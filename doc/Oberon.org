@@ -1,0 +1,31 @@
+* Runtime environment
+
+This compiler currently only targets 65C816. Ints are 16-bit.
+
+Long M and X are the default, specific code can change this, but should restore the default at the end. An optimisation pass could tidy this up.
+
+Curently the code is not relocatable and will be set to start at an absolute address. To set the load address use the -D command line option to set the org value. Note that to specify hex you need to use \$ as the prefix.
+
+* Optimiser
+
+There are currently no optimisations (apart from some simple shortening of addresses where possible). An optimisation pass could be added later.
+
+** Remove redundant stores/loads
+** Remove redundant long/short changes
+** Relaxing long jumps
+This one is harder because of the return. If we can reduce all JSL's to an address then we can change the RTL to an RTS, but if just one is still long then they all need to remain long.
+
+* ToDo
+
+Verify simple code generation. Run in simulator.
+Implement simple org from command line.
+Register allocator
+Integer maths
+Local variables
+Global variables
+Procedure calls and returns
+Support more data types than ints.
+Runtime library
+Implement linker map file (for asm and oberon).
+
+Relocating loader and relocations in ELF

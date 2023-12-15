@@ -1,0 +1,96 @@
+* Introduction
+
+* Segments
+A segment is a grouping of code, normally related code that it is useful to locate together. Segments can be used to organise the code, but they are also used in code generation to group related code within the same bank. Ideally a segment should fit within one bank, but the compiler is smart enough to split a segment in two or more if this is not the case, if this happens then the segment is split and named with an index.
+
+* Sections
+The linker understands the following sections:
+
+** Text
+  make_section("text", PF_R | PF_W, SHT_PROGBITS);
+
+This is the actual code
+
+** Data
+  make_section("data", PF_R | PF_W, SHT_PROGBITS);
+
+Initialised data, this is loaded into RAM at runtime and can be updated by the code.
+
+** bss
+  make_section("bss", PF_R | PF_W, SHT_NOBITS);
+
+Constant data, cannot be written to so may be loaded in the Program bank along with the code.
+
+** dp
+  make_section("dp", PF_R | PF_W | PF_D, SHT_NOBITS);
+
+Direct page data, acts like data but is allocated in the direct page. This data is not initialised. So this is a marker to show how much dp space the process requires.
+
+** tls
+  make_section("tls", PF_R | PF_W, SHT_NOBITS);
+
+** Stack
+  make_section("stack", PF_R | PF_W | PF_S, SHT_NOBITS);
+
+This is a marker to declare how large the stack should be.
+
+** Relocations
+A list of relocations for the text segment.
+
+
+* File Format
+All linker inputs and outputs are ELF files (apart from ROM outputs). 
+
+A .cfg file can be used to configure the memory layout of the target system.
+
+* Config file
+
+{
+  sections: [
+    {
+	  name: "text"
+
+* Output  
+** Executable
+
+** ROM
+-f
+ bin
+ s19
+ s28
+ s37
+ intel
+ tim
+
+*** bin
+Binary data.
+
+*** TIM
+This is the format that the TIM monitor uses. It is a simple ASCII format suitable for direct download by the monitor.
+
+
+Zero or more leading characters except:
+
+    ";"  (usually blank leader)
+
+Any number of records of the form:
+
+    ;ccaaaadddd....ddssss
+
+    where:
+ 
+        cc is the number of bytes in the record in hex.
+
+        aaaa is the hex address to store the first byte of data.
+
+        dddd....dd is the data (two hex digits per byte).
+
+        ssss is the check-sum, which is the arithmetic sum, to 16 bits, of all the count, 
+        address and data bytes represented by the record.
+
+A terminating record of zero length, either:
+
+    ;00  or  ;
+
+
+

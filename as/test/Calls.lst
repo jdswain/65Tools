@@ -1,0 +1,131 @@
+8000: 18                clc
+8001: fb                xce
+8002: c2 30             rep #$0030
+8004: a9 00 10          lda #$1000
+8007: 1b                tas
+8008: 22 37 80 00       jsl App.main
+800c: 00                brk
+800d:                   MODULE App;
+800d:                   
+800d:                   
+800d:                   PROCEDURE prInt(i: INTEGER);
+800d:                   	 VAR
+800d: 3b                tsa
+800e: 38                sec
+800f: e9 02 00          sbc #$0002
+8012: 1b                tas
+8013:                   		  a: INTEGER;
+8013:                   BEGIN
+8013: a9 30 00          lda #$0030
+8016: 83 01             sta #$01,S
+8018:                   	 a := 48; (* ASCII 0 *)
+8018: a3 06             lda #$06,S
+801a: 85 10             sta $10
+801c: a3 01             lda #$01,S
+801e: 85 12             sta $12
+8020: 18                clc
+8021: 63 06             adc #$06,S
+8023: 85 12             sta $12
+8025: a5 12             lda $12
+8027: 83 01             sta #$01,S
+8029:                   	 a := a + i;
+8029: a3 01             lda #$01,S
+802b: 85 14             sta $14
+802d: 8d 00 c0          sta $c000
+8030: 3b                tsa
+8031: 18                clc
+8032: 69 02 00          adc #$0002
+8035: 1b                tas
+8036: 6b                rtl
+8037:                   	 PUT($C000, a);
+8037:                   END prInt;
+8037:                   
+8037:                   PROCEDURE main(): INTEGER;
+8037:                   VAR
+8037:                   	 x: INTEGER;
+8037: 3b                tsa
+8038: 38                sec
+8039: e9 03 00          sbc #$0003
+803c: 1b                tas
+803d:                        y: BOOLEAN;
+803d:                   BEGIN
+803d: a9 58 00          lda #$0058
+8040: 85 10             sta $10
+8042: 8d 00 c0          sta $c000
+8045:                   	 PUT($C000, 'X');
+8045:                   
+8045: a9 03 00          lda #$0003
+8048: 83 01             sta #$01,S
+804a:                   	 x := 1 + 2;
+804a: a9 00 00          lda #$0000
+804d: 83 03             sta #$03,S
+804f: a3 01             lda #$01,S
+8051: 48                pha
+8052:                   	 y := FALSE;
+8052: 22 0d 80 00       jsl prInt
+8056: f4 07 00          pea #$0007
+8059:                   	 prInt(x);
+8059: 22 0d 80 00       jsl prInt
+805d:                   	 prInt(7);
+805d: c9 00 00          cmp #$0000
+8060:                   bne l0
+8060:                   
+8060:                   	 IF x > 8 THEN
+8060: a9 05 00          lda #$0005
+8063: 83 01             sta #$01,S
+8065:                   		  x := 5;
+8065:                   	 END;
+8065:                   (*
+8065:                   	 IF x > 4 THEN
+8065:                   		  x := 5;
+8065:                        END;
+8065:                   *)	 
+8065: 3b                tsa
+8066: 18                clc
+8067: 69 03 00          adc #$0003
+806a: 1b                tas
+806b: 6b                rtl
+806c: a3 01             lda #$01,S
+806e: 85 10             sta $10
+8070: 83 01             sta #$01,S
+8072:                   	 RETURN x
+8072:                   END main;
+8072:                   
+8072:                   END App.
+8072:                   
+8072:                   (*
+8072:                   Process
+8072:                   
+8072:                   calledProc(x+2)
+8072:                   [oberon_prepCall]
+8072:                     if proc alloc reg for return
+8072:                     rx := RH
+8072:                     saveRegs
+8072:                   [parse_oberon_paramlist]
+8072:                     r0 := x + 2
+8072:                   [oberon_call]
+8072:                     saveRegs
+8072:                     jump to calledProc
+8072:                     restoreRegs -- to remove params
+8072:                     restoreRegs rx -- to restore regs before call
+8072:                   
+8072:                   PROCEDURE calledProc(i: INTEGER)
+8072:                     03,S is i
+8072:                     allocate var stack frame, 2 bytes
+8072:                     01,S is a
+8072:                     pop var stack frame, 2 bytes
+8072:                     store return in 01,S -- this is the last register allocated before the call
+8072:                     rts
+8072:                   
+8072:                   Issues 
+8072:                     param addresses are incorrect.
+8072:                     return is stored, make sure it is allocated and used correctly.
+8072:                   
+8072:                   a := 48
+8072:                   r0 := a -- load(a)
+8072:                   r1 = i -- load(i)
+8072:                   r0 = i + i -- addOp(r0, r1) -- incorrect
+8072:                   a := r0 -- store(a)
+8072:                   
+8072:                   *)
+Symbols:

@@ -1,0 +1,156 @@
+* Procedure Definition
+
+Global var BASE contains the address of the top used of RAM, this is in ZP.
+
+We use (BASE),Y addressing mode to access local variables, global variables are
+absolute.
+
+Params are passed in X, for first INT params, then in RAM for additional params  
+or for arrays. Params are effectively defined as local variables and have storage in
+the local variables. X is used for the return value.
+
+   procedure ex1(p1: int, p2: int) : int
+   var
+     l1: int;
+     l2: int;
+   begin
+     return 10;
+   end
+
+and is called like this:
+
+    ex1(v1, v2);
+
+BASE
+BASE_END
+
+|---------------|
+| Last Size: 0  |
+| Frame Size: 2 |
+| v1            |
+| v2            |
+|---------------|
+| Last Size: 2  |
+| Frame Size: 4 |
+| p1            |
+| p2            |
+| l1            |
+| l2            |
+|---------------|
+               
+
+push_frame:  CLC
+             ; Add current size + 2 to base
+             LDA (BASE),#1
+             PHA
+             ADC #2
+             ADC $BASE
+             STA $BASE
+             LDA #0
+             ADC $BASE+1
+             STA $BASE+1
+             ;
+             PLA
+             STA (BASE)    ; Last Size
+             STX (BASE),#1 ; Frame Size
+             RTS
+
+pop_frame:   CLC
+             ; Subtract last size + 2 from base
+             LDA (BASE)
+             SBC $BASE
+             SBC #2
+             STA $BASE
+             LDA #0
+             SBC $BASE+1
+             STA $BASE+1
+             RTS
+
+
+in this case the params fit in the registers, so a call might look like this:
+
+reset:       CLD
+             LDA #RAM_START.lo
+             STA BASE
+             LDA #RAM_START.hi
+             STA BASE+1
+             LDA #LOCAL_COUNT
+             STA (BASE)
+             JSR SetBaseEnd
+call_main:   JMP main
+             ; should never get here
+             BRK ; JMP call_main
+
+main:        LDA #02
+             STA (BASE)
+             JSR SetBaseEnd
+
+             LDY #$1         ; p1
+             LDA (BASE),Y    
+             LDY #$1
+             STA (BASE_END),Y
+             LDY #$2         ; p2
+             LDA (BASE),Y
+             STA (BASE_END),y
+             JSR ex1
+
+And the implementation would look like this:
+
+ex1:         LDA BASE_END
+             STA BASE
+             LDA BASE_END+1
+             STA BASE+1
+             LDA #4
+             STA (BASE)
+             JSR SetBaseEnd
+
+             LDX #10
+             JMP PopFrame
+
+SetBaseEnd:  LDA BASE
+             STA BASE_END
+             LDA BASE+1
+             STA BASE_END+1
+
+             CLC
+             LDA (BASE) ; Frame size
+             ADC BASE_END
+             LDA #0
+             ADC BASE_END+1
+             RTS
+
+PopFrame:    CLC
+             LDA (BASE)
+             SBC BASE
+             LDA #0
+             SBC BASE+1
+             RTS
+
+* Accessing variables
+
+   LDY #index
+   LDA (BASE), Y
+
+   LDY #index
+   STA (BASE), Y
+   
+
+
+* Call
+
+
+* Procedure
+
+
+* Return
+
+** variable
+  LDY #index
+  LDA (BASE), Y
+  TAX
+  RTS
+
+** const
+  LDX #const
+  RTS
+

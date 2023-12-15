@@ -1,0 +1,61 @@
+0000:                   (*
+0000:                   TIM Monitor functions.
+0000:                   
+0000:                   *)
+0000:                   
+0000:                   	;; WRT
+0000:                   	;; Type a character
+0000:                   	;; Arg: A
+0000:                   	;; Result: None
+0000:                   	;; A,X cleared, Y preserved
+0000:                   	WRT = $72c6
+0000:                   
+0000:                   	;; RDT
+0000:                   	;; Read a character
+0000:                   	;; Arg: None
+0000:                   	;; Result: A
+0000:                   	;; X cleared, Y not preserved
+0000:                   	RDT = $72e9
+0000:                   
+0000:                   	;; CRLF
+0000:                   	;; Type CR-LF and delay
+0000:                   	;; Arg: None
+0000:                   	;; Result: None
+0000:                   	;; A, X cleared, Y preserved
+0000:                   	CRLF = $728a
+0000:                   
+0000:                   	;; SPACE
+0000:                   	;; Type a space character
+0000:                   	;; Arg: None
+0000:                   	;; Result: None
+0000:                   	;; A,X,Y preserved 
+0000:                   	SPACE = $7377
+0000:                   
+0000:                   	;; WROB
+0000:                   	;; Type a byte in hex
+0000:                   	;; Arg: A
+0000:                   	;; Result: None
+0000:                   	;; A,X cleared, Y preserved
+0000:                   	WROB = $72B1
+0000:                   
+0000:                   	;; RDHSR
+0000:                   	;; Read a character from high-speed paper tape reader
+0000:                   	;; Arg: None
+0000:                   	;; Result: X--char read
+0000:                   	;;         A--char trimmed to 7 bits
+0000:                   	;;   	  Y preserved
+0000:                   	RDHSR = $733D
+0000:                   
+0000:                   	start_address = $f6	; Set with hex tape on load ($f6,$f7)
+0000:                   	CR-LF_Delay=$E3		; Set on load or with user program (in bit times,
+0000:                   				; minimum of 1.  Zero means 256 bits-time delay).
+0000:                   
+0000:                   	UINT=$FFF8		; User IRQ vector
+0000:                   	NMI_Vector=$FFFA	; Hardware NMI vector
+0000:                   	RESET_Vector=$FFFC	; Hardware RESET vector
+0000:                   	IRQ_Vector=$FFFE	; Hardware IRQ vector
+0000:                                                          
+0000:                                                          
+Symbols:
+
+

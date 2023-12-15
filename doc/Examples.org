@@ -1,0 +1,129 @@
+* ToDo
+** Case statement 
+Uses indirect addressing to create a jump table.
+** Arrays
+For now allow any variable to be an array, so just add the indexing operator.
+
+* Addressing Modes
+
+**  Immediate
+
+CONST PROMPT = '>';
+
+** Absolute, Zero Page
+
+Machine
+INT ACIA_CONTROL = $FF00
+
+Code
+INT cValue;
+BOOL stop;
+
+cValue = ACIA_CONTROL;
+stop = ACIA_CONTROL.2;
+ACIA_CONTROL := #7D;
+
+** Implied
+
+N/A
+
+** Indirect Absolute (aaaa)
+Only used by JMP. Can be used internally for a jump table, but we don't have case.
+
+** Absolute Indexed aaaa,X aaaa,Y aa,X aa,Y
+INT index;
+INT value;
+
+value := buffer[index];
+
+** Indexed Indirect (aa,X)
+v = *(aa + x);
+
+v = bp[zp+i];
+
+** Indirect Indexed (aa),Y
+v = *((*aa) + Y);
+
+** Relative aaaa
+N/A - relative jump
+
+** Accumulator A
+N/A - Use A register
+
+
+* Variables
+
+Globals have location.
+
+procedure ex(word b);
+  int c, i;
+begin
+  i := 0;
+  repeat
+    c := read();
+    b[i] = c;
+  until i = 10;
+end
+
+ex: LDA #0
+    STA $i
+lo: JSR read ; Result in A
+    LDX $i
+    STA b,X
+    CPX #10
+    BNE lo
+    RTS
+
+ex: LDX #0
+lo: JSR read
+    STA b, X
+    CPX #10
+    BNE lo
+    RTS
+
+local {
+  acc
+  inx
+}
+
+ssa form
+
+var {
+  type
+  needA
+  needI
+}
+
+function {
+  retType
+  paramType[] - array of paramaters
+  instrs*
+}
+
+op {
+  Object* left
+  Object* leftIndex
+  Object* right
+  Object* rightIndex
+  Object* result
+  Object* resultIndex
+  opType op
+  next*
+}
+call {
+  Object*
+}
+condition {
+}
+branch {
+  cond
+  Statement* dest (could be forward so we need to fixup address)
+}
+
+Normally use A for calculations.
+Use X or Y for loop counters and indexed variables.
+Spill A to X or Y first, then stack or memory.
+
+All variables are INT, one byte, or PTR.
+Special variables C, N, Z
+@ operator takes address of variable, *dereferences variable.

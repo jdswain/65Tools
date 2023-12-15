@@ -1,0 +1,77 @@
+* Memory Layout
+
+Bank 0 is dedicated to system data. All other banks can be used for program code or data.
+
+* Operating System
+
+The operating system has it's own direct page and stack. These are allocated in Bank 0 and are called the SupervisorDirectPage and SupervisorStackPointer.
+
+** Sypervisor Call
+Operating system calls 
+
+cop #$10
+
+The operating system is responsible for preserving the UserStackPointer
+
+    tsx
+    lda #SupervisorStackPointer
+    tas
+    phx
+
+; perform operation
+
+    pla
+    tas
+    rti
+
+* Call
+A subroutine has a stack frame for parameters and local variables. The caller is responsible for allocating this frame and populating the parameters.
+
+; Call a function
+pha param1
+pha param2
+pha param3
+jsr function
+
+; Function
+tsc 
+sed
+sbc #FrameSize
+tcs
+
+...
+stz $8,S ; Store local variable
+lda #8,S ; Load local variable
+...
+
+tsc
+clc
+adc $FrameSize + ParamSize
+tcs
+rts
+
+
+* ProcessInfo
+A process has a ProcessInfo structure, this is stored in it's DirectPage area.
+
+struct ProcessInfo {
+  long r0; /* Integer registers */
+  long r1;
+  long r2;
+  long r3;
+  long r4;
+  long r5;
+  long r6;
+  long r7;
+
+  double fp0; /* Floating point registers */
+  double fp1;
+  double fp2;
+  double fp3;
+
+  char **env;
+
+  /* Other global process constants such as heap information */
+
+}
+

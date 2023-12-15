@@ -1,0 +1,194 @@
+8000: 18                clc
+8001: fb                xce
+8002: c2 30             rep #$0030
+8004: a9 00 10          lda #$1000
+8007: 1b                tas
+8008: 22 43 80 00       jsl App.main
+800c: 00                brk
+800d:                   MODULE App;
+800d:                   
+800d:                   PROCEDURE takeSomeSpace(i: INTEGER);
+800d:                   	 VAR
+800d: 3b                tsa
+800e: 38                sec
+800f: e9 02 00          sbc #$0002
+8012: 1b                tas
+8013:                   		  a: INTEGER;
+8013:                   BEGIN
+8013: a9 07 00          lda #$0007
+8016: 83 01             sta #$01,S
+8018:                   	 a := 7;
+8018: a3 01             lda #$01,S
+801a: 85 10             sta $10
+801c: 18                clc
+801d: 63 01             adc #$01,S
+801f: 85 10             sta $10
+8021: a5 10             lda $10
+8023: 83 01             sta #$01,S
+8025: 3b                tsa
+8026: 18                clc
+8027: 69 02 00          adc #$0002
+802a: 1b                tas
+802b: 6b                rtl
+802c:                   	 a := a + i;
+802c:                   END takeSomeSpace;
+802c:                   
+802c:                   PROCEDURE anotherOne();
+802c:                   	 VAR
+802c: 3b                tsa
+802d: 38                sec
+802e: e9 02 00          sbc #$0002
+8031: 1b                tas
+8032:                   		  x: INTEGER;
+8032:                   BEGIN
+8032: b5 10             lda $10,X
+8034: 48                pha
+8035: 22 0d 80 00       jsl takeSomeSpace
+8039: 68                pla
+803a: 95 10             sta $10,X
+803c: 3b                tsa
+803d: 18                clc
+803e: 69 02 00          adc #$0002
+8041: 1b                tas
+8042: 6b                rtl
+8043:                   	 takeSomeSpace(x);
+8043:                   END anotherOne;
+8043:                   	 
+8043:                   PROCEDURE main(): INTEGER;
+8043:                   VAR
+8043:                   	  x: INTEGER;
+8043:                   	  i: INTEGER;
+8043: 3b                tsa
+8044: 38                sec
+8045: e9 06 00          sbc #$0006
+8048: 1b                tas
+8049:                   	  j: INTEGER;
+8049:                   BEGIN
+8049: a9 48 00          lda #$0048
+804c: 85 10             sta $10
+804e: 8d 00 c0          sta $c000
+8051:                   	 PUT($C000, 'H');
+8051: a9 65 00          lda #$0065
+8054: 85 10             sta $10
+8056: 8d 00 c0          sta $c000
+8059:                   	 PUT($C000, 'e');
+8059: a9 6c 00          lda #$006c
+805c: 85 10             sta $10
+805e: 8d 00 c0          sta $c000
+8061:                   	 PUT($C000, 'l');
+8061: a9 6c 00          lda #$006c
+8064: 85 10             sta $10
+8066: 8d 00 c0          sta $c000
+8069:                   	 PUT($C000, 'l');
+8069: a9 6f 00          lda #$006f
+806c: 85 10             sta $10
+806e: 8d 00 c0          sta $c000
+8071:                   	 PUT($C000, 'o');
+8071: a9 21 00          lda #$0021
+8074: 85 10             sta $10
+8076: 8d 00 c0          sta $c000
+8079:                   	 PUT($C000, '!');
+8079: a9 72 5c          lda #$5c72
+807c: 85 10             sta $10
+807e: 8d 00 c0          sta $c000
+8081:                   	 PUT($C000, '\r');
+8081: a9 6e 5c          lda #$5c6e
+8084: 85 10             sta $10
+8086: 8d 00 c0          sta $c000
+8089:                   	 PUT($C000, '\n');
+8089: a9 0d 00          lda #$000d
+808c: 83 01             sta #$01,S
+808e:                   	 x := 11 + 2;
+808e: a9 d0 07          lda #$07d0
+8091: 83 03             sta #$03,S
+8093: a3 03             lda #$03,S
+8095: 85 10             sta $10
+8097: 18                clc
+8098: 69 0a 00          adc #$000a
+809b: 85 10             sta $10
+809d: a5 10             lda $10
+809f: 38                sec
+80a0: e3 01             sbc #$01,S
+80a2: 85 10             sta $10
+80a4:                   	 i := 2000; 
+80a4: a5 10             lda $10
+80a6: 18                clc
+80a7: 69 07 00          adc #$0007
+80aa: 85 10             sta $10
+80ac: a5 10             lda $10
+80ae: 83 05             sta #$05,S
+80b0:                   	 j := i + 10 - x + 7; (* Result is 2004, which is $7d4 *)
+80b0: b5 10             lda $10,X
+80b2: 48                pha
+80b3: 22 0d 80 00       jsl takeSomeSpace
+80b7: 68                pla
+80b8: 95 10             sta $10,X
+80ba:                   	 takeSomeSpace(x);
+80ba: 22 2c 80 00       jsl anotherOne
+80be:                   	 anotherOne();
+80be: a3 05             lda #$05,S
+80c0: 85 10             sta $10
+80c2: 3b                tsa
+80c3: 18                clc
+80c4: 69 06 00          adc #$0006
+80c7: 1b                tas
+80c8: 6b                rtl
+80c9:                   	 RETURN j
+80c9:                   END main;
+80c9:                   
+80c9:                   (* Closure style...
+80c9:                   
+80c9:                   TYPE
+80c9:                   	 sortClosure: PROCEDURE(^Object left, ^Object right): Int;
+80c9:                   
+80c9:                   PROCEDURE closure;
+80c9:                   BEGIN
+80c9:                   	 map.sort [(left, right)
+80c9:                   			   BEGIN
+80c9:                   					return left < right;
+80c9:                   			   END
+80c9:                   			  ];
+80c9:                   END
+80c9:                   *)	 
+80c9:                   
+80c9:                   (* This is a very simple function *)
+80c9:                   (* 
+80c9:                   The code generated should be: 
+80c9:                   
+80c9:                   1. Function stack frame setup including correct size
+80c9:                   
+80c9:                   test:  tsa
+80c9:                          sec
+80c9:                          adc #$02
+80c9:                          tas
+80c9:                   
+80c9:                   2. Assign constant to variable
+80c9:                   
+80c9:                          lda #$000a
+80c9:                   	   sta 0,s
+80c9:                   
+80c9:                   3. Function stack cleanup and return
+80c9:                   
+80c9:                          tsa
+80c9:                          clc
+80c9:                          adc #$02
+80c9:                          tas
+80c9:                   
+80c9:                          rts
+80c9:                   
+80c9:                    *)
+80c9:                   
+80c9:                   (*
+80c9:                   PROCEDURE ret(): BOOLEAN;
+80c9:                   VAR
+80c9:                   	 a: INTEGER;
+80c9:                   BEGIN
+80c9:                   	 a := 0;
+80c9:                   	 test();
+80c9:                   	 IF 0 THEN a := 4 END;
+80c9:                   	 RETURN (a+2)
+80c9:                   END ret;
+80c9:                    *)
+80c9:                   
+80c9:                   END App.
+Symbols:

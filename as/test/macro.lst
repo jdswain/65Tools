@@ -1,0 +1,12 @@
+0000:                   test 	macro param {
+0000:                   	lda #param
+0000:                   	}
+0000:                   
+0000:                   test 	macro param {
+0000: a9 a5 00          	lda #param
+0003:                   	}
+0003:                   main	test $a5
+0003: 60                	rts
+Symbols:
+main                 0 
+

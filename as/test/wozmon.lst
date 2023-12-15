@@ -1,0 +1,162 @@
+ff00:                   ;  The WOZ Monitor for the Apple 1
+ff00:                   ;  Written by Steve Wozniak in 1976
+ff00:                   
+ff00:                   test = 10 + 2 + 2	
+ff00:                   
+ff00:                   ; Page 0 Variables
+ff00:                   
+ff00:                   XAML            = $24           ;  Last "opened" location Low
+ff00:                   XAMH            = $25           ;  Last "opened" location High
+ff00:                   STL             = $26           ;  Store address Low
+ff00:                   STH             = $27           ;  Store address High
+ff00:                   L               = $28           ;  Hex value parsing Low
+ff00:                   H               = $29           ;  Hex value parsing High
+ff00:                   YSAV            = $2A           ;  Used to see if hex value is given
+ff00:                   MODE            = $2B           ;  $00=XAM, $7F=STOR, $AE=BLOCK XAM
+ff00:                   
+ff00:                   
+ff00:                   ; Other Variables
+ff00:                   
+ff00:                   IN              = $0200         ;  Input buffer to $027F
+ff00:                   KBD             = $D010         ;  PIA.A keyboard input
+ff00:                   KBDCR           = $D011         ;  PIA.A keyboard control register
+ff00:                   DSP             = $D012         ;  PIA.B display output register
+ff00:                   DSPCR           = $D013         ;  PIA.B display control register
+ff00:                   
+ff00:                   				cpu = "6502"
+ff00:                       			org = $FF00
+ff00:                   
+ff00: d8                RESET:         CLD             ; Clear decimal arithmetic mode.
+ff01: 58                                CLI
+ff02: a0 7f                             LDY #$7F        ; Mask for DSP data direction register.
+ff04: 8c 12 d0                          STY DSP         ; Set it up.
+ff07: a9 a7                             LDA #$A7        ; KBD and DSP control register mask.
+ff09: 8d 11 d0                          STA KBDCR       ; Enable interrupts, set CA1, CB1, for
+ff0c: 8d 13 d0                          STA DSPCR       ; positive edge sense/output mode.
+ff0f: c9 df             NOTCR:          CMP #'_'+$80    ; "_"?
+ff11: f0 13                             BEQ BACKSPACE   ; Yes.
+ff13: c9 9b                             CMP #$9B        ; ESC?
+ff15: f0 03                             BEQ ESCAPE      ; Yes.
+ff17: c8                                INY             ; Advance text index.
+ff18: 10 0f                             BPL NEXTCHAR    ; Auto ESC if > 127.
+ff1a: a9 dc             ESCAPE:         LDA #'\'+$80    ; "\".
+ff1c: 20 ef ff                          JSR ECHO        ; Output it.
+ff1f: a9 8d             GETLINE:        LDA #$8D        ; CR.
+ff21: 20 ef ff                          JSR ECHO        ; Output it.
+ff24: a0 01                             LDY #$01        ; Initialize text index.
+ff26: 88                BACKSPACE:      DEY             ; Back up text index.
+ff27: 30 f6                             BMI GETLINE     ; Beyond start of line, reinitialize.
+ff29: ad 11 d0          NEXTCHAR:       LDA KBDCR       ; Key ready?
+ff2c: 10 fb                             BPL NEXTCHAR    ; Loop until ready.
+ff2e: ad 10 d0                          LDA KBD         ; Load character. B7 should be ‘1’.
+ff31: 99 00 02                          STA IN,Y        ; Add to text buffer.
+ff34: 20 ef ff                          JSR ECHO        ; Display character.
+ff37: c9 8d                             CMP #$8D        ; CR?
+ff39: d0 d4                             BNE NOTCR       ; No.
+ff3b: a0 ff                             LDY #$FF        ; Reset text index.
+ff3d: a9 00                             LDA #$00        ; For XAM mode.
+ff3f: aa                                TAX             ; 0->X.
+ff40: 0a                SETSTOR:        ASL             ; Leaves $7B if setting STOR mode.
+ff41: 85 2b             SETMODE:        STA MODE        ; $00=XAM $7B=STOR $AE=BLOK XAM
+ff43: c8                BLSKIP:         INY             ; Advance text index.
+ff44: b9 00 02          NEXTITEM:       LDA IN,Y        ; Get character.
+ff47: c9 8d                             CMP #$8D        ; CR?
+ff49: f0 d4                             BEQ GETLINE     ; Yes, done this line.
+ff4b: c9 ae                             CMP #'.'+$80    ; "."?
+ff4d: 90 f4                             BCC BLSKIP      ; Skip delimiter.
+ff4f: f0 f0                             BEQ SETMODE     ; Yes. Set STOR mode.
+ff51: c9 ba                             CMP #':'+$80    ; ":"?
+ff53: f0 eb                             BEQ SETSTOR     ; Yes. Set STOR mode.
+ff55: c9 d2                             CMP #'R'+$80    ; "R"?
+ff57: f0 3b                             BEQ RUN         ; Yes. Run user program.
+ff59: 86 28                             STX L           ; $00-> L.
+ff5b: 86 29                             STX H           ; and H.
+ff5d: 84 2a                             STY YSAV        ; Save Y for comparison.
+ff5f: b9 00 02          NEXTHEX:        LDA IN,Y        ; Get character for hex test.
+ff62: 49 b0                             EOR #$B0        ; Map digits to $0-9.
+ff64: c9 0a                             CMP #$0A        ; Digit?
+ff66: 90 06                             BCC DIG         ; Yes.
+ff68: 69 88                             ADC #$88        ; Map letter "A"-"F" to $FA-FF.
+ff6a: c9 fa                             CMP #$FA        ; Hex letter?
+ff6c: 90 11                             BCC NOTHEX      ; No, character not hex.
+ff6e: 0a                DIG:            ASL
+ff6f: 0a                                ASL             ; Hex digit to MSD of A.
+ff70: 0a                                ASL
+ff71: 0a                                ASL
+ff72: a2 04                             LDX #$04        ; Shift count.
+ff74: 0a                HEXSHIFT:       ASL             ; Hex digit left, MSB to carry.
+ff75: 26 28                             ROL L           ; Rotate into LSD.
+ff77: 26 29                             ROL H           ;  Rotate into MSD’s.
+ff79: ca                                DEX             ; Done 4 shifts?
+ff7a: d0 f8                             BNE HEXSHIFT    ; No, loop.
+ff7c: c8                                INY             ; Advance text index.
+ff7d: d0 e0                             BNE NEXTHEX     ; Always taken. Check next char for hex.
+ff7f: c4 2a             NOTHEX:         CPY YSAV        ; Check if L, H empty (no hex digits).
+ff81: f0 97                             BEQ ESCAPE      ; Yes, generate ESC sequence.
+ff83: 24 2b                             BIT MODE        ; Test MODE byte.
+ff85: 50 10                             BVC NOTSTOR     ;  B6=0 STOR 1 for XAM & BLOCK XAM
+ff87: a5 28                             LDA L           ; LSD’s of hex data.
+ff89: 81 26                             STA (STL,X)     ; Store at current ‘store index’.
+ff8b: e6 26                             INC STL         ; Increment store index.
+ff8d: d0 b5                             BNE NEXTITEM    ; Get next item. (no carry).
+ff8f: e6 27                             INC STH         ; Add carry to ‘store index’ high order.
+ff91: 4c 44 ff          TONEXTITEM:     JMP NEXTITEM    ; Get next command item.
+ff94: 6c 24 00          RUN:            JMP (XAML)      ; Run at current XAM index.
+ff97: 30 2b             NOTSTOR:        BMI XAMNEXT     ; B7=0 for XAM, 1 for BLOCK XAM.
+ff99: a2 02                             LDX #$02        ; Byte count.
+ff9b: b5 27             SETADR:         LDA L-1,X       ; Copy hex data to
+ff9d: 95 25                             STA STL-1,X     ; ‘store index’.
+ff9f: 95 23                             STA XAML-1,X    ; And to ‘XAM index’.
+ffa1: ca                                DEX             ; Next of 2 bytes.
+ffa2: d0 f7                             BNE SETADR      ; Loop unless X=0.
+ffa4: d0 14             NXTPRNT:        BNE PRDATA      ; NE means no address to print.
+ffa6: a9 8d                             LDA #$8D        ; CR.
+ffa8: 20 ef ff                          JSR ECHO        ; Output it.
+ffab: a5 25                             LDA XAMH        ; ‘Examine index’ high-order byte.
+ffad: 20 dc ff                          JSR PRBYTE      ; Output it in hex format.
+ffb0: a5 24                             LDA XAML        ; Low-order ‘examine index’ byte.
+ffb2: 20 dc ff                          JSR PRBYTE      ; Output it in hex format.
+ffb5: a9 ba                             LDA #':'+$80    ; ":".
+ffb7: 20 ef ff                          JSR ECHO        ; Output it.
+ffba: a9 a0             PRDATA:         LDA #$A0        ; Blank.
+ffbc: 20 ef ff                          JSR ECHO        ; Output it.
+ffbf: a1 24                             LDA (XAML,X)    ; Get data byte at ‘examine index’.
+ffc1: 20 dc ff                          JSR PRBYTE      ; Output it in hex format.
+ffc4: 86 2b             XAMNEXT:        STX MODE        ; 0->MODE (XAM mode).
+ffc6: a5 24                             LDA XAML
+ffc8: c5 28                             CMP L           ; Compare ‘examine index’ to hex data.
+ffca: a5 25                             LDA XAMH
+ffcc: e5 29                             SBC H
+ffce: b0 c1                             BCS TONEXTITEM  ; Not less, so no more data to output.
+ffd0: e6 24                             INC XAML
+ffd2: d0 02                             BNE MOD8CHK     ; Increment ‘examine index’.
+ffd4: e6 25                             INC XAMH
+ffd6: a5 24             MOD8CHK:        LDA XAML        ; Check low-order ‘examine index’ byte
+ffd8: 29 07                             AND #$07        ; For MOD 8=0
+ffda: 10 c8                             BPL NXTPRNT     ; Always taken.
+ffdc: 48                PRBYTE:         PHA             ; Save A for LSD.
+ffdd: 4a                                LSR
+ffde: 4a                                LSR
+ffdf: 4a                                LSR             ; MSD to LSD position.
+ffe0: 4a                                LSR
+ffe1: 20 e5 ff                          JSR PRHEX       ; Output hex digit.
+ffe4: 68                                PLA             ; Restore A.
+ffe5: 29 0f             PRHEX:          AND #$0F        ; Mask LSD for hex print.
+ffe7: 09 b0                             ORA #'0'+$80    ; Add "0".
+ffe9: c9 ba                             CMP #$BA        ; Digit?
+ffeb: 90 02                             BCC ECHO        ; Yes, output it.
+ffed: 69 06                             ADC #$06        ; Add offset for letter.
+ffef: 2c 12 d0          ECHO:           BIT DSP         ; bit (B7) cleared yet?
+fff2: 30 fb                             BMI ECHO        ; No, wait for display.
+fff4: 8d 12 d0                          STA DSP         ; Output character. Sets DA.
+fff7: 60                                RTS             ; Return.
+fff8:                   
+fff8: 00                                BRK             ; unused
+fff9: 00                                BRK             ; unused
+fffa:                   
+fffa:                   ; Interrupt Vectors
+fffa:                   
+fffa: 00 0f                             data.w $0F00     ; NMI
+fffc: 00 ff                             data.w RESET     ; RESET
+fffe: 00 00                             word   $0000     ; BRK/IRQ
+Symbols:

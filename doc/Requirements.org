@@ -1,0 +1,968 @@
+* Req: +Supported Devices
+
+6502
+WDC65C02
+R65C02
+C19
+WDC65C816
+
+See CPU directive.
+
+* Req: +Number Formats
+| Prefix | Format      | Example       |
+|--------+-------------+---------------|
+|        | Decimal     | lda #42       |
+| $      | Hexidecimal | lda #$ff      |
+| %      | Binary      | lda %10101111 |
+
+* Req: +Case Insensitive
+The assembler is case preserving but case insensitive.
+
+Identifiers are case sensitive but keywords are not.
+
+* Req: +Segments
+Segments are different types of data. Standard segments include the following:
+
+| Name   | Attrs | Description                                |
+|--------+-------+--------------------------------------------|
+| text   | XR    | The executable code                        |
+| rodata | R     | Read only data                             |
+| data   | RW    | Writable data                              |
+| BSS    | RW    | Uninitialised data, takes no space in file |
+| dpage  | RW    | Direct Page                                |
+
+We can also add other specialised segments, such as a Direct Page segment, Bank0, and also TLS.
+
+A segment directive in the assembler will change the output to the named segment. 
+
+Segment defintions are tracked with a stack. The END SEGMENT directive will return to the previous segment.
+
+* Req: +Sections
+Sections are used at link time to organise the code, they are not needed at runtime.
+
+initX and finiX sections are subparts of the text segment, they are called in order at startup and shutdown, some of these sections have special uses and some are available for programmers to use.
+
+Section defintions are tracked with a stack. The END SECTION directive will return to the previous section.
+
+At link time the sections are merged with their other sections in the active segment. The order may not be consistent.
+
+* Req: +Compilation Unit
+A series of input files can be specified and they will all be assembled to one .o file. This is one module or compilation unit. 
+
+* Req: +Relative or Absolute addressing
+The assembler can either be outputting relative or absolute code. The default is relative, absolute mode can be selected by assigning to the org special variable.
+
+Org is a special variable. The '*' name used by some other assemblers is not available.
+
+Since org is a variable it can be assigned like any other statement, this means that the source can move org forward using an expression. Org can also be used in expressions
+
+Org cannot be moved backwards.
+
+struct label {
+  char *name;
+  bool is_abs;
+  uint32 value;
+};
+
+* Req: +Datatypes
+Internally the assembler must work with various datatypes. 
+
+| Name    | Type                                      |
+|---------+-------------------------------------------|
+| Boolean | true or false                             |
+| Integer | A large integer value of undefined length |
+| Byte    | One bytes                                 |
+| Word    | Two bytes                                 |
+| Long    | Four bytes but also used as an address    |
+| Real    | Floating point number                     |
+| String  | An ASCII string                           |
+| List    | A list of values                          |
+| Map     | A map of values                           |
+
+Indexes can be added to symbols, this is similar to adding values.
+
+let acia_0 = $cc00
+let reg = 0
+let ddr = 1
+
+lda $df
+sta acia_0[ddr]
+
+?? Could conflict with long addressing ??
+
+A variable or constant is of type Value.
+
+* Req: +Variables and constants
+Variables can be defined in the source file and used in subsequent expressions. 
+
+Constants are defined with the let statement. It is an error to redefine a constant. The let statement may be ommitted.
+
+Variables are defined with the var statement.
+
+struct var {
+  bool is_const;
+  char *name;
+  enum var_type type;
+  union {
+    int ival;
+    double fval;
+    char *sval;
+  } v;
+};
+
+Command line defines are created as constants. (or should they be overridable?)
+
+** (Done) Special constants
+let on = 1;
+let off = 0;
+let true = 1;
+let false = 0;
+let yes = 1;
+let no = 0;
+
+* Req: +Scope
+Scopes are nested with {}. There is a global scope and scopes below it. Constants, variables, and macros exist within a scope.
+
+The outermost scope is reserved for built in values and command line defines.
+
+May need to be careful to not allow overriding a cost value in a nested scope.
+
+* Req: +Expressions
+Expressions can be used in either assignment statements or wherever values are required. 
+
+Some special symbols are defined, including:
+| Name | Operation |
+|------+-----------|
+| <    | byte 0    |
+| >    | byte 1    |
+| ^    | byte 2    |
+
+Brackets can be used for disambiguation if required.
+
+100+<addr
+
+Integers support standard mathematical operatons +,-,*,/,%.
+
+Boolean operators are &,|,XOR,!,!&,!|
+Logical operators are &&, || 
+
+* Req: +Support built in functions
+The expression parser supports calling built in functions by name. This is useful for providing data conversion or calculation functions.
+
+Examples of useful functions are:
+
+| Name                                 | Description                                             |
+|--------------------------------------+---------------------------------------------------------|
+| len(s :String): Integer              | Returns the length of a string                          |
+| trunc(s: String, n: Integer): String | Truncates or pads the string to the given length        |
+| format(s: String, ...): String       | Printf style formatting of a string                     |
+|--------------------------------------+---------------------------------------------------------|
+| round(r: Real): Real                 |                                                         |
+| floor(r: Real): Real                 |                                                         |
+| ceil(r: Real): Real                  |                                                         |
+|--------------------------------------+---------------------------------------------------------|
+| is_abs(v)                            | Test if a label is relative or absolute                 |
+| is_rel(v)                            |                                                         |
+| is_defined(name)                     | Test if a constant, variable, macro or label is defined |
+| is_dpage(name)                       | True if the expression is in the direct page            |
+| is_page(expr)                        | True if the expression evaluates to the same page as *  |
+| is_near(expr)                        | True if expression evaluates to the current bank        |
+| is_far(expr)                         | True if expression is outside current bank              |
+|--------------------------------------+---------------------------------------------------------|
+| date(format)                         | Output date with selected format                        |
+| bit7(flag)                           | Set bit 7 on for subsequent ASCII output                |
+| mask(and,or,sub)                     | Masks the ASCII output                                  |
+|                                      |                                                         |
+  
+* Req: -Linker map file
+The linker is controllered by a link map file. This file can be specified on the linker command line. 
+
+The ELF file already maps all sections into a segment, so the linker is not concerned with this.
+
+addr:length segment...
+
+For example:
+
+000000:0000FF DirectPage
+00F000:000FF0 text
+00F000:000FF0 rodata
+00FFF0:00000F vectors
+010000:01FFFF data bss
+
+For relocatable segments the - is used for the address. The length is still required and is used as a check that the maximum length is not exceeded.
+
+------:01FFFF text
+
+This defines a relocatable text section that has a maximum length of 128k.
+
+* Req: +Dealing with banks
+Segments can be larger than one bank, but sections must be less than the size of a bank. 
+
+* Req: +Assembly flow statements
+The following statements are available during assembly:
+
+** if
+if expr {
+  [statement]+
+} else if expr
+  [statement]+
+} else {
+  [statement]+
+}
+
+** while
+while expr {
+  [statement]+
+}
+
+** repeat
+repeat { 
+  [statement]+
+} until expr
+
+** for
+for (start ; cond ; loop) {
+}
+
+They follow the statement format while introducing some new keywords.
+
+* Req: +Macros
+Macros are recorded in the intermediate language as they are found in the source. 
+
+Macros take precidence over directives and opcodes so can override them.
+
+** Definition
+label   macro p1, p2, p3 {
+	statementList
+	}
+
+** Call
+        label p1, p2, p3
+
+** Labels
+Macros concatenate labels using the @ charater. Expressions can be enclosed in <> characters and will be evaluated.
+
+The # character at the end of a macro label appends a 4 digit suffix to the label to ensure it is unique.
+
+* Req: +Command line options
+
+as [options] -o [output file] [input files]
+
+Options:
+
+| Option            | Description                                                      |
+|-------------------+------------------------------------------------------------------|
+| -D [name[=value]] | Define global constant value                                     |
+| -L [filename]     | Generate assembly listing,optionally specify the output filename |
+| -I [path]         | Include directory                                                |
+| -o [file]         | Specify output file                                              |
+  
+* Req: +Special variables
+
+| Name     | Description                         |
+|----------+-------------------------------------|
+| __FILE__ | Current source file                 |
+| __LINE__ | Line number                         |
+| __65AS__ | Assembler version                   |
+|----------+-------------------------------------|
+| addr     | The current output address          |
+| pc       | The current program counter address |
+| longa    | Long A and Memory                   |
+| longi    | Long Index                          |
+| cpu      | The current processor               |
+| pass     | The current pass                    |
+| dbreg    | Data Bank Register                  |
+| dpage    | Direct Page Register                |
+| pbreg    | Program Bank Register               |
+
+Setting pc also marks the current section/segment as absolute.
+
+** cpu
+Selects the processor instructions that are valid. Current values are:
+
+| Name   | Description            |
+|--------+------------------------|
+| 6502   | NMOS 6502              |
+| W65C02 | CMOS WDC 65C02         |
+| R65C02 | Rockwell 65C02         |
+| C19    | Rockwell C19 and later |
+| 65816  | WDC 65C186             |
+
+** dbreg
+Specifies the current value for the Data Bank Register. If this value is set and a long absolute address matches the current Data Bank value then the address will be modified to use the absolute addressing mode.
+
+
+        segment data
+        org $010000
+fpreg   block $00, 4
+
+        segment text
+        dbreg $01
+        lda fpreg    ; fpreg is $010000 but assembler will shorten to lda $0000
+
+** dpage
+Tells the assembler the value of the Direct Page register. If this value is set and a statement generates an address that is in the direct page the addressing mode will be changed to use the direct page mode.
+
+** longa on|off
+Tell the assembler the length of A and memory operations.
+
+Default is on.
+
+** longi on|off
+Tell the assembler the length of the index registers.
+
+Default is on.
+
+* Req: +Length modifiers
+Opcodes can have a length modifier appended to select the addressing mode. These modifiers are:
+
+| .b | byte   | 1 |                          |
+| .d | direct | 1 | Direct Page addressing   |
+| .w | word   | 2 |                          |
+| .a | word   | 2 | Absolute addressing mode |
+| .l | long   | 3 | Long addressing          |
+
+This disambiguates the addressing mode of the instruction. If a length modifier is not selected then the shortest addressing mode is selected.
+
+Note that this does not change the processor mode (the M and X bits) so the programmer still needs to be careful to ensure that the assembly matches this mode.
+
+LONGA and LONGX directives set the default to either byte or word for their respective instructions.
+
+* Req: +Immediate Language and data structures
+An immediate language is used to 
+
+enum ValueType {
+  var,
+  const,
+  label
+};
+
+struct Scope {
+}
+
+struct Value {
+  enum ValueType type;
+  char *name;
+  {
+    int ival;
+    double rval;
+    char *sval;
+  }
+}
+
+* Req: +Addressing Modes
+
+** Immediate
+Immediate, ImmediateByte, ImmediateWord
+
+expression
+
+ImmediateByte if LONGA/LONGI off or if .b suffix is present.
+ImmediateWord if LONGA/LONGI on or if .w suffix is present.
+
+** Absolute
+Absolute, AbsoluteDirect, AbsoluteWord, AbsoluteLong
+
+expression
+
+The . modifiers can be used to select the addressing mode.
+
+AbsoluteDirect lda.d forces DP mode
+AbsoluteWord lda.a normal absolute bank address
+AbsoluteLong lda.l long address
+
+Also the DPAGE or DBREG variables can be checked to shorten the opcode.
+
+** Accumulator
+Accumulator
+
+A
+
+** Implied
+Implied
+
+** Indirect Indexed
+IndirectIndexed, IndirectIndexedDirect, IndirectIndexedAbsolute, IndexedIndirectLong
+
+(expression),Y
+[expression],Y
+
+The instruction length modifiers can be used to select the adressing mode. An alternative form is to use square brackets to select the long addressing mode. Alos the DPAGE and DBREG variables are consulted to select a shorter instruction.
+
+** Indexed Indirect
+IndexedIndirect, IndexedIndirectDirect, IndexedIndirectAbsolute, IndexedIndirectLong
+
+(expression,X)
+[expression,X)
+
+** Indexed X
+IndexedX, IndexedXDirect, IndexedXAbsolute, IndexedXLong
+
+expression,X
+
+** Indexed Y
+IndexedY, IndexedYDirect, IndexedYAbsolute
+
+expression,Y
+
+** Program Counter Relative
+ProgramCounterRelative, ProgramCounterRelativeShort, ProgramCounterRelativeLong
+
+The .b and .w modifiers can be used to select the length.
+
+** Indirect
+Indirect, IndirectDirect, IndirectAbsolute, IndirectLong
+
+(expression)
+[expression]
+
+** Stack
+Special case of Implied
+
+** Stack Relative
+StackRelative
+
+expression,expression
+addr,s
+
+** Stack Relative Indexed Indirect
+StackRelativeIndexedIndirect
+
+(addr,s),Y
+
+** Block
+Block
+
+dst,src
+#src,#dst
+
+** Special Cases
+PEA accepts either Absolute or Immediate.
+PEI accepts either Relative, Absolute, or Immediate.
+
+
+
+
+void param() {
+  if (token == HASH) {
+    next();
+    value = expression();
+    if (token == COMMA) {
+      next();
+
+    }
+    return Immediate\value;
+  } else if (token == A) {
+    return Implied;
+  } else if (token == SEP) {
+    return Implied;
+  } else if (token == LBRACKET) {
+    
+  } else {
+    value = expression();
+    return AbsoluteOrProgramCounterRelative\value;
+  }
+}
+
+
+Param = Immediate | Absolute | Accumulator | Implied | IndirectIndexed | IndexedIndirect | IndexedX | IndexedY | Pro.
+Immediate = "#" expression.
+Absolute = expression
+ProgramCounterRelative = expression .
+
+Accumulator = "A" | .
+Implied = .
+
+IndirectIndexed = "(" expression ")" "," "Y" .
+IndexedIndirect = "(" expression "," "X" ")" | "[" expression "," "X" "]" .
+IndexedX = expression "," "X" .
+IndexedY = expression "," "Y" .
+Indirect = "(" expression ")" | "[" expression "]" .
+StackRelative = expression "," "S" .
+StackRelativeIndexedIndirect = "(" expression "," "S", ")" "," "Y" .
+Block = {"#"} expression "," {"#"} expression .
+ParamList = expression { "," expression } .
+
+* Req: +Listing file
+An assembly listing file can be generated for each run of the assembler. The scanner needs to collect a line at a time for the listing output.
+
+Listing lines consist of the current address (3 bytes) then up to 5 output bytes then the source line. If the source line generates more than 5 bytes then subsequent bytes are continued on the next line or lines.
+
+000000: 00 01 02 03 04   LDA #0000 ; A sample listing line
+
+A memory map file can also be output, this lists the sizes of the sections and segments.
+
+* Req: +Program Structure
+The assembler is run by a main function which interprets the command line options and calls assembler functions. The assembler itself is a library which could be embedded in another application (such as the C compiler).
+
+The assembler is reentrant, it uses a context object rather than global variables. This context is an opaque datatype, all interactions are through assembler library functions.
+
+* Req: +Comments
+Comments can be defined in multiple ways in the source file. Source lines are processed one at a time due to requirements for the listing file output.
+
+ ; The rest of the line is a comment
+ /* */ block comment, can be inline or span multiple lines. Can also be nested.
+ // Single line comment
+An * at the start of the line also starts a full line comment.
+
+* Req: +Debugger
+Symbols can be retained in the executable file for use by a debugger.
+* Req: +Vector Declaration
+Vectors can be declared with existing constructs:
+
+    section Vectors
+    org = $FFFE
+    data.w nmi_vec, irq_vec, reset_vec
+
+* Req: +Directives
+** INCLUDE file
+Include the referenced file. This will import the symbols in the file as well as process the file for instructions.
+
+When searching for files the current directory and then the include path is searched.
+** IMPORT file
+Ensure that this file is only included once.
+
+** INSERT file
+Outputs the file as binary data in the current section and segment. Useful for including binary data.
+
+When searching for files the include path is searched.
+
+** ERROR text
+Causes the assembly to quit, the message specified is sent to the error output.
+
+var width = 45
+if width > 40 { error "Width cannot be greater than 40" }
+** ERRORIF expr, text
+This is similar to error but the boolean expression is evaluated and if true then the text message is printed. This is more useful than using error alone as this only runs in the output pass.
+** SECTION name block
+Defines the name for the section for subsequent output. The name can be any value specified. Sections are used for organising the location of generated code in the final output.
+
+** SEGMENT name,attrs block
+Defines the current segment. If the name is a well known segment (text, rodata, data, BSS) then the attrs do not need to be specified. If the name is a new name then attributes need to be specified using the followng keys:
+
+| Key | Description |
+|-----+-------------|
+| w   | Writable    |
+| x   | Executable  |
+| a   | Allocate    |
+
+If the allocate flag is not specified then no data is output (but the size of the section is still calculated. This allows the assembler to output to sections for runtime only data such as BSS. This also is used for defining labels within a segment without defining values.
+
+** FUNCTION
+Defines a function. Currently does nothing but is useful for the debugger when we implement the C compiler. Also could be used in optimisations.
+
+** equate
+Sets a label to the specified address.
+
+let ACIA_ADDR = $CC00
+
+           INCLUDE "acia.h"
+
+ACIA        = ACIA_ADDR
+ACIA_IER1*  = ACIA[0]
+ACIA_CR1*   = ACIA[1]
+ACIA_FR1*   = ACIA[2]
+
+
+  org = $C000
+ACIA_IER1  DATA
+** MESSAGE text, text, ...
+Displays the message during the output pass of the assembly process. This is useful for showing which options were taken or for outputting reminders as part of the assembly process.
+
+Backslash is used as the escape character.
+
+Multiple values can be sent. Formatting is somewhat like C++ iostreams with modifier functions. The format modifiers are shared with the data directives.
+
+| Modifier         | Description                    |
+|------------------+--------------------------------|
+| hex              |                                |
+| dec              |                                |
+| bin              |                                |
+| digits(v)        |                                |
+** MESSAGENOW
+The same as message but displays the message in every pass of the assembler.
+
+This can be useful for debugging.
+** DATA, DATA.b, DATA.w, DATA.l, DATA.f, DATA.d
+A comma seperated list of items. Output can be characters using single quotes, strings using double quotes or numbers. Labels and expressions may be used.
+
+Functions can be used to modify the data.
+keyword:     data.b 'p', 'r', 'i', 'n', bit7('t')
+
+| data.b | byte   |
+| data.w | word   |
+| data.l | long   |
+| data.f | float  |
+| data.d | double |
+
+** TEXT, TEXT.b, TEXT.0, TEXT.l
+String data output. Includes some special characters:
+\r  Return
+\n  Newline
+\0  0 byte
+\t  Tab
+\\  Backslash
+
+|    |                                      |
+|----+--------------------------------------|
+|    | Literal ASCII text                   |
+| .7 | Set bit 7 of last character          |
+| .0 | Append \0 after text                 |
+| .l | Add a length byte to start of string |
+
+** FILL length, value
+Stores length bytes of value. Value is optional, if ommitted then 0 is used.
+
+A special variable i is available in the value, and functions can be used here.
+fill 256, 127.5 + 127.5 * sin(toRadians(i*360/256))
+fill 4, 'D', 'E', 'M', 'O'
+fill.w 4, $FE00
+
+The length modifiers can be used to specify the size of the value.
+
+| .b  | byte     |
+| .w  | word     |
+| .l  | long     |
+| .lh | low/high |
+
+When low/high is specified then the label is annotated with .lo and .hi suffixes.
+
+For segments without the allocate flag set (BSS) the block directive can be used to specify the size of the of the segment.
+
+          segment bss
+head      block 1
+tail      block 1
+buffer 
+
+** GLOBAL
+Exports the named symbol, making it available to other modules in the linker.
+
+A shortcut for the global definition is a * as a suffix in the declaraton of the label.
+
+Any unresolved labels are treated as external and must be resolved by the linker. There is no need to declare external variables.
+** ALIGN
+Used to move the org to an aligned value. This can be used to set a page boundary with ALIGN $100.
+
+* Req: +Listing Control Directives
+During pass 1 the assembler reads the first values of these settings and uses them for page 1 of the output.
+
+** PL
+Page Length. Default is 61.
+
+** PW
+Page Width. Default is 78.
+
+** TOP
+Number of blank lines at the top of the page. Default is 0.
+
+** HEADING
+The heading at the top of the page. The default value for this field is the filename.
+
+** SUBHEADING
+
+** PAGE
+Outputs a form feed to move to the next page.
+
+** LIST on|off
+Turns the listing on or off. Default is off, but the -L command line option will turn the listing on.
+
+** INCLIST on|off
+List include files.
+
+struct ListingInfo {
+  uint8_t page_length;
+  uint8_t page_width;
+  uint8_t top;
+  char *heading;
+  char *subheading;
+  bool list_on;
+  bool inclist_on;
+  bool pass1_on;
+};
+
+* Req: +Passes
+Pass 1 scans the input and generates immediate code. Immediate code has references to labels rather than absolute addresses.
+Pass 2 runs multiple times, resolving addresses for fixed code. The scan is continued until a scan does not result in code size reduction. 
+Pass 0 writes out the final code.
+
+There is a special variable called pass that can be used to see which pass is being executed.
+
+(Need a way to force a longer address if required)
+
+* Req: +Relocations
+
+The assembler must output relocation records for relocatable code. The ELF linker format specifies a number of relocations.
+
+* Req: +Limits
+
+Strings are limited to 1024 characters. This could be a problem for includes.
+Identifiers are limited to 16 characters.
+
+* Req: (Future)Functions
+Support defining functions. This is different from macros in that they are not expanded
+but return a calculated value.
+
+* Grammar
+
+ToDo: Can we add .l, .h syntax to expression? Or is it better to stick with lo(expression) format?
+ToDo: Directive lohi automatically divide arrays
+ToDo: special variables from data
+
+Message data.c "Welcome to the monitor"
+
+lda #Message ; Loads the address of Message
+lda #Message.length ; Loads the length of Message data
+lda #Message.end ; Loads the address 1 past the end of message
+
+lda Message[Message.length - 2] ; Loads the second last character of message
+ToDo: String operations + *
+
+Whitespace = {' '|'\r'|'\n'|'\t'}
+EOL = '\r'['\n']|'\n'.
+Comment = ';'...EOL | '//' ...EOL | '/*'...'*/'.
+ident = letter {letter|digit|'_'}.
+letter = 'A'..'Z' | 'a'..'z'.
+digit = '0'..'9'.
+StatementSep = ';' | EOL.
+
+number  =  integer | real. 
+integer  =  digit {digit} | "$" {hexDigit} | "%" {binaryDigit} | CharConstant. 
+hexDigit  =  digit | "A" | "B" | "C" | "D" | "E" | "F". (and lower case)
+binaryDigit  = "0" | "1".
+real  =  digit {digit} "." {digit} [ScaleFactor]. 
+ScaleFactor  =  ("E" | "D") ["+" | "-"] digit {digit}. 
+CharConstant  =  '"' character '"'. 
+string  =  '"' {character} '"'. 
+
+block = '{' StatementSequence '}'
+
+assignment = ([LET] | VAR) IdentDef '=' expression.
+expression  =  SimpleExpression [relation SimpleExpression]. 
+SimpleExpression  =  ["+"|"-"] term {AddOperator term}. 
+term  =  factor {MulOperator factor}. 
+factor  =  number | string | 
+    ident [ActualParameters] | ident '[' expression ']' |
+    "(" expression ")" | "~" factor | '!' factor
+    '<' expression | '>' expression | '^' expression. 
+ExpList  =  expression {"," expression}. 
+ActualParameters  =  "(" [ExpList] ")". 
+MulOperator  =  "*" | "/" | DIV | MOD | "&". 
+AddOperator  =  "+" | "-" | '|'. 
+relation  =  "==" | "!=" | "<" | "<=" | ">" | ">=" | '&&' | '||'. (order?)
+
+StatementSequence  =  statement {StatementSep statement}. 
+statement  =  [ assignment | MacroDefinition | Instruction 
+    IfStatement | WhileStatement | RepeatStatement | LoopStatement ]. 
+
+IfStatement  =  IF expression block
+    {ELSE IF expression block} 
+    [ELSE block]. 
+WhileStatement  =  WHILE expression block.
+RepeatStatement  =  REPEAT block UNTIL expression. 
+LoopStatement  =  FOR '(' assignment ';' assignment ';' expression ')' block. 
+MacroDeclaration  =  ident MACRO [FormalParameters] block.
+
+IdentDef = ident ['*'] | '.' ident.
+Instruction  =  [IdentDef] (Instr | Directive | MacroIdent) [ '.' ident ] InstrParameters.
+InstrParameters  =  '#' expression |                     ; Immediate
+                    expression |                         ; Absolute, ProgramCounterRelative
+		    'A' |                                ; Accumulator
+		    |                                    ; Implied, Stack
+		    '(' expression ')' ',' 'Y' |
+		    '[' expression ']' ',' 'Y' |         ; IndirectIndexed
+		    '(' expression ',' 'X' ')' |
+		    '[' expression ',' 'X' ']' |         ; IndexedIndirect
+		    expression ',' 'X' |                 ; Indexed X
+		    expression ',' 'Y' |                 ; Indexed Y
+		    '(' expression ')' |           
+		    '[' expression ']' |                 ; Indirect
+		    expression ',' 'S' |                 ; StackRelative
+		    '(' expression ',' 'S' ')' ',' 'Y' | ; StackRelativeIndexedIndirect
+		    expression ',' expression | 
+		    '#' expression ',' '#' expression |  ; Block
+		    expression { "," expression } .      ; ParamList
+
+* Tokens
+StatementSep
+Ident
+Integer
+Real
+String
+BlockStart
+BlockEnd
+Token
+Equals =
+Plus +
+Minus -
+LSq [
+RSq ]
+LBracket (
+RBracket )
+Tilde ~
+Not !
+And &&
+Or ||
+LT <
+GT >
+Caret ^
+Comma ,
+Asterisk *
+FSlash /
+DIV
+MOD
+Ampersand &
+Or |
+Equality ==
+NotEquals !=
+LEq <=
+GEq >=
+Period .
+Hash #
+
+* Keywords
+LET
+VAR
+DIV
+MOD
+IF
+ELSE
+WHILE
+REPEAT
+UNTIL
+FOR
+MACRO
+A
+X
+Y
+S
+
+INCLUDE
+IMPORT
+INSERT
+ERROR
+ERRORIF
+SEGMENT
+SECTION
+FUNCTION
+MESSAGE
+MESSAGENOW
+DATA
+TEXT
+FILL
+GLOBAL
+ALIGN
+PL
+PW
+TOP
+HEADING
+SUBHEADING
+PAGE
+LIST
+INCLIST
+
+* ToDo
+
+x Review and complete grammar
+x Define and implement all symbols.
+x Extract symbols from grammar and implement scanner
+Implement Include
+  x Simple include
+  - <include>, search include paths
+Run pass 1 and pass 2
+Implement .o ELF file output
+
+Implement Symbol Table.
+x Implement parser
+
+CaseStatement  =  CASE expression OF case {"|" case} 
+    [ELSE StatementSequence] END. 
+case  =  [CaseLabelList ":" StatementSequence]. 
+CaseLabelList  =  CaseLabels {"," CaseLabels}. 
+CaseLabels  =  ConstExpression [".." ConstExpression]. 
+
+MacroDeclaration  =  MacroHeading ";" MacroBody ident. 
+MacroHeading  =  MACRO ["*"] identdef [FormalParameters]. 
+FormalParameters  =  "(" [FPSection {";" FPSection}] ")". 
+FPSection  =  [VAR] ident {"," ident} ":" FormalType. 
+FormalType  =  {ARRAY OF} (qualident | ProcedureType). 
+MacroBody  =  DeclarationSequence [BEGIN StatementSequence] END. 
+
+
+** Unimplemented KickAss Features
+Comments after mnemonics
+Multi labels
+pseudopc (assembling at different location to execution)
+lohi fill
+Only ASCII encoding is supported
+* Runtime
+env**
+arg**
+pb
+db
+dp
+
+* Syscall
+COP
+longa and longi on
+X contains syscall number
+Y contains parameter block address (using DB)
+A is used for return value
+
+The kernel has it's own stack
+
+COP Vector points to:
+JML KernelEntry
+
+
+KernelEntry:    ; In kernel bank
+
+TSX
+JML (
+<Restore Stack>
+RTI
+
+; Save User SP
+  TSA
+  LDX #KernelStack
+  TXS
+  PHA
+
+...
+
+  PLX
+  TXS
+  RTI
+
+* Structure
+as.c - main code, command line interpreter, passes
+as.h - globals, structure definitions
+?state.c - state related functions
+scanner.c - tokenizer
+parser.c - parser
+codegen.c - initial generator
+buffered_file.c - buffered file reader
+memory.c - memory management
+value.c - value type and functions
+* ToDo
+Does not allow input from stdin
+
+
+([LET] | VAR) IdentDef sBECOMES
+IdentDef kMACRO ...
+[IdentDef] kINSTR ...
+kIF
+kWHILE
+kREPEAT
+kFOR
+
+kLET 
+kVAR
+IdentDef 
+  sBECOMES -> assignment
+  kMACRO -> macro
+  kINSTR -> instr
+  StateSep -> label
+kIF
+kWHILE
+kREPEAT
+kFOR

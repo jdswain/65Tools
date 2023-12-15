@@ -1,0 +1,93 @@
+* Status
+In oberon a scope is an object, probably should change to this.
+The symbol table is made of objects too. enter() creates objects.
+
+* Tasks
+** - dbr and pbr
+** Text output or mkrom
+** load addr, start addr
+** Add DirectPage mode to branch and jump instructions
+** BLT,BGT? 
+
+** cfg file to set up Sections (and segments?)
+
+* Later
+** Segments
+** Repeat/While etc.
+
+** Linking
+** Relocations
+
+** Floating Point
+
+** Dead code elimination
+Count procedure invocations and if 0 and not exported, don't generate code.
+
+** Linker config file
+Defines the sections, arch, load address etc. Instead of this being hardcoded as it is now.
+
+
+* Ideas
+** Literate programming in the parser
+** Design by Contract
+** Closures
+
+* Issues
+** Need a way of specifying the entry point
+
+PROCEDURE main(env: ARRAY OF STRING, args: ARRAY OF STRING)
+
+*** Startup and exit
+Module with name of executable is called app module.
+All module code blocks are executed on startup. App module is first.
+If .command, then 
+  procedure with command is executed (version with params takes precidence).
+else if main command exists 
+  it is executed.
+Exit() system call is used to exit. Exit checks app module ans calls App.exit() if it exists.
+
+
+** as_error on pass 0 does not have line numbers
+
+
+** Minor
+*** Decimal constants with invalid characters (hex) don't give error, just silently ignores, eg. adc (e0)
+Looks like parser interprets them as symbols.
+
+*** Macro call should be before macro listing
+
+** Compiler Steps
+x Add/Subtract
+Mul/Divide
+Other arithmetic functions
+x ProcedureReturn
+x ProcedureEnter
+Params
+Var Params
+Conditions
+IF statement
+Loops
+Other simple data types
+Strings
+Arrays
+Records
+Multiple Modules
+System Calls
+Built in Functions
+Inline ASM
+Linker Script
+Symbol Table (load into emulator)
+Relocation
+Optimiser Pass
+- redundant loads/stores
+   
+* Done
+** dp
+** Macros
+** Hex output on wrong line on C19.s test
+** Symbol listing is missing some symbols
+** Macro ScopeEnd is not output
+** Macro call should not output two bytes
+** Macro parameters are reversed
+
+

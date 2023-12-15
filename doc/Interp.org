@@ -1,0 +1,18 @@
+* Intro
+
+Interp is a 65C816 interpreter that runs under linux. It is used for testing the compiler output.
+
+* V1
+
+Load ELF file and call start() function.
+Interpret instructions.
+Simple serial port emulator for input and output.
+Allocate all RAM so banking can be tested.
+
+* V2
+
+Implement relocations.
+Add IO such as a screen buffer etc.
+Graphical interface.
+Debugger.
+Cycle accurate timing.

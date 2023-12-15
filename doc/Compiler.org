@@ -1,0 +1,282 @@
+* Single executable
+
+The compiler, assembler, linker are implemented as a single executable. Internally the functions are split.
+
+* Input Files
+
+The compiler takes the following inputs:
+
+1. A machine definition file.
+2. A module for compilation.
+
+* Output
+
+The output is:
+
+1. The compiled code as S-Records.
+2. An assembly listing file.
+3. A symbol map that lists the addresses of all symbols as well as other useful information.
+
+* Intermediate Code
+
+The compiler first generates an intermediate code before converting this to assembly language. The intermediate code can be optimised in various ways, and further optimisations can be done on the generated code.
+
+Intermediate code is a two address code. The intermediate code format can also include machine instructions, this allows for both inline assembly and for special instructions that are not normally used by the compiler (such as interrupt instructions, block move, system calls, or bit manipulation instructions).
+
+Bit manipulation instructions are not currently used, this could be added later.
+
+x is address in memory
+a is address in memory, it is an array of 4 byte items
+
+v = a[10]
+
+MUL.w t0, 10, 4
+MOV.b v, a[t0]
+
+MOV.w t0, 40
+MOV.b v, a[t0]
+
+LDX #40
+LDA a,y
+STA v
+
+v = a[b]
+
+MUL.w t0, b, 4
+MOV.b v, a[t0]
+
+ASL t0, b, 2
+MOV.b v, a[t0]
+
+LDA b
+ASL
+ASL
+TAX
+LDA a, x
+STA v
+
+
+** Datatypes
+
+Intermediate code can have these datatypes
+- B Byte
+- W Word
+- L Long
+- F Float
+- D Double
+- N Near Pointer
+- P Far Pointer
+
+enum IType {
+  TypeByte,
+  TypeSignedByte,
+  TypeWord,
+  TypeSignedWord,
+  TypeLong,
+  TypeSignedLong,
+  TypeFloat,
+  TypeDouble,
+  TypeNearPointer,
+  TypeFarPointer
+};
+
+** Registers
+
+The immediate code uses SSA form implementing an unlimited set of registers.
+
+Register allocation uses a set of direct page registers. The processor registers are just used for internal operations.
+
+r0-r8 are 16-bit registers.
+They can also be addressed with .l and .h for low and high byte. 
+
+** Calling conventions
+r0-r3 are parameter registers. Additional parameters are sent using the stack.
+r4-r7 are available for use in functions, they must be preserved across calls.
+
+** Instructions
+
+Arithmetic instructions can only operate on the same data types. Data types can be promoted to larger types before arithmetic.
+
+Instructions have the form of dest, src1, src2. Any of these can be either a register, an immediate value, or a memory address. Operands can also have indexes ([]).
+
+*** Arithmetic
+Types must be the same before these operations, so there is actually one operation per type.
+
+ADD
+SUB
+MUL
+DIV
+ASL
+ASR
+ROL
+ROR
+NEG
+AND
+OR
+XOR
+
+*** Branching
+
+FUNC paramCount, param0...
+
+CALL label, paramCount, param0...
+RET value
+
+JMP (only local to a function)
+
+BC var, label, label (Carry flag)
+BN var, label, label (Negative flag, for twos complement)
+BO var, label, label (Overflow flag, used for twos complement)
+BZ var, label, label (Zero flag, also called branch equal or not equal)
+
+*** Data
+
+MOV to, from (also does conversions)
+
+*** Instruction Format
+Instructions are added to a byte buffer in order. Instructions can have a variable length.
+
+enum IInstrType {
+  ADD,
+  SUB,
+  MUL,
+  DIV,
+  ASL,
+  ASR,
+  ROL,
+  ROR,
+  NEG,
+  AND,
+  OR,
+  XOR,
+
+  CAL,
+  RET,
+  JMP,
+
+  BC,
+  BN,
+  BO,
+  BZ,
+  
+  MOV (converts types)
+};
+
+// We are assuming for now that a Symbol can point to a constant, a register, or a named memory location. The symbol also contains the type information. This may require extending the symbol type.
+
+struct IFunction {
+  int bufferSize,
+  Symbol *name,
+  byte paramCount,
+  Param[] params, 
+  Instr[] instrs,
+};
+
+struct IParam {
+  Symbol *local; // Also defines type
+  
+}
+
+struct IOp {
+  IInstrType instr;
+  Symbol *dest; // All types must be the same
+  Symbol *op0;
+  Symbol *op1;
+}
+
+struct IBranch {
+  IInstrType instr;
+  IType type;
+  Symbol *yes;
+  Symbol *no;
+}
+
+struct IReturn {
+  IInstrType instr;
+  Symbol *retValue;
+}
+
+* Procedure Calls
+
+Parameters are passed in registers, and the called function needs a full set of registers to work with.
+
+** PrepCall x
+Allocate the next register for the return if needed. In this way the return value is just like any other
+intermediate result.
+
+Save all registers to the stack (up to the return register).
+
+Zero rh.
+
+** Params
+Evaluate params and their results end in consecutive registers.
+
+Param evaluation can uses registers, but only for the duration of that expression.
+
+** Call
+At this point it's just a matter of jumping to the procedure address.
+
+** Procedure
+The procedure knows that if it has N params that these params are in reg0 to regN.
+
+It allocates space for locals on the stack.
+
+At return time the result is loaded into regN. This allows the code after the call to restore the regs.
+
+** Functions
+
+PrepCall
+Call
+Return
+SaveRegs
+RestoreRegs
+
+procedure func(p1: int, p2: int): int
+var
+  x: int;
+begin
+  x := p1 + p2;
+  return x;
+end
+
+
+procedure main;
+var
+  y: int;
+begin
+  y := func(5, 6);
+end
+
+main
+  allocate y on the stack
+
+x = makeItem(y);
+rx: int; -- return register
+
+prepCall(x, rx):
+  load(x)  // r0 = func return value
+  rh += 1
+  rx := rh
+  saveRegs(rh);
+  rh := 0;
+
+params(x):
+  load 5 into r0
+  load 6 into r1
+
+call(x, rx):
+  jsr func
+
+func
+  r0 contains p1
+  r1 contains p2
+  r2 := r0 + r1
+  x := r2
+  load(x) -- result is in r2, reg after params
+  rts
+
+call:
+  restoreRegs()
+
+main:
+  y := r2

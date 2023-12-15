@@ -1,0 +1,161 @@
+// Address decoder
+assign ramcsb = !(!address[15] & phi2);  
+assign sercsb = !(address[15] & !address[14] & !address[13] & phi2); // 8000
+assign lcdcs =  address[15] & !address[14] & address[13] & phi2; // A000
+
+// Boot ROM
+always @(address)
+begin
+	if ((address[15] == 1'b1) && (address[14] == 1'b1)) begin
+    		case (address[7:0])
+			8'h00: datab <= 8'hD8; //           RESET     CLD
+			8'h01: datab <= 8'h78; //                           SEI
+			8'h02: datab <= 8'h20;
+			8'h03: datab <= 8'h2E;
+			8'h04: datab <= 8'hFF; // JSR LCDINIT
+			8'h05: datab <= 8'hA9;
+			8'h06: datab <= 8'h4F; //   LDA #$4F
+			8'h07: datab <= 8'h8D; 
+			8'h08: datab <= 8'h01; 
+			8'h09: datab <= 8'h80; //   STA CR1
+			8'h0A: datab <= 8'hA9; 
+			8'h0B: datab <= 8'hE0; // LDA #$E0
+			8'h0C: datab <= 8'h8D;
+			8'h0D: datab <= 8'h01;
+			8'h0E: datab <= 8'h80; // STA TDR1
+
+			8'h0F: datab <= 8'hAD; 
+			8'h10: datab <= 8'h03;
+			8'h11: datab <= 8'h80;
+			8'h12: datab <= 8'hAD; 
+			8'h13: datab <= 8'h00; 
+			8'h14: datab <= 8'h80; 
+			8'h15: datab <= 8'h29; 
+			8'h16: datab <= 8'h01;
+			8'h17: datab <= 8'hF0;
+			8'h18: datab <= 8'hF9;
+
+			8'h19: datab <= 8'hAD; 
+			8'h1A: datab <= 8'h03; 
+			8'h1B: datab <= 8'h80; 
+
+			8'h1C: datab <= 8'h20;
+			8'h1D: datab <= 8'h5C;
+			8'h1E: datab <= 8'hFF;
+			8'h1F: datab <= 8'h4C;
+			8'h20: datab <= 8'h12;
+			8'h21: datab <= 8'hFF;
+
+			8'h24: datab <= 8'h48; //        LCDBUSY   PHA
+			8'h25: datab <= 8'hAD;
+			8'h26: datab <= 8'h00;
+			8'h27: datab <= 8'hA0; //     LCDBUSY0     LDA LCD0            ;read from LCD register 0
+			8'h28: datab <= 8'h29; 
+			8'h29: datab <= 8'h80; //                  AND #$80            ;check bit 7 (busy)
+			8'h2A: datab <= 8'hD0;
+			8'h2B: datab <= 8'hF9; //                  BNE LCDBUSY0
+			8'h2C: datab <= 8'h68; //                  PLA
+			8'h2D: datab <= 8'h60; //                  RTS
+			8'h2E: datab <= 8'hA2;
+			8'h2F: datab <= 8'h04; //        LINIT     LDX #$04            ;do function set 4 times
+			8'h30: datab <= 8'hA9;
+			8'h31: datab <= 8'h38; //        LINIT0    LDA #$38            ;function set: 8 bit, 2 lines, 5x7
+			8'h32: datab <= 8'h8D;
+			8'h33: datab <= 8'h00;
+			8'h34: datab <= 8'hA0; //               STA LCD0
+			8'h35: datab <= 8'h20;
+			8'h36: datab <= 8'h24;
+			8'h37: datab <= 8'hFF; //               JSR LCDBUSY         ;wait for busy flag to clear
+			8'h38: datab <= 8'hCA; //                     DEX
+			8'h39: datab <= 8'hD0;
+			8'h3A: datab <= 8'hF5; //                  BNE LINIT0
+			8'h3B: datab <= 8'hA9;
+			8'h3C: datab <= 8'h06; //                  LDA #$06            ;entry mode set: increment, no shift
+			8'h3D: datab <= 8'h8D;
+			8'h3E: datab <= 8'h00;
+			8'h3F: datab <= 8'hA0; //               STA LCD0
+			8'h40: datab <= 8'h20;
+			8'h41: datab <= 8'h24;
+			8'h42: datab <= 8'hFF; //               JSR LCDBUSY
+			8'h43: datab <= 8'hA9;
+			8'h44: datab <= 8'h0F; //                  LDA #$0E            ;display on, cursor on, blink off
+			8'h45: datab <= 8'h8D;
+			8'h46: datab <= 8'h00;
+			8'h47: datab <= 8'hA0; //               STA LCD0
+			8'h48: datab <= 8'h20;
+			8'h49: datab <= 8'h24;
+			8'h4A: datab <= 8'hFF; //               JSR LCDBUSY
+			8'h4B: datab <= 8'hA9;
+			8'h4C: datab <= 8'h01; //                  LDA #$01            ;clear display
+			8'h4D: datab <= 8'h8D;
+			8'h4E: datab <= 8'h00;
+			8'h4F: datab <= 8'hA0; //               STA LCD0
+			8'h50: datab <= 8'h20;
+			8'h51: datab <= 8'h24;
+			8'h52: datab <= 8'hFF; //               JSR LCDBUSY
+			8'h53: datab <= 8'hA9;
+			8'h54: datab <= 8'h80; //                  LDA #$80            ;DDRAM address set: $00
+			8'h55: datab <= 8'h8D;
+			8'h56: datab <= 8'h00;
+			8'h57: datab <= 8'hA0; //               STA LCD0
+			8'h58: datab <= 8'h20;
+			8'h59: datab <= 8'h24;
+			8'h5A: datab <= 8'hFF; //               JSR LCDBUSY
+			8'h5B: datab <= 8'h60; //                     RTS
+
+			8'h5C: datab <= 8'h8D; //LCDPRINT
+			8'h5D: datab <= 8'h01;
+			8'h5E: datab <= 8'hA0; //               STA LCD1            ;output the character
+			8'h5F: datab <= 8'h20;
+			8'h60: datab <= 8'h24;
+			8'h61: datab <= 8'hFF; //               JSR LCDBUSY
+			8'h62: datab <= 8'hAD;
+			8'h63: datab <= 8'h00;
+			8'h64: datab <= 8'hA0; //               LDA LCD0            ;get current DDRAM address
+			8'h65: datab <= 8'h29;
+			8'h66: datab <= 8'h7F; //                  AND #$7F
+			8'h67: datab <= 8'hC9;
+			8'h68: datab <= 8'h14; //                  CMP #$14            ;wrap from pos $13 (line 1 char 20)...
+			8'h69: datab <= 8'hD0;
+			8'h6A: datab <= 8'h05; //                  BNE LCDPRINT0
+			8'h6B: datab <= 8'hA9;
+			8'h6C: datab <= 8'hA8; //                  LDA #$C0            ;...to $40 (line 2 char 1)
+			8'h6D: datab <= 8'h4C;
+			8'h6E: datab <= 8'h80;
+			8'h6F: datab <= 8'hFF; //               STA LCD0
+			8'h70: datab <= 8'hC9;
+			8'h71: datab <= 8'h3C;
+			8'h72: datab <= 8'hD0; //               JSR LCDBUSY
+			8'h73: datab <= 8'h05; //           LCDPRINT0 PLA
+			8'h74: datab <= 8'hA9; //                     RTS
+			8'h75: datab <= 8'h94; //                  LDA #$C0            ;...to $40 (line 2 char 1)
+			8'h76: datab <= 8'h4C;
+			8'h77: datab <= 8'h80;
+			8'h78: datab <= 8'hFF; //               STA LCD0
+			8'h79: datab <= 8'hC9;
+			8'h7A: datab <= 8'h28;
+			8'h7B: datab <= 8'hD0; //               JSR LCDBUSY
+			8'h7C: datab <= 8'h08; //           LCDPRINT0 PLA
+			8'h7D: datab <= 8'hA9; //                     RTS
+			8'h7E: datab <= 8'hBC;
+			8'h7F: datab <= 8'h8D; //               JSR LCDBUSY
+			8'h80: datab <= 8'h00; //           LCDPRINT0 PLA
+			8'h81: datab <= 8'hA0; //                     RTS
+			8'h82: datab <= 8'h20;
+			8'h83: datab <= 8'h24; //               JSR LCDBUSY
+			8'h84: datab <= 8'hFF; //           LCDPRINT0 PLA
+			8'h85: datab <= 8'h60; //               JSR LCDBUSY
+
+//			8'h1B: datab <= 8'h4C;
+//			8'h1C: datab <= 8'h13;
+//			8'h1D: datab <= 8'hFF; //     LOOP	  JMP LOOP
+
+			8'hFC: datab <= 8'h00;
+			8'hFD: datab <= 8'hFF;
+
+			default: datab <= 8'h00;
+		endcase
+	end else begin
+		datab <= 8'bzzzzzzzz;
+	end
+end

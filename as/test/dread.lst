@@ -1,0 +1,273 @@
+0000:                   	;; Disk Read
+0000:                   
+0000:                   	cpu := "6502"
+0000:                   	
+0000:                   	org := $FD59
+fd59:                   
+fd59:                   
+fd59:                   	NEXT := $f84F
+fd59:                   	
+fd59:                   	FD_STATUS = $0100
+fd59:                   	FD_CMD = $0100
+fd59:                   	FD_TRACK = $0101
+fd59:                   	FD_SECTOR = $0102
+fd59:                   	FD_DATA = $0103
+fd59:                   	DRV_STAT = $0106
+fd59:                   	DRV_CTL = $0106
+fd59:                   
+fd59:                   	
+fd59:                   	/*
+fd59:                   	DRV_STAT
+fd59:                   	7 nINTRQ
+fd59:                   	6 n(INTREQ+DRQ)
+fd59:                   	5 MOTOR 0 = ON, 1 = OFF
+fd59:                   
+fd59:                   	DRV_CTL
+fd59:                   	7 DENSITY 0 = DOUBLE, 1 = SINGLE
+fd59:                   	5 MOTOR 0 = OFF, 1 = ON
+fd59:                   	4 DRIVE SELECT 3
+fd59:                   	3 DRIVE SELECT 2
+fd59:                   	2 DRIVE SELECT 1
+fd59:                   	1 DRIVE SELECT 0
+fd59:                   	0 SIDE SELECT 0 = Side 0, 1 = Side 1
+fd59:                   	*/
+fd59:                   	
+fd59:                   	;; DREAD ( addr n --- err )
+fd59:                   	;; Reads 4 sectors starting at sector 4n + 1 of selected disk,
+fd59:                   	;; current track to addr. Leaves error byte.
+fd59:                   	
+fd59: 20 74 fd          DREAD:		JSR CALC_SECT
+fd5c: 20 7f fd          .DSECT		JSR DSETUP
+fd5f: a9 90             			LDA #$90			; Read sector, multiple records, compare for side 0, no 15ms delay, disable side select compare
+fd61: 20 b5 fd          			JSR D_CMD
+fd64: 20 93 fd          			JSR RDSECT
+fd67: 29 bf             			AND #$BF
+fd69: f0 04             			BEQ LOC2
+fd6b: c6 54             			DEC $54
+fd6d: d0 ed             			BNE DSECT
+fd6f: e8                .LOC2:		INX
+fd70: e8                			INX
+fd71: 4c 4f f8          			JMP NEXT
+fd74:                   
+fd74: 16 00             CALC_SECT:	ASL 0,X				; X is top of stack = n
+fd76: 16 00             			ASL 0,X				; Calculate 4n + 1
+fd78: f6 00             			INC 0,X				; n is now sector number
+fd7a: a9 05             			LDA #$05
+fd7c: 85 54             			STA $54
+fd7e: 60                			RTS
+fd7f:                   
+fd7f: a9 04             DSETUP:		LDA #$04
+fd81: 85 53             			STA $53				; Sectors remaining
+fd83: b5 02             			LDA $02,X			; Addr low
+fd85: 85 51             			STA $51
+fd87: b5 03             			LDA $03,X			; Addr high
+fd89: 85 52             			STA $52
+fd8b: b5 00             			LDA $00,X			; Sector number
+fd8d: 8d 02 01          			STA FD_SECTOR
+fd90: 4c a8 fd          			JMP DINDEX 			; FDA8
+fd93:                   
+fd93: 2c 06 01          RDSECT:		BIT DRV_STAT
+fd96: 70 fb             			BVS RDSECT			; Branch if n(INTREQ+DRQ) set
+fd98: 10 13             			BPL INDLOOP			; Branch if nINTRQ not set
+fd9a: ad 03 01          			LDA FD_DATA
+fd9d: 91 51             			STA ($51),Y
+fd9f: c8                			INY
+fda0: d0 f1             			BNE RDSECT			; 256 byte sector
+fda2: e6 52             			INC $52				; Add $FF to addr
+fda4: c6 53             			DEC $53				; Dec sector remaining count
+fda6: d0 eb             			BNE RDSECT
+fda8:                   
+fda8: a9 d4             DINDEX:		LDA #$D4			; 1101 0100 = Force Interrupt on index pulse
+fdaa: 20 b5 fd          			JSR D_CMD
+fdad: ad 00 01          .INDLOOP	LDA FD_STATUS
+fdb0: 4a                			LSR
+fdb1: b0 fa             			BCS INDLOOP			; FA
+fdb3: 2a                			ROL
+fdb4: 60                			RTS
+fdb5:                   
+fdb5: 8d 00 01          D_CMD:		STA FD_CMD
+fdb8: a0 08             			LDY #$08
+fdba: 88                .DELLOOP	DEY
+fdbb: d0 fd             			BNE DELLOOP
+fdbd: 60                			RTS
+fdbe:                   
+fdbe:                   	;; 		DWRITE
+fdbe:                   	
+fdbe: 20 74 fd          DWRITE:	    JSR CALC_SECT
+fdc1: 20 7f fd          FDC3:	    JSR DSETUP
+fdc4: a9 b0                 		LDA #$B0			; Write sector, multiple records, compare for side 0, no 15ms delay, disable side select compare
+fdc6: 20 b5 fd          			JSR $FDB5
+fdc9: 20 d5 fd          			JSR WRITE_SEC
+fdcc: 25 fd                 		AND $FD
+fdce:                   	
+fdce: f0 34                         BEQ 04
+fdd0: c6 54                         DEC $54
+fdd2:                               BNE ED
+fdd2: 4c 6f fd          			JMP LOC2
+fdd5:                   	
+fdd5: 2c 06 01          WRITE_SEC   BIT $0106
+fdd8:                               BVS FB
+fdd8:                               BPL 13
+fdd8: b1 33                         LDA (51),Y
+fdda: 8d 03 01                      STA $0103
+fddd: c8                            INY
+fdde:                   			BNE $F1
+fdde: e6 52                 		INC $52
+fde0: c6 53                 		DEC $53
+fde2:                       		BNE $EB
+fde2: 4c 90 fd          			JMP $FD90
+fde5:                   
+fde5:                   /*
+fde5:                   	DREAD FD59
+fde5:                   	DWRITE FDC0
+fde5:                   	DISK F874
+fde5:                   
+fde5:                   	DISK
+fde5:                   	SWAP
+fde5:                   	LIT
+fde5:                   	031C 						; B/SIDE
+fde5:                   	@
+fde5:                   	/MOD
+fde5:                   
+fde5:                   	;S
+fde5:                   	POP-NEXT?
+fde5:                   	
+fde5:                   	DISK ( addr n f --- )
+fde5:                   	Single point entry to kernel disk handlers.
+fde5:                   	Perform disk operation, read if f=1, write if f=0,
+fde5:                   	Disk block n and memory location addr.
+fde5:                   	
+fde5:                   F874  A5 4F     LDA $4F 		; Push IP
+fde5:                   F876  48        PHA
+fde5:                   F877  A5 4E     LDA $4E
+fde5:                   F879  48        PHA
+fde5:                   F87A  18        CLC
+fde5:                   F87B  A5 4C     LDA $4C 		; W
+fde5:                   F87D  69  2     ADC #$02
+fde5:                   F87F  85 4E     STA $4E			; IP
+fde5:                   F881  98        TYA
+fde5:                   F882  65 4D     ADC $4D	
+fde5:                   F884  85 4F     STA $4F
+fde5:                   F886  4C 28 F4  JMP $F428
+fde5:                   	
+fde5:                   
+fde5:                   	A0  2 B1 4C 48 C8 B1 4C 4C 21 F4
+fde5:                    F894  18 A5 4C 69  2 48 98 65 4D 4C 21 F4 A0  2 18 B1
+fde5:                    F8A4  4C 65 48 48 A9  0 65 49 4C 21 F4 89 F8  0  0 89
+fde5:                    F8B4  F8  1  0 89 F8  2  0 89 F8  3  0 89 F8  4  0 89
+fde5:                    F8C4  F8 20  0 A0 F8  0 A0 F8  2 A0 F8  4 A0 F8  6 A0
+fde5:                    F8D4  F8  8 A0 F8  A A0 F8  C A0 F8  E A0 F8 10 A0 F8
+fde5:                    F8E4  12 A0 F8 14 74 F8 D0 F8 3B F8 17 F7 74 F8 D3 F8
+fde5:                    F8F4  3B F8 17 F7 FA F8 F6  0 D0  2 F6  1 4C 28 F4  5
+fde5:                    F904  F9 18 B5  0 69  2 95  0 90  2 F6  1 4C 28 F4 15
+fde5:                    F914  F9 B5  0 D0  2 D6  1 D6  0 4C 28 F4 22 F9 38 B5
+fde5:                    F924   0 E9  2 95  0 B0  2 D6  1 4C 28 F4 74 F8 A5 F7
+fde5:                    F934  78 F7 17 F7 74 F8 30 F9 5B F7 17 F7 42 F9 38 B5
+fde5:                    F944   2 F5  0 B5  3 F5  1 98 2A 49  1 E8 E8 4C 4F F8
+fde5:                    F954  56 F9 B5  2 D5  0 B5  3 F5  1 94  3 50  2 49 80
+fde5:                    F964  10  1 C8 94  2 4C  8 F5 74 F8 D3 F7 54 F9 17 F7
+fde5:                   
+fde5:                   
+fde5:                   FD59 20 74 FD    DREAD JSR $FD74
+fde5:                   FD5C 20 7F FD                  JSR $FD7F
+fde5:                   FD5F A9 90                         LDA #$90
+fde5:                   FD61 20 B5 FD                  JSR $FDB5
+fde5:                   FD64 20 93 FD                   JSR $FD93
+fde5:                   FD67 29 BF                         AND #$BF
+fde5:                   FD69 F0 04                         BEQ loc1 ;04
+fde5:                   FD6B C6 54                         DEC $54
+fde5:                   FD6D D0 ED                        BNE ED
+fde5:                   FD6F E8                  .loc1     INX
+fde5:                   FD70 E8                                INX
+fde5:                   FD71 4C 4F F8                    JMP $F84F
+fde5:                   
+fde5:                   FD74 16 00                          ASL 0,X
+fde5:                   FD76 16 00                          ASL 0,X
+fde5:                   FD78 F6 00                          INC 0,X
+fde5:                   FD7A A9 05                         LDA #$05
+fde5:                   FD7C 85 54                          STA $54
+fde5:                   FD7E 60                                RTS
+fde5:                   
+fde5:                   FD7F A9 04                            LDA #$04
+fde5:                   FD81 85 53                             STA $53
+fde5:                   FD83 B5 02                            LDA $02,X
+fde5:                   FD85 85 51                             STA $51
+fde5:                   FD87 B5 03                            LDA $03,X
+fde5:                   FD89 85 52                          STA $52
+fde5:                   FD8B B5 00                         LDA $00,X
+fde5:                   FD8D 8D 02 01                   STA $0102
+fde5:                   FD90 4C A8 FD                   JMP $FDA8
+fde5:                   
+fde5:                   FD93 2C 06 01                    BIT $0106
+fde5:                   FD96 70 FB                         BVS FB
+fde5:                   FD98 10 13                          BPL 13
+fde5:                   FD9A AD 03 01                   LDA $0103
+fde5:                   FD9D 91 51                         STA ($51),Y
+fde5:                   FD9F C8                               INY
+fde5:                   FDA0 D0 F1                         BNE F1
+fde5:                   FDA2 E6 52                          INC $52
+fde5:                   FDA4 C6 53                          DEC $53
+fde5:                   FDA6 D0 EB                         BNE EB                   
+fde5:                   
+fde5:                   FDA8 A9 D4                        LDA #$D4
+fde5:                   FDAA 20 B5 FD                  JSR $FDB5
+fde5:                   FDAD AD 00 01                  LDA $0100
+fde5:                   FDB0 4A                              LSR A
+fde5:                   FDB1 B0 FA                        BCS FA 
+fde5:                   FDB3 2A                              ROL A
+fde5:                   FDB4 60                               RTS
+fde5:                   
+fde5:                   FDB5 8D 00 01                  STA $0102
+fde5:                   FDB8 A0 08                       LDY #$08
+fde5:                   FDBA 88                            DEY
+fde5:                   FDBB D0 FD                     BNE FD
+fde5:                   FDBD 60                            RTS
+fde5:                   
+fde5:                   	DWRITE
+fde5:                   	
+fde5:                   FDC0    20 74 FD   JSR $FD74
+fde5:                   FDC3 	20 7F FD   JSR $FD7F
+fde5:                   FDC6	A9 B0      LDA #$B0
+fde5:                   FDC8	20 B5 FD   JSR $FDB5
+fde5:                   FDCB	20 D9 FD   JSR $FDD9
+fde5:                   FDCE	29 FD      AND $FD
+fde5:                   	
+fde5:                   FDD0    F0  4      BEQ 04
+fde5:                   FDD2	C6 54      DEC $54
+fde5:                   FDD4	D0 ED      BNE ED
+fde5:                   FDD6	4C 6F FD   JMP $FD6F
+fde5:                   	
+fde5:                   FDD9	2C  6  1   BIT $0106
+fde5:                   FDDC    70 FB      BVS FB
+fde5:                   FDDE    10 CD      BPL 13
+fde5:                   FDE0    B1 51      LDA (51),Y
+fde5:                   FDE2    8D  3  1   STA $0103
+fde5:                   FDE5    C8         INY
+fde5:                   FDE6    D0 F1      BNE $F1
+fde5:                   FDE8	E6 52      INC $52
+fde5:                   FDEA	C6 53      DEC $53
+fde5:                   FDEC    D0 EB      BNE $EB
+fde5:                   FDEE    4C 90 FD   JMP $FD90
+fde5:                   
+fde5:                   FDF1    F3 FD AD  0  1 A9 FF A0  3 99 18  3 88 10 FA
+fde5:                    FE00  4C 28 F4 EA EA A8 A9  0 2A 19  D FE 60 22 24 28
+fde5:                    FE10  30 13 FE AC 16  3 B9 18  3 C9 50 90  7 A9  3 20
+fde5:                    FE20  AA FD A9  0 8D  1  1 B5  0 8D  3  1 AC 16  3 99
+fde5:                    FE30  18  3 A9 13 20 AA FD 4C  8 F5 74 F8 AF F8 6E FC
+fde5:                    FE40  A5 F9 97 F4  C  0 AF F8 F8 F4 9D F9 AF F4 FC FF
+fde5:                    FE50  17 F7 74 F8 F0 F8 E5 F8 58 F8 17 F7 74 F8 D1 F7
+fde5:                    FE60  E5 F8 3B F8 F0 F8 C5 F7 30 F9 17 F7 74 F8 74 F9
+fde5:                    FE70  6B F7 97 F4  7  0 58 F4 2D F4 FA 17 F7 74 F8 D9
+fde5:                    FE80  F8 3B F8 F2 FC 74 F9 58 F4  9 C5 F7 54 F9 97 F4
+fde5:                    FE90   7  0 58 F4  7 78 F7 58 F4 30 78 F7 F4 FA 17 F7
+fde5:                    FEA0  74 F8 7D FE EF F7 CE F6 5B F7 97 F4 F6 FF 17 F7
+fde5:                    FEB0  74 F8 34 F7 D3 F7 C5 F7 56 FC 52 FE A0 FE 6C FE
+fde5:                   
+fde5:                   	*/
+Symbols:
+CALC_SECT         fd74 DSETUP            fd7f FD_DATA            103 RDSECT            fd93 
+DINDEX            fda8 DWRITE            fdbe FD_SECTOR          102 WRITE_SEC         fdd5 
+DREAD             fd59 D_CMD             fdb5 FD_STATUS          100 
+DRV_CTL            106 FDC3              fdc1 FD_TRACK           101 
+DRV_STAT           106 FD_CMD             100 NEXT              f84f 
+

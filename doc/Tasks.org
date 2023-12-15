@@ -1,0 +1,204 @@
+* Goals
+65C02 assembler and code generation tools suitable for assembling monitor for Rockwell system.
+CodeGen reused in Oberon compiler.
+
+* as
+
+Make * at the start of a line a comment as well.
+Case insensitive
+
+* CodeGen
+
+Binary file writer
+Scripts for s-rec tools
+
+* Map file design
+** OS Version
+Assembler has Segment directive, segments are:
+          Direct
+          Code
+          Text
+          Data
+
+Addresses cannot be specified, just segments.
+
+** OBJ file
+The assembler generates an OBJ file which needs to be linked to be programmed into a ROM or to create an EXE. The OBJ file contains a relocation table.
+
+** Linker
+The linker can be used to make either LIB, EXE or ROM file. 
+
+** LIB file
+A LIB file is just combined OBJ files, the linker just merges them into one file and updates the relocation table.
+
+** EXE file
+An EXE file is designed for loading into RAM, it resolves any symbols it can, and leaves the rest in a relocation table suitable for the operating system loader.
+
+(external references)
+
+** ROM file
+A ROM file must resolve all symbols, if not there is an error. It is best to create a System.OBJ file that defines all of the hardware items. The ROM file will also set the following vector locations if they are set:
+
+|----------+-----------------+--------+---------|
+| Address  | 65C02/Emulation | 65C816 | All     |
+|----------+-----------------+--------+---------|
+| 00FFFE,F | IRQB or BRK     | IRQB   | VectorE |
+| 00FFFC,D | RESETB          |        | VectorC |
+| 00FFFA,B | NMIB            | NMIB   | VectorA |
+| 00FFF8,9 | ABORTB          | ABORTB | Vector8 |
+| 00FFF6,7 |                 | BRK    | Vector6 |
+| 00FFF4,5 | COP             | COP    | Vector4 |
+| 00FFF2,3 |                 |        | Vector2 |
+| 00FFF0,1 |                 |        | Vector0 |
+|----------+-----------------+--------+---------|
+
+The 65C816 starts in emulation mode, that is why the reset vector is only in 65C02 mode. In 65C02 or emulation mode there is no seperate BRK vector, it is combined with IRQB.
+
+If there are more than one symbols defined with a vector name then the Vector? symbol takes precedence. 
+
+
+** .65 file
+A 65 file is a file suitable for runtime loading into a running system. 
+
+struct file {
+       header: Header;
+       relocate: Relocate;
+       text: Text;
+}
+
+struct Header {
+       cpu: 0 6502 1 65C02 2 65816
+       DirectPage: bytes required for Direct Page usage
+       Data: bytes required for Data (RAM) usage
+}
+
+struct relocate {
+       offset: 
+
+
+Binary format.
+
+Map File:
+[Module]
+[Offset] {* Based on index *}
+ 
+For remapping:
+Scan through the code looking for JMP instruction. If found add the base address to the existing address.
+
+[Offset] {* Just add the base address to the existing address *}
+
+For mapping to Module:
+[Offset][Module][Index]
+
+* Code
+
+Monitor
+s-rec reader
+Code relocator/loader
+
+* Macros
+
+
+; status register
+PNFLAG := %10000000 ; Negative flag
+PVFLAG := %01000000 ; Overflow flag
+PMFLAG := %00100000 ; Acc/Mem 8 bit flag
+PXFLAG := %00010000 ; Index 8 bit flag
+PDFLAG := %00001000 ; Decimal flag
+PIFLAG := %00000100 ; IRQ disable flag
+PZFLAG := %00000010 ; Zero flag
+PCFLAG := %00000001 ; Carry flag
+
+PFALL := PNFLAG + PVFLAG + PZFLAG + PCFLAG
+                                                                                                  
+; set A/M 16 bit
+macro ACC16(clc)
+begin
+    REP #PMFLAG or (PCFLAG & clc)
+    LongA on
+end
+
+; set A/M 8 bit
+macro ACC08
+begin
+    SEP #PMFLAG
+    LongA off
+end
+
+; set X/Y 16 bit
+macro Index16
+begin
+    REP #PXFLAG
+    LongI on
+end
+
+; set X/Y 8 bit
+macro INDEX08
+begin
+    SEP #PXFLAG
+    LongI off
+end
+
+; set A/M & X/Y 16 bit
+macro CPU16(clc)
+begin
+    REP #(PMFLAG or PXFLAG or (PCFLAG & clc))
+    LongA on
+    LongI on
+end
+
+; set A/M & X/Y 8 bit
+macro CPU08
+begin
+    SEP #(PMFLAG or PXFLAG)
+    LongA off
+    LongI off
+end
+
+* High Level Structure
+
+* 65-ln
+main
+link (resolve addresses, relocate)
+elf (read, write)
+
+* 65-bintools
+main
+elf (read)
+binwriter (rom, srec)
+
+* 65-readelf
+main
+elf (read)
+disassembler
+
+* 65-as
+main
+scanner
+parser
+codegen
+
+* 65-cc
+main
+scanner
+parser
+iloc
+opt
+codegen
+elf
+
+* 65-libc
+
+* 65-DOS
+gpt
+fat32
+shell
+ed
+term
+time
+env
+
+* 65-os
+process
+thread
+pipe

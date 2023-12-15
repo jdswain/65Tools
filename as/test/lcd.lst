@@ -1,0 +1,90 @@
+0200:                   	cpu = "6502"
+0200:                   	
+0200:                   	lcd_base = $0800
+0200:                   	lcd_inst = lcd_base + 0
+0200:                   	lcd_data = lcd_base + 1
+0200:                   
+0200:                   		org = $0200
+0200:                   
+0200: 20 6a 02          lcd_reset:	jsr wait_16	; Wait at least 15ms after power up
+0203:                   
+0203: a5 3f             		lda $#3f	; Write function set
+0205: 8d 00 08          		sta lcd_inst
+0208: 20 70 02          		jsr wait_4
+020b:                   
+020b: a9 3f             		lda #$3f
+020d: 8d 00 08          		sta lcd_inst
+0210: 20 67 02          		jsr wait_32
+0213:                   
+0213: a9 3f             		lda #$3f
+0215: 8d 00 08          		sta lcd_inst
+0218: 20 67 02          		jsr wait_32
+021b:                   
+021b: a9 3b             		lda #$3b		; $3b for 2 line, $33 for 1 line
+021d: 8d 00 08          		sta lcd_inst
+0220: 20 67 02          		jsr wait_32
+0223:                   
+0223: a9 0c             		lda #$0c		; Display on, no cursor, no cursor blink
+0225: 8d 00 08          		sta lcd_inst
+0228: 20 67 02          		jsr wait_32
+022b:                   
+022b: a9 01             		lda #$01		; Clear display command
+022d: 8d 00 08          		sta lcd_inst
+0230: 20 73 02          		jsr wait_2
+0233:                   
+0233: a9 06             		lda #$06		; Write entry mode set, increment mode
+0235: 8d 00 08          		sta lcd_inst
+0238:                   
+0238: 60                		rts
+0239:                   
+0239: 98                lcd_setaddr:	tya
+023a: 29 50             		and #20*4 		; Limit to max character
+023c: c9 08             		cmp #$08
+023e: 30 04             		bmi wl
+0240: 29 07             		and #$07
+0242: 09 40             		ora #$40
+0244: 09 80             wl:		ora #$80
+0246: 48                		pha
+0247: 20 57 02          		jsr lcd_busy
+024a: 68                		pla
+024b: 8d 00 08          		sta lcd_inst
+024e: 60                		rts
+024f:                   
+024f:                   	
+024f: 20 57 02          lcd_clr:	jsr lcd_busy
+0252: a9 01             		lda #$01
+0254: 8d 00 08          		sta lcd_inst
+0257:                   
+0257: 2c 00 08          lcd_busy:	bit lcd_inst
+025a: 30 fb             		bmi lcd_busy
+025c: 60                		rts
+025d:                   
+025d: 20 39 02          lcd_wr:		jsr lcd_setaddr		; Write byte to LCD. x=char, y=addr
+0260: 20 57 02          lcd_wrauto:	jsr lcd_busy		; Writes next character, does not handle line end
+0263: 8e 01 08          		stx lcd_data
+0266: 60                		rts
+0267:                   
+0267:                   ;; At 1 MHz a 1ms delay is 1000 cycles
+0267:                   ;; A cascading set of dalay loops so that we have plenty of options
+0267: 20 6a 02          wait_32		jsr wait_16
+026a: 20 6d 02          wait_16:	jsr wait_8
+026d: 20 70 02          wait_8:		jsr wait_4
+0270: 20 73 02          wait_4:		jsr wait_2
+0273: a2 c8             wait_2:		ldx #200	
+0275: ca                loop_2:		dex		; 2
+0276: d0 fd             		bne loop_2	; 3
+0278: 60                		rts
+0279:                   	
+0279: a0 00             lcd_hello:	ldy #$00
+027b: a2 48             		ldx #'H'
+027d: 20 5d 02          		jsr lcd_wr
+0280: a2 65             		ldx #'e'
+0282: 20 60 02          		jsr lcd_wrauto
+0285: a2 6c             		ldx #'l'
+0287: 20 60 02          		jsr lcd_wrauto
+028a: 20 60 02          		jsr lcd_wrauto
+028d: a2 6f             		ldx #'o'
+028f: 20 60 02          		jsr lcd_wrauto
+0292: 60                		rts
+0293:                   	
+Symbols:

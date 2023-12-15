@@ -1,0 +1,3 @@
+Wikipedia article is good introduction.
+
+Could just implement simple #defines, #if and #include to get most of functionality.
