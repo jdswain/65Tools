@@ -65,7 +65,7 @@ void help(void) {
 int main(int argc, char **argv) {
   value_init();
   as_init();
-  oberon_init();
+  // oberon_init();
   scanner_init(ASMMode); // We need this for the args
   int optind = as_parse_args(argc - 1, argv + 1);
 
@@ -558,30 +558,18 @@ void print_recursive(FILE *file, MapNode *root, int *offset, int *col, int step,
     print_recursive(file, root->left, offset, col, step, columns);
     if (!root->value->is_local) {
       if ((*offset == 0) && (*col < columns)) {
-	  fprintf(file, "%-12.12s  ", root->key);
-	object_print(file, root->value);
-	fprintf(file, " ");
-	*offset = step;
-	*col = *col + 1;
+		fprintf(file, "%-12.12s  ", root->key);
+		object_print(file, root->value);
+		fprintf(file, " ");
+		*offset = step;
+		*col = *col + 1;
       } else {
-	*offset = *offset - 1;
+		*offset = *offset - 1;
       }
     }
     print_recursive(file, root->right, offset, col, step, columns);
   }
 }
-
-/*
-Debug output
-
-count = 15;
-columns = 4;
-rows = (count + columns) / columns
-1 5 9  13
-2 6 10 14
-3 7 11 15
-4 8 12
-*/
 
 void as_print_symbols(FILE *file)
 {
@@ -591,18 +579,18 @@ void as_print_symbols(FILE *file)
   int columns = 5;
   int column;
 
-  fprintf(file, "Symbols:");
+  fprintf(file, "\nSymbols:");
   Object *s = scope;
-  while (s->parent != 0) { /* Don't print top level */ // ToDo: Make fake top level
-    count = map_count(s->desc);
-    rows = ((count - 1) / columns) + 1;
-    // fprintf(file, "Scope: %d in %d rows.\n", count, rows);
-    for (int r = 0; r < rows; r++) {
-      row = r; column = 0; fprintf(file, "\n"); print_recursive(file, s->desc, &row, &column, rows - 1, columns);
-    }
-    fprintf(file, "\n");
-    s = s->parent;
-  };
+
+  count = map_count(s->desc);
+  rows = ((count - 1) / columns) + 1;
+  // fprintf(file, "Scope: %d in %d rows.\n", count, rows);
+  for (int r = 0; r < rows; r++) {
+	row = r; column = 0; fprintf(file, "\n"); print_recursive(file, s->desc, &row, &column, rows - 1, columns);
+  }
+  fprintf(file, "\n");
+  s = s->parent;
+  
   fprintf(file, "\n");  
 }
 

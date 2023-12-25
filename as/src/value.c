@@ -172,21 +172,21 @@ Object *object_new(Mode mode, Type *type)
 void object_print(FILE *file, const Object *value)
 {
   if (value->type == typeByte) {
-	fprintf(file, "%2x", (char)value->int_val);
+	fprintf(file, "  %02x", (char)value->int_val);
   } else if (value->type == typeBool) {
-	fprintf(file, "%2x", (char)value->int_val); 
+	fprintf(file, "  %02x", (char)value->int_val); 
   } else if (value->type == typeChar) {
-	fprintf(file, "%2x", (char)value->int_val);
+	fprintf(file, "  %02x", (char)value->int_val);
   } else if (value->type == typeInt) {
-	fprintf(file, "%4x", (int)value->int_val);
+	fprintf(file, "%04x", (int)value->int_val);
   } else if (value->type == typeReal) {
 	fprintf(file, "%8f", value->real_val);
   } else if (value->type == typeNilType) {
-	fprintf(file, "nil");
+	fprintf(file, " nil");
   } else if (value->type == typeNoType) {
 	fprintf(file, "void");
   } else if (value->type == typeSet) {
-	fprintf(file, "set %2x", (int)value->int_val);
+	fprintf(file, "s %02x", (int)value->int_val);
   } else if (value->type == typeString) {
 	fprintf(file, "%.8s", value->string_val);
   }
