@@ -186,7 +186,7 @@ void gen_RC02(char *filename, int line_num, Instr *instr, AddrMode mode, int val
     break;
   case sCPY:
     switch( mode ) {
-    case Immediate:                      om(0xc0, value1, longi); return;
+    case Immediate:                      ob(0xc0, value1); return;
     case Absolute:                       ow(0xcc, value1); return;
     case DirectPage:                     ob(0xc4, value1); return;
     default:                             break;
