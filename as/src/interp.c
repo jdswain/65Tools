@@ -366,24 +366,26 @@ void emit_text(Object *value, enum OpType type)
       j = 0;
       while ((c = v->string_val[j++]) != 0) {
 		if (c == '\\') {
+		  //--i;
 		  switch (v->string_val[j++]) {
 		  case 0: break; // \ at end of string
-		  case 'n': codegen_byte(0x0a); break;
-		  case 't': codegen_byte(0x09); break;
-		  case 'b': codegen_byte(0x08); break;
-		  case 'r': codegen_byte(0x0d); break;
-		  case 'a': codegen_byte(0x07); break;
-		  case '\'': codegen_byte('\''); break;
-		  case '\"': codegen_byte('\"'); break;
-		  case '\\': codegen_byte('\\'); break;
-		  case 'f': codegen_byte(0x0c); break;
-		  case 'v': codegen_byte(0x0b); break;
-		  case '0': codegen_byte(0x00); break;
+		  case 'n': c = 0x0a; break;
+		  case 't': c = 0x09; break;
+		  case 'b': c = 0x08; break;
+		  case 'r': c = 0x0d; break;
+		  case 'a': c = 0x07; break;
+		  case '\'': c = '\''; break;
+		  case '\"': c = '\"'; break;
+		  case '\\': c = '\\'; break;
+		  case 'f': c = 0x0c; break;
+		  case 'v': c = 0x0b; break;
+		  case '0': c = 0x00; break;
 		  case 'x':
 			// ToDo: hex
 			break;
 		  }
-		} else if ((type == OpTextBit7) && (i == 1) && (v->string_val[j] == 0)) {
+		}
+		if ((type == OpTextBit7) && (i == 1) && (v->string_val[j] == 0)) {
 		  codegen_byte(c | 0x80);
 		} else {
 		  codegen_byte(c);

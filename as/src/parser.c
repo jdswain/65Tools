@@ -320,32 +320,13 @@ void parse_if(Symbol *sym)
   parse_expression(sym, false);
   if (*sym == sBLOCKSTART) {
     interp_add(OpIfBegin, 0);
-	Object *object = object_new(Const, typeNoType);
-	object->mode = Var;
-	char buffer[32];
-	sprintf(buffer, "if_block_%d", bf_line());
-	Object *name = object_new(Const, typeString);
-	object->mode = Var;
-	name->string_val = as_strdup(buffer);
-	interp_add(OpScopeBegin, name);
-	scope_add_object((char *)&buffer, object);
-	scope_push_object(object);
     scanner_get(sym);
     parse_block(sym);
-    interp_add(OpScopeEnd, 0);
-	scope_pop();
     scanner_get(sym);
     if (*sym == sELSE) {
       scanner_get(sym);
       interp_add(OpElseBegin, 0);
-	  Object *object = object_new(Const, typeNoType);
-	  object->mode = Var;
-	  scope_add_object("else_block_unique", object);
-	  scope_push_object(object);
-	  interp_add(OpScopeBegin, object);
       parse_block(sym);
-	  scope_pop();
-      interp_add(OpScopeEnd, 0);
       scanner_get(sym);
     }
   } else {
@@ -1779,9 +1760,6 @@ void parse_oberon_statementsequence(Symbol *sym) {
 		expect(sym, sTHEN);
 		parse_oberon_statementsequence(sym);
 	  }
-	  Object *elseLabel;
-	  oberon_jump(elseLabel);
-	  oberon_here(flabel);
 	  if (*sym == sELSE) {
 		scanner_get(sym);
 		parse_oberon_statementsequence(sym);
