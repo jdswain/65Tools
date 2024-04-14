@@ -3,7 +3,6 @@
 #include "memory.h"
 //#include "func.h"
 #include "buffered_file.h"
-#include "oberongen.h"
 
 #include <string.h>
 
@@ -32,7 +31,7 @@ Type *typeMacro;
 
 Type *type_make(int ref, Form form, int size)
 {
-  Type *type = as_malloc(sizeof(Type));
+  Type *type = as_mallocz(sizeof(Type));
   type->form = form;
   type->size = size;
   type->ref = ref;
@@ -56,7 +55,7 @@ void value_init(void)
   typeMap = type_make(MapForm, MapForm, 0); 
   typeMacro = type_make(MacroForm, MacroForm, 0);
 
-  objectZero.type = typeInt;
+  objectZero.type = type_retain(typeInt);
   objectZero.int_val = 0;
   objectFalse.type = typeBool;
   objectFalse.int_val = 0;
@@ -76,16 +75,20 @@ Type *type_new(void)
 
 Type *type_retain(Type *self)
 {
-  self->ref_count++;
+  if (self) {
+	self->ref_count++;
+  }
   return self;
 }
 
 void type_release(Type *self)
 {
-  self->ref_count--;
-  if (self->ref_count == 0) {
-	/* ToDo: free sub objects */
-	as_free(self);
+  if (self) {
+	self->ref_count--;
+	if (self->ref_count == 0) {
+	  /* ToDo: free sub objects */
+	  as_free(self);
+	}
   }
 }
 
@@ -230,8 +233,6 @@ Object *object_copy(Object *value)
 
   if (v->type == typeByte) {
 	v->int_val = value->int_val; 
-  } else if (v->type == typeInt) {
-	v->int_val = value->int_val;
   } else if (v->type == typeChar) {
 	v->int_val = value->int_val;
   } else if (v->type == typeInt) {
@@ -252,8 +253,6 @@ void object_set(Object *to, Object *from)
 
   if (to->type == typeByte) {
 	to->int_val = from->int_val; 
-  } else if (to->type == typeInt) {
-	to->int_val = from->int_val;
   } else if (to->type == typeChar) {
 	to->int_val = from->int_val;
   } else if (to->type == typeInt) {
@@ -366,7 +365,11 @@ Object *object_neg(const Object *l)
 Object *object_equal(const Object *l, const Object *r)
 {
   Object *result = object_new(Const, typeInt);
-  result->int_val = l->int_val == r->int_val;
+  if (l->type == typeInt) {
+	result->int_val = l->int_val == r->int_val;
+  } else if (l->type == typeString) {
+	result->int_val = strncmp(l->string_val, r->string_val, 20) == 0;
+  }
   return result;
 }
 

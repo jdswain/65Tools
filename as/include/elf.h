@@ -5,6 +5,10 @@
 ELF is the binary file format for executable files and intermediate code files.
 
 Our format is very similar to ELF but has been simplifed slightly.
+
+Program headers provide the load information for a file (segments).
+
+Section headers provide information for linking and relocation.
 */
 
 #include <inttypes.h>
@@ -111,7 +115,8 @@ typedef struct {
 #define EM_02            3              /* NMOS 6502 */
 #define EM_RC02          4              /* Rockwell 65C02 */
 #define EM_RC19          5              /* Rockwell C19 */
-#define EM_NUM           6
+#define EM_RC01          6              /* Rockwell R65C01Q */
+#define EM_NUM           7
 
 /* Legal values for e_version (version).  */
 

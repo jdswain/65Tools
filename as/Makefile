@@ -17,7 +17,6 @@ buffered_file \
 value \
 elf_file \
 cpu \
-oberongen \
 
 objects = \
 $(src_objects) \

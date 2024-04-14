@@ -441,6 +441,7 @@ void gen_C02(char *filename, int line_num, Instr *instr, AddrMode mode, int valu
     case DirectPage:                     ob(0x85, value1); return;
     case DirectPageIndirect:             ob(0x92, value1); return;
     case AbsoluteIndexedX:               ow(0x9d, value1); return;
+	case DirectPageIndexedY:
     case AbsoluteIndexedY:               ow(0x99, value1); return;
     case DirectPageIndexedX:             ob(0x95, value1); return;
     case DirectPageIndexedIndirectX:     ob(0x81, value1); return;
@@ -529,6 +530,6 @@ void gen_C02(char *filename, int line_num, Instr *instr, AddrMode mode, int valu
   if (pass() == 0) as_gen_error(filename, line_num, "%s %s not supported on %s",
 	   token_to_string(instr->opcode),
 	   mode_to_string(mode),
-	   cpu_to_string(cpu));
+	   cpu_string());
 }
 

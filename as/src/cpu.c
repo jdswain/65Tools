@@ -37,15 +37,3 @@ char *mode_to_string(enum AddrMode mode)
  return "Invalid Mode";
 }
 
-char *cpu_to_string(ELF_Half cpu)
-{
-  switch (cpu) {
-  case EM_NONE: return "None";
-  case EM_816: return "65C816";
-  case EM_C02: return "65C02";
-  case EM_02: return "6502";
-  case EM_RC02: return "Rockwell 65C02";
-  case EM_RC19: return "Rockwell C19";
-  }
-  return "Unknown";
-}

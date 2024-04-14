@@ -55,6 +55,7 @@ enum OpType {
 	     OpEmit,
 	     OpIfBegin,
 	     OpElseBegin,
+	     OpElseIfBegin,
 	     OpJump,
 	     OpScopeBegin,
 		 OpScopeEnd,

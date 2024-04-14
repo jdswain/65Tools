@@ -63,7 +63,7 @@ void as_free(void *ptr)
   mem_cur_size -= malloc_usable_size(ptr);
   printf("free %lx\n", (long)ptr);
 #endif
-  free(ptr);
+  if (ptr) free(ptr);
 }
 
 void as_memstats(void)

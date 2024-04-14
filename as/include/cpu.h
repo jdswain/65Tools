@@ -56,6 +56,5 @@ enum Modifier {
 typedef enum Modifier Modifier;
 
 char *mode_to_string(enum AddrMode mode);
-char *cpu_to_string(ELF_Half cpu);
 
 #endif

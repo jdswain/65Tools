@@ -467,6 +467,6 @@ void gen_02(char *filename, int line_num, Instr *instr, AddrMode mode, int value
   if (pass() == 0) as_gen_error(filename, line_num, "%s %s not supported on %s",
 	   token_to_string(instr->opcode),
 	   mode_to_string(mode),
-	   cpu_to_string(cpu));
+	   cpu_string());
 }
 

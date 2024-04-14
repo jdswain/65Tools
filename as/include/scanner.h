@@ -39,7 +39,6 @@ void scanner_start(void);
 bool is_instr(Symbol val);
 bool is_directive(Symbol val);
 bool is_asm_keyword(Symbol val);
-bool is_oberon_keyword(Symbol val);
 
 char *token_to_string(Symbol val);
 

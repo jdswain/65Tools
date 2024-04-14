@@ -56,7 +56,6 @@ extern uint32_t addr; // Current output address
 extern uint32_t pc; // Current pc
 extern bool longa;
 extern bool longi;
-extern ELF_Half cpu;
 int pass(void); // Pass number
 extern uint16_t dbreg;
 extern uint16_t dpage;
@@ -83,6 +82,8 @@ void as_print_symbols(FILE *file);
 
 MacroDef *as_get_macro(char *ident);
 void as_define_macro(char *ident, MacroDef *value);
+
+char *cpu_string(void);
 
 
 #endif

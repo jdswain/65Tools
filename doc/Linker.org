@@ -65,6 +65,12 @@ A .cfg file can be used to configure the memory layout of the target system.
 *** bin
 Binary data.
 
+*** s19, s28, s37
+Motorola s-records. The different versions have different addressing capabilities.
+
+*** intel
+Intel hex.
+
 *** TIM
 This is the format that the TIM monitor uses. It is a simple ASCII format suitable for direct download by the monitor.
 
@@ -93,4 +99,40 @@ A terminating record of zero length, either:
     ;00  or  ;
 
 
+*
+ToDo
 
+1. Output symbols in ELF file.
+2. Read symbols in em16.
+3. Symbolicate the trace.
+4. Add public marker, either 'export' or * after name.
+5. Add extern to import symbols.
+6. Implement linker
+   - Implement relocatable segments in as
+   - strip symbols
+   - merge sections
+   - relocate segments
+
+Drivers can be distributed as relocatable ELF files and linked into sos.kernel to add or remove.
+
+Kernel
+- Disk Driver
+- SCSI Driver
+- Serial Driver
+- Console Driver
+- Graphics Driver        
+- SOS filesystem
+- Boot loader
+- System call interface  
+- Memory manager
+- Clock driver
+- Interrupt manager
+
+Applications
+- System Utilities (or maybe shell, or use Business Basic as shell?)
+- Forth Development
+- Business Basic
+- Editor
+- Assembler
+- Linker  
+- Oberon Compiler        

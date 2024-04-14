@@ -136,7 +136,9 @@ typedef struct Object {
   bool exported;
   int exno;
   bool readonly;
-  bool is_local;  /* For asm only */
+  bool is_local; // This is local to a function
+  bool is_global;
+  bool is_import;
   union {
     bool bool_val;
     long int_val;

@@ -50,7 +50,6 @@ void next(void)
     // so that it matches up with the codegen.
     line[(lineno?1:0)][c] = '\0';
     if ((scannerMode == ASMMode) && ((file == 0) || (bf_line() > 2))) print_line();
-    if ((scannerMode == OberonMode) && ((file == 0) || (bf_line() > 2))) print_line();
     lineno = !lineno;
     c = 0;
   }
@@ -84,8 +83,6 @@ void ident(Symbol *sym) {
     if( strcasecmp(key[j],id) == 0 ) {
       if (scannerMode == ASMMode) {
 		if (is_instr(j) || is_asm_keyword(j) || is_directive(j)) *sym = symno[j];
-      } else if (scannerMode == OberonMode) {
-		if (is_oberon_keyword(j)) *sym = symno[j];
       }
     }
   }
@@ -188,7 +185,7 @@ void scanner_get(Symbol* sym) {
 
     if( ch < 'A' ) {
       if( ch < '0' ) {
-        if( ch == '\n' ) { next(); if (scannerMode == OberonMode) *sym = sNULL; else *sym = sSTATESEP;
+        if( ch == '\n' ) { next(); *sym = sSTATESEP;
        	} else if( ch == '!' ) { next();
           if( ch == '=' ) { next(); *sym = sNEQ;
           } else { next(); *sym = sNOT;
@@ -198,14 +195,10 @@ void scanner_get(Symbol* sym) {
         } else if( ch == '%' ) { next();
 		  if( ch == '=' ) { next(); *sym = sMOD_ASN;
 		  } else {
-			if (scannerMode == OberonMode) {
-			  *sym = sPERCENT;
+			if (ch == '0' || ch == '1') {
+			  binary(); *sym = sINTEGER;
 			} else {
-			  if (ch == '0' || ch == '1') {
-				binary(); *sym = sINTEGER;
-			  } else {
-				*sym = sMOD;
-			  }
+			  *sym = sMOD;
 			}
 		  }
         } else if( ch == '&' ) { next();
@@ -327,7 +320,6 @@ void scanner_start()
 bool is_instr(Symbol val) { return (val < K) && (flags[val] & F_INSTR); }
 bool is_directive(Symbol val) { return (val < K) && (flags[val] & F_DIRECTIVE); }
 bool is_asm_keyword(Symbol val) { return (val < K) && (flags[val] & F_AKEYWORD); } 
-bool is_oberon_keyword(Symbol val) { return (val < K) && (flags[val] & F_OKEYWORD); } 
 
 char *token_to_string(Symbol val)
 {

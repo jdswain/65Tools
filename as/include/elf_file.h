@@ -85,7 +85,10 @@ void elf_write_intel(elf_context_t *context);
 void elf_write_tim(elf_context_t *context);
 
 /* Section */
-elf_section_t* elf_section_create(elf_context_t *context, ELF_Word name);
+elf_section_t *elf_section_create(elf_context_t *context,
+								  const char *nm,
+								  ELF_Word flags,
+								  ELF_Word type);
 elf_section_t* elf_section_find(elf_context_t *context, ELF_Word name);
 
 static inline bool section_is_text(elf_section_t *section) {
@@ -116,9 +119,15 @@ const char *elf_string_get(elf_section_t *section, ELF_Word offset);
 ELF_Word elf_string_locate(elf_section_t *section, const char *str);
 
 /* Symbol */
+void elf_symbol_create(elf_context_t *context,
+					   const char *name,
+					   ELF_Addr value,
+					   ELF_Word size,
+					   unsigned char info);
+
 ELF_Word elf_symbol_add(elf_section_t *section, ELF_Sym *symbol);
-const ELF_Sym *elf_symbol_get(elf_section_t *section, ELF_Word offset);
-ELF_Word elf_symbol_locate(elf_section_t *section, ELF_Word st_name);
+const ELF_Sym *elf_symbol_get(elf_context_t *context, ELF_Word offset);
+ELF_Word elf_symbol_locate(elf_context_t *context, ELF_Word st_name);
 
 /* Relocation */
 #define REL_DP   0x01

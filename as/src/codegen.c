@@ -50,7 +50,8 @@ void or(char *filename, int line_num, uint8_t op, int v) {
   o(op);
   int r = v - (addr + 1);
   if ((pass() == 0) && ((r > 127) || (r < -128)))
-    as_gen_error(filename, line_num, "Relative branch out of range");
+	as_gen_error(filename, line_num, "Relative branch out of range, from $%04x to $%04x", addr, v);
+  //  printf("r: %04x v: %04x\n", addr, v);
   o(r & 0xff);
 }
 
@@ -164,6 +165,7 @@ void codegen_gen(char *filename, int line_num, Instr *instr, int value1, int val
   else if (mode == AbsoluteIndexedX) {
     if (instr->modifier == MDirect) mode = DirectPageIndexedX;
     else if (is_dp(value1) && ((instr->modifier != MAbsolute) && (instr->modifier != MWord))) mode = DirectPageIndexedX;
+	else if ((instr->modifier == MLong) || (value1 > 0xffff)) mode = AbsoluteLongIndexedX;
   }
   else if (mode == AbsoluteIndexedY) {
     if (instr->modifier == MDirect) mode = DirectPageIndexedY;
@@ -181,11 +183,12 @@ void codegen_gen(char *filename, int line_num, Instr *instr, int value1, int val
     else if (is_dp(value1) && ((instr->modifier != MAbsolute) && (instr->modifier != MWord))) mode = AbsoluteIndirect;
   }
 
-  switch (cpu) {
+  switch (elf_context->ehdr->e_machine) {
   case EM_816:   gen_816(filename, line_num, instr, mode, value1, value2); break;
   case EM_C02:   gen_C02(filename, line_num, instr, mode, value1, value2); break;
   case EM_02:    gen_02(filename, line_num, instr, mode, value1, value2); break;
   case EM_RC02:  gen_RC02(filename, line_num, instr, mode, value1, value2, value3); break;
+  case EM_RC01:  gen_RC02(filename, line_num, instr, mode, value1, value2, value3); break;
   case EM_RC19:  gen_RC19(filename, line_num, instr, mode, value1, value2, value3); break;
   }
 }

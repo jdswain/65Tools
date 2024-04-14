@@ -34,9 +34,9 @@ typedef uint32_t ELF_Symndx;
 
 typedef struct {
   unsigned char e_ident[EI_NIDENT];   /* Magic number and other info */
-  ELF_Half    e_type;                 /* Object file type */
-  ELF_Half    e_machine;              /* Architecture */
-  ELF_Word    e_version;              /* Object file version */
+  ELF_Half      e_type;                 /* Object file type */
+  ELF_Half      e_machine;              /* Architecture */
+  ELF_Word      e_version;              /* Object file version */
   ELF_Addr    e_entry;                /* Entry point virtual address */
   ELF_Off     e_phoff;                /* Program header table file offset */
   ELF_Off     e_shoff;                /* Section header table file offset */
@@ -54,19 +54,19 @@ typedef struct {
    may have.  */
 
 #define EI_MAG0         0               /* File identification byte 0 index */
-#define ELFMAG0         'E'             /* Magic number byte 0 */
+#define ELFMAG0         0x7f            /* Magic number byte 0 */
 
 #define EI_MAG1         1               /* File identification byte 1 index */
-#define ELFMAG1         'L'             /* Magic number byte 1 */
+#define ELFMAG1         'E'             /* Magic number byte 1 */
 
 #define EI_MAG2         2               /* File identification byte 2 index */
-#define ELFMAG2         '1'             /* Magic number byte 2 */
+#define ELFMAG2         'L'             /* Magic number byte 2 */
 
 #define EI_MAG3         3               /* File identification byte 3 index */
-#define ELFMAG3         '6'             /* Magic number byte 3 */
+#define ELFMAG3         'F'             /* Magic number byte 3 */
 
 /* Conglomeration of the identification bytes, for easy testing as a word.  */
-#define ELFMAG          "EL16"
+#define ELFMAG          " ELF"
 #define SELFMAG         4
 
 #define EI_CLASS        4               /* File class byte index */
@@ -84,8 +84,8 @@ typedef struct {
                                         /* Value must be EV_CURRENT */
 
 #define EI_OSABI        7               /* OS ABI identification */
-#define ELFOSABI_OS16           1       /* OS 16 */
-#define ELFOSABI_OS8            2       /* OS 8 */
+#define ELFOSABI_OS16           66      /* OS 16 */
+#define ELFOSABI_OS8            65      /* OS 8 */
 #define ELFOSABI_STANDALONE     255     /* Standalone (embedded) application */
 
 #define EI_ABIVERSION   1               /* ABI version */
@@ -173,6 +173,59 @@ typedef struct
   unsigned char st_other;               /* No defined meaning, 0 */
   ELF_Section st_shndx;                 /* Section index */
 } ELF_Sym;
+
+/* 
+Local symbol. These symbols are not visible outside the object file containing 
+their definition. Local symbols of the same name can exist in multiple files 
+without interfering with each other. 
+*/
+#define STB_LOCAL 0
+
+/* 
+Global symbols. These symbols are visible to all object files being combined. 
+One file's definition of a global symbol satisfies another file's undefined 
+reference to the same global symbol. 
+*/
+#define STB_GLOBAL 1
+
+/* 
+Weak symbols. These symbols resemble global symbols, but their definitions 
+have lower precedence. 
+*/
+#define STB_WEAK 2
+#define STB_LOOS 10
+#define STB_HIOS 12
+#define STB_LOPROC 13
+#define STB_HIPROC 15
+
+/* The symbol type is not specified. */
+#define STT_NOTYPE 0 
+/* This symbol is associated with a data object, such as a variable, an array, and so forth. */
+#define STT_OBJECT 1 
+/* This symbol is associated with a function or other executable code. */
+#define STT_FUNC 2 
+/* This symbol is associated with a section. Symbol table entries of this type exist primarily for relocation and normally have STB_LOCAL binding. */
+#define STT_SECTION 3 
+/* Conventionally, the symbol's name gives the name of the source file that is associated with the object file. A file symbol has STB_LOCAL binding and a section index of SHN_ABS. This symbol, if present, precedes the other STB_LOCAL symbols for the file. 
+
+Symbol index 1 of the SHT_SYMTAB is an STT_FILE symbol representing the object file. Conventionally, this symbol is followed by the files STT_SECTION symbols. These section symbols are then followed by any global symbols that have been reduced to locals. */
+#define STT_FILE 4 
+/* This symbol labels an uninitialized common block. This symbol is treated exactly the same as STT_OBJECT. */
+#define STT_COMMON 5 
+/* The symbol specifies a thread-local storage entity. When defined, this symbol gives the assigned offset for the symbol, not the actual address.
+
+Thread-local storage relocations can only reference symbols with type STT_TLS. A reference to a symbol of type STT_TLS from an allocatable section, can only be achieved by using special thread-local storage relocations. See Chapter 8, Thread-Local Storage for details. A reference to a symbol of type STT_TLS from a non-allocatable section does not have this restriction. */
+#define STT_TLS 6 
+
+#define STT_LOOS 10
+#define STT_HIOS 12
+#define STT_LOPROC 13
+#define STT_SPARC_REGISTER 13
+#define STT_HIPROC 15
+
+#define ELF32_ST_BIND(info)          ((info) >> 4)
+#define ELF32_ST_TYPE(info)          ((info) & 0xf)
+#define ELF32_ST_INFO(bind, type)    (((bind)<<4)+((type)&0xf))
 
 /* Relocation table entry (in section of type SHT_REL).  */
 

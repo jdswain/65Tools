@@ -456,6 +456,7 @@ bool stack_if(void)
   } else if (v->type == typeNoType) {
 	result = false;
   } else if (v->type == typeString) {
+	as_warn("string if, %s", v->string_val);
 	result = true;
   } else {
 	result = false;
@@ -497,13 +498,13 @@ void stack_message(Object *value)
     for (i = value->int_val; i > 0; --i) {
       Object *v = stack[stack_pointer-i];
 	  if (v->type == typeByte) {
-        printf("%ld", v->int_val);
+        printf("$%lx", v->int_val);
 	  } else if (v->type == typeBool) {
-        printf("%ld", v->int_val);
+        printf("$%lx", v->int_val);
 	  } else if (v->type == typeChar) {
-        printf("%ld", v->int_val);
+        printf("$%lx", v->int_val);
 	  } else if (v->type == typeInt) {
-        printf("%ld", v->int_val);
+        printf("$%lx", v->int_val);
 	  } else if (v->type == typeReal) {
         printf("%f", v->real_val); 
 	  } else if (v->type == typeString) {
@@ -622,7 +623,7 @@ void interp_interp(Op **instrs, int num_instrs, bool exec[16], int exec_level, b
   for (int i=0; i<num_instrs; i++) {
     Op *instr = instrs[i];
     if (instr->type == OpScopeEnd) {
-	  scope_pop();
+	  // scope_pop();
       if (exec_level > 0) {
 		last_exec = exec[exec_level];
 		exec_level--;
@@ -658,8 +659,12 @@ void interp_interp(Op **instrs, int num_instrs, bool exec[16], int exec_level, b
       case OpLeftShift:        stack_leftshift(); break;
       case OpRightShift:       stack_rightshift(); break;
       case OpEmit:             emit_instr(instr); break;
-      case OpIfBegin:          exec_level++; exec[exec_level] = stack_if(); break;
-      case OpElseBegin:        exec_level++; exec[exec_level] = !exec[exec_level-1]; break;
+      case OpIfBegin:
+		exec_level++; exec[exec_level] = stack_if(); break;
+      case OpElseBegin:
+		exec_level++; exec[exec_level] = !last_exec; break;
+      case OpElseIfBegin:
+		exec_level++; exec[exec_level] = stack_if(); break;
       case OpJump:             break;
       case OpScopeBegin:       scope_begin(instr->value); exec_level++; exec[exec_level] = true; break;
       case OpError:            stack_error(instr->value); break;
@@ -736,9 +741,8 @@ int interp_run(const char *filename)
       stack_pointer = 0;
 
       // Reset all state to default values for each pass to ensure consistency
-      cpu = elf_context->ehdr->e_machine;
-      longa = true;
-      longi = true;
+      longa = false;
+      longi = false;
       
       // Clear all output buffers
       buf_reset(&(section->data), &(section->shdr->sh_size));
@@ -834,6 +838,8 @@ void interp_add_word(int val) {
 
 void interp_add_instr(OpCode instr, AddrMode mode, Modifier modifier)
 {
+  if (section == 0) return;
+
   Op *op = as_malloc(sizeof(Op));
   op->type = OpEmit;
   op->instr.opcode = instr;

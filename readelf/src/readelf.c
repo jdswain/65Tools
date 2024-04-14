@@ -33,9 +33,11 @@ void print_hdr(ELF_Ehdr *hdr)
   printf("String Index:   %d\n\n", hdr->e_shstrndx);
 }
 
-void print_section(elf_context_t *context, ELF_Shdr *hdr, void *data, int data_len)
+void print_section(elf_section_t *section)
 {
-  printf("Section %s", elf_find_str(context, hdr->sh_name));
+  ELF_Shdr *hdr = section->shdr;
+  
+  printf("Section %s", elf_string_get(section, hdr->sh_name));
   printf("  type:       %d", hdr->sh_type);
   printf("  flags:      %d", hdr->sh_flags);
   printf("  addr:       %d", hdr->sh_addr);
@@ -65,13 +67,20 @@ int main(int argc, char **argv)
     return 1;
   }
 
-  print_hdr(context->header);
+  print_hdr(context->ehdr);
 
   elf_section_t *section;
-  list_for_every_entry(&context->sections, section, elf_section_t, node) {
-    print_section(context, section->shdr, section->data, section->data_size);
+  elf_section_t **sections = context->sections;
+  for (int i = 0; i < context->ehdr->e_shnum; i++) {
+	printf("SECTION\n");
+	section = *sections;
+    print_section(section);
+	sections++;
   }
   
   return 0;
 }
 
+void as_error(const char *str) {
+  printf("%s\n", str);
+}

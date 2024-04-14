@@ -6,7 +6,6 @@
 #include "interp.h"
 #include "elf_file.h"
 #include "codegen.h"
-#include "oberongen.h"
 
 //////////////////////////////
 // Global variables
@@ -35,7 +34,6 @@ uint32_t addr; // Current output address
 uint32_t pc; // Current pc
 bool longa;
 bool longi;
-ELF_Half cpu;
 uint8_t _pass; // Pass number
 uint16_t dbreg;
 uint16_t dpage;
@@ -65,7 +63,6 @@ void help(void) {
 int main(int argc, char **argv) {
   value_init();
   as_init();
-  // oberon_init();
   scanner_init(ASMMode); // We need this for the args
   int optind = as_parse_args(argc - 1, argv + 1);
 
@@ -104,17 +101,8 @@ void define_bool(const char *key, bool val)
   object_release(value);
 }
 
-void make_section(const char *name, ELF_Word flags, ELF_Word type)
-{
-  ELF_Word nm = elf_string_create(elf_context->shstrtab, name);
-  section = elf_section_create(elf_context, nm);
-  section->shdr->sh_flags = flags;
-  section->shdr->sh_type = type;
-}
-
 void as_init(void)
 {
-  cpu = EM_816;
   files = 0;
   num_files = 0;
   scope_root = object_new(Const, typeNoType);
@@ -175,6 +163,7 @@ void parse_option_D(const char *optarg)
 
   // We use the parser here so that expressions can be used
   bf_memory(optarg, strlen(optarg));
+  printf("optarg is '%s'", optarg);
   scanner_start();
   scanner_get(&sym);
   parse_define(&sym);
@@ -259,21 +248,36 @@ void as_cleanup(void)
 
 void create_standard_file(void)
 {
-  make_section("stack", SHF_WRITE | SHF_ALLOC | SHF_STACK, SHT_NOBITS); // Just a marker for stack size requirements
-  elf_context->section_stack = section;
-  make_section("dp", SHF_WRITE | SHF_ALLOC | SHF_DP, SHT_NOBITS); // Direct page
-  elf_context->section_dp = section;
-  make_section("tls", SHF_WRITE | SHF_ALLOC | SHF_TLS, SHT_NOBITS); // Thread local storage
-  elf_context->section_tls = section;
-  make_section("bss", SHF_WRITE | SHF_ALLOC, SHT_NOBITS); // Uninitalised data
-  elf_context->section_bss = section;
-  make_section("data", SHF_WRITE | SHF_ALLOC, SHT_PROGBITS); // Initialised data
-  elf_context->section_data = section;
-  make_section("rodata", SHF_ALLOC, SHT_PROGBITS); // Constants
-  elf_context->section_rodata = section;
-  make_section("text", SHF_ALLOC | SHF_EXECINSTR, SHT_PROGBITS); // The code
-  section->shdr->sh_addr = 0x8000; // Default for now
-  elf_context->section_text = section; // Last section so section points to text
+  // Just a marker for stack size requirements
+  elf_context->section_stack = elf_section_create(elf_context, "stack",
+												  SHF_WRITE | SHF_ALLOC | SHF_STACK,
+												  SHT_NOBITS); 
+  // Direct page
+  elf_context->section_dp = elf_section_create(elf_context, "dp",
+											   SHF_WRITE | SHF_ALLOC | SHF_DP,
+											   SHT_NOBITS); 
+  // Thread local storage
+  elf_context->section_tls = elf_section_create(elf_context, "tls",
+												SHF_WRITE | SHF_ALLOC | SHF_TLS,
+												SHT_NOBITS); 
+ // Uninitalised data
+  elf_context->section_bss = elf_section_create(elf_context, "bss",
+												SHF_WRITE | SHF_ALLOC,
+												SHT_NOBITS);
+  // Initialised data
+  elf_context->section_data = elf_section_create(elf_context, "data",
+												 SHF_WRITE | SHF_ALLOC,
+												 SHT_PROGBITS); 
+  // Constants
+  elf_context->section_rodata = elf_section_create(elf_context, "rodata",
+												   SHF_ALLOC,
+												   SHT_PROGBITS);
+  // The default code
+  elf_context->section_text = elf_section_create(elf_context, "text",
+												 SHF_ALLOC | SHF_EXECINSTR,
+												 SHT_PROGBITS); 
+  elf_context->section_text->shdr->sh_addr = 0x8000; // Default
+  section = elf_context->section_text;
   
   int a, b, c;
   char *buffer = as_malloc(12);
@@ -300,22 +304,22 @@ void as_open_output(const char *name)
   output_mode = as_file_type(name);
   switch (output_mode) {
   case FileExecutable:
-    elf_context = elf_create(name, cpu);
+    elf_context = elf_create(name, EM_816);
     elf_context->ehdr->e_type = ET_EXEC;
     create_standard_file();
     break;
   case FileObject:
-    elf_context = elf_create(name, cpu);
+    elf_context = elf_create(name, EM_816);
     elf_context->ehdr->e_type = ET_REL;
     create_standard_file();
     break;
   case FileLib:
-    elf_context = elf_create(name, cpu);
+    elf_context = elf_create(name, EM_816);
     elf_context->ehdr->e_type = ET_EXEC;
     create_standard_file();
     break;
   case FileDylib:
-    elf_context = elf_create(name, cpu);
+    elf_context = elf_create(name, EM_816);
     elf_context->ehdr->e_type = ET_DYN;
     create_standard_file();
     break;
@@ -326,7 +330,7 @@ void as_open_output(const char *name)
   case FileS37:
   case FileIntel:
   case FileTIM:
-    elf_context = elf_create(name, cpu);
+    elf_context = elf_create(name, EM_02);
     elf_context->ehdr->e_type = ET_EXEC;
     create_standard_file();
     break;
@@ -338,6 +342,26 @@ void as_open_output(const char *name)
     as_error("Invalid output file specified '%s'", name);
     
   };
+}
+
+/**
+   This function writes the current symbols to the symtab
+*/
+void as_write_symbols(MapNode *node)
+{
+  if (node != 0) {
+	as_write_symbols(node->left);
+    if (!node->value->is_local) {
+	  unsigned char info = 0;
+	  // We shouldn't write local symbols to the symbol table, but it's useful
+	  // for debugging
+	  if (node->value->is_local) info &= STB_LOCAL;
+	  if (node->value->is_global) info &= STB_GLOBAL;
+	  elf_symbol_create(elf_context, node->key, node->value->int_val, info, 0);
+    }
+	as_write_symbols(node->right);
+  }
+
 }
 
 void as_compile(const char *filename)
@@ -357,14 +381,6 @@ void as_compile(const char *filename)
 	  scanner_get(&sym);
       parse_asm_file(&sym);
       break;
-    case FileOberonSrc:
-      printf("Compiling '%s'\n", filename);
-	  oberon_app_startup();
-	  scanner_init(OberonMode);
-	  scanner_start();
-	  scanner_get(&sym);
-      parse_oberon_file(&sym);
-      break;
     default:
       as_error("Unknown file type: %s", filename);
     }
@@ -380,6 +396,7 @@ void as_compile(const char *filename)
 	  }
 	  _pass = 0;
 	  interp_run(filename); // Output pass
+	  as_write_symbols(scope->desc);
 	} else {
 	  printf("Compilation failed.\n");
 	}
@@ -475,6 +492,19 @@ Object *make_value_int(int i)
   return v;
 }
 
+char *cpu_string()
+{
+  switch (elf_context->ehdr->e_machine) {
+  case EM_NONE: return "None";
+  case EM_816: return "65C816";
+  case EM_C02: return "65C02";
+  case EM_02: return "6502";
+  case EM_RC02: return "Rockwell 65C02";
+  case EM_RC19: return "Rockwell C19";
+  }
+  return "Unknown";
+}
+
 Object *as_get_symbol(char *ident)
 {
   // ToDo: this leaks memory becaue the special values should be released, but the scope objects shouldn't
@@ -482,12 +512,12 @@ Object *as_get_symbol(char *ident)
   if (strcmp("__FILE__", ident) == 0) return make_value_str(file->filename);
   if (strcmp("__LINE__", ident) == 0) return make_value_int(file->line_num);
   // __65AS__ defined in root scope  
-  if (strcasecmp("org", ident) == 0) return make_value_int(addr);
+  if (strcasecmp("org", ident) == 0) return make_value_int(section->shdr->sh_addr);
   if (strcasecmp("addr", ident) == 0) return make_value_int(addr);
   if (strcasecmp("pc", ident) == 0) return make_value_int(pc);
   if (strcasecmp("longa", ident) == 0) return make_value_int(longa);
   if (strcasecmp("longi", ident) == 0) return make_value_int(longi);
-  if (strcasecmp("cpu", ident) == 0) return make_value_int(cpu);
+  if (strcasecmp("cpu", ident) == 0) return make_value_str(cpu_string());
   if (strcasecmp("pass", ident) == 0) return make_value_int(pass());
   if (strcasecmp("dbreg", ident) == 0) return make_value_int(dbreg);
   if (strcasecmp("dpage", ident) == 0) return make_value_int(dpage);
@@ -514,13 +544,17 @@ void as_define_symbol(const char *name, Object *object)
   if (strcasecmp("longi", name) == 0) { longi = object->int_val; return; }
   if (strcasecmp("cpu", name) == 0) {
     if (object->type == typeString) {
+	  ELF_Half cpu;
       if (strcasecmp(object->string_val, "6502") == 0) cpu = EM_02;
       if (strcasecmp(object->string_val, "65C02") == 0) cpu = EM_C02;
       if (strcasecmp(object->string_val, "R65C02") == 0) cpu = EM_RC02;
+      if (strcasecmp(object->string_val, "R6501Q") == 0) cpu = EM_RC01;
+      if (strcasecmp(object->string_val, "65C816") == 0) cpu = EM_816;
       if (strcasecmp(object->string_val, "816") == 0) cpu = EM_816;
       if (strcasecmp(object->string_val, "C19") == 0) cpu = EM_RC19;
       if (strcasecmp(object->string_val, "RC19") == 0) cpu = EM_RC19;
-    } else {
+	  elf_context->ehdr->e_machine = cpu;
+	} else {
       as_error("cpu directive requires string value");
     }
     return;
@@ -584,14 +618,12 @@ void as_print_symbols(FILE *file)
 
   count = map_count(s->desc);
   rows = ((count - 1) / columns) + 1;
-  // fprintf(file, "Scope: %d in %d rows.\n", count, rows);
   for (int r = 0; r < rows; r++) {
-	row = r; column = 0; fprintf(file, "\n"); print_recursive(file, s->desc, &row, &column, rows - 1, columns);
+	row = r; column = 0;
+	fprintf(file, "\n");
+	print_recursive(file, s->desc, &row, &column, rows - 1, columns);
   }
-  fprintf(file, "\n");
-  s = s->parent;
-  
-  fprintf(file, "\n");  
+  fprintf(file, "\n\n");
 }
 
 void as_print_include_paths(void)
