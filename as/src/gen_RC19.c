@@ -1,6 +1,8 @@
 /*
 
-Rockwell C19 instruction set
+Rockwell C19 instruction set.
+
+This includes L28.
 
 */
 void gen_RC19(char *filename, int line_num, Instr *instr, AddrMode mode, int value1, int value2, int value3)
