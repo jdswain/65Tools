@@ -1,0 +1,15 @@
+* Tasks
+
+** Done
+Use Bitwise's 816 simulator.
+Allocate large amount of RAM.
+ELF loader, loads text section and jumps to start address.
+Simulated 6551.
+
+** ToDo
+Symbol file loader.
+Simulate ADB.
+Simulate Text Console.
+Simulate block read-write device for filesystem development.
+Simulate bitmap display.
+Simulate 85C30?

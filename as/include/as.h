@@ -9,8 +9,6 @@
 
 #include "scanner.h"
 #include "value.h"
-#include "elf.h"
-#include "elf_file.h"
 #include "buffered_file.h"
 
 #include "cpu.h"
@@ -21,14 +19,6 @@
 
 #define MAX_LINE 132
 #define MAX_INCLUDE_PATHS 10
-
-typedef Symbol OpCode;
-struct Instr {
-  OpCode opcode;
-  AddrMode mode;
-  Modifier modifier;
-};
-typedef struct Instr Instr;
 
 //////////////////////////////
 // Global variables
@@ -52,10 +42,7 @@ extern int macro_end; /* Flag for macro ending */
 extern uint8_t verbose; // Counter for verbosity level
 
 // Assembly state
-extern uint32_t addr; // Current output address
 extern uint32_t pc; // Current pc
-extern bool longa;
-extern bool longi;
 int pass(void); // Pass number
 extern uint16_t dbreg;
 extern uint16_t dpage;

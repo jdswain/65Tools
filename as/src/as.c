@@ -30,10 +30,7 @@ MacroDef *macro; /* The executing macro */
 uint8_t verbose; // Counter for verbosity level
 
 // Assembly state
-uint32_t addr; // Current output address
 uint32_t pc; // Current pc
-bool longa;
-bool longi;
 uint8_t _pass; // Pass number
 uint16_t dbreg;
 uint16_t dpage;
@@ -63,7 +60,7 @@ void help(void) {
 int main(int argc, char **argv) {
   value_init();
   as_init();
-  scanner_init(ASMMode); // We need this for the args
+  scanner_init(); // We need this for the args
   int optind = as_parse_args(argc - 1, argv + 1);
 
   if (optind == 0) {
@@ -242,43 +239,12 @@ int as_parse_args(int argc, char** argv)
 void as_cleanup(void)
 {
   list_reset((void ***)&files, &num_files);
-  elf_release(elf_context);
+  codegen_close();
   // as_print_include_paths();
 }
 
 void create_standard_file(void)
 {
-  // Just a marker for stack size requirements
-  elf_context->section_stack = elf_section_create(elf_context, "stack",
-												  SHF_WRITE | SHF_ALLOC | SHF_STACK,
-												  SHT_NOBITS); 
-  // Direct page
-  elf_context->section_dp = elf_section_create(elf_context, "dp",
-											   SHF_WRITE | SHF_ALLOC | SHF_DP,
-											   SHT_NOBITS); 
-  // Thread local storage
-  elf_context->section_tls = elf_section_create(elf_context, "tls",
-												SHF_WRITE | SHF_ALLOC | SHF_TLS,
-												SHT_NOBITS); 
- // Uninitalised data
-  elf_context->section_bss = elf_section_create(elf_context, "bss",
-												SHF_WRITE | SHF_ALLOC,
-												SHT_NOBITS);
-  // Initialised data
-  elf_context->section_data = elf_section_create(elf_context, "data",
-												 SHF_WRITE | SHF_ALLOC,
-												 SHT_PROGBITS); 
-  // Constants
-  elf_context->section_rodata = elf_section_create(elf_context, "rodata",
-												   SHF_ALLOC,
-												   SHT_PROGBITS);
-  // The default code
-  elf_context->section_text = elf_section_create(elf_context, "text",
-												 SHF_ALLOC | SHF_EXECINSTR,
-												 SHT_PROGBITS); 
-  elf_context->section_text->shdr->sh_addr = 0x8000; // Default
-  section = elf_context->section_text;
-  
   int a, b, c;
   char *buffer = as_malloc(12);
   
@@ -376,7 +342,7 @@ void as_compile(const char *filename)
     switch (as_file_type(filename)) {
     case FileAsmSrc:
       printf("Assembling '%s'\n", filename);
-	  scanner_init(ASMMode);
+	  scanner_init();
 	  scanner_start();
 	  scanner_get(&sym);
       parse_asm_file(&sym);
@@ -513,10 +479,10 @@ Object *as_get_symbol(char *ident)
   if (strcmp("__LINE__", ident) == 0) return make_value_int(file->line_num);
   // __65AS__ defined in root scope  
   if (strcasecmp("org", ident) == 0) return make_value_int(section->shdr->sh_addr);
-  if (strcasecmp("addr", ident) == 0) return make_value_int(addr);
+  if (strcasecmp("addr", ident) == 0) return make_value_int(codegen_here());
   if (strcasecmp("pc", ident) == 0) return make_value_int(pc);
-  if (strcasecmp("longa", ident) == 0) return make_value_int(longa);
-  if (strcasecmp("longi", ident) == 0) return make_value_int(longi);
+  if (strcasecmp("longa", ident) == 0) return make_value_int(codegen_longa());
+  if (strcasecmp("longi", ident) == 0) return make_value_int(codegen_longi());
   if (strcasecmp("cpu", ident) == 0) return make_value_str(cpu_string());
   if (strcasecmp("pass", ident) == 0) return make_value_int(pass());
   if (strcasecmp("dbreg", ident) == 0) return make_value_int(dbreg);
@@ -534,14 +500,14 @@ void as_define_symbol(const char *name, Object *object)
   if (strcmp("__65AS__", name) == 0) { as_error("__65AS__ cannot be set"); return; }
   if (strcasecmp("pass", name) == 0) { as_error("pass cannot be set"); return; }
   if (strcasecmp("org", name) == 0) {
-    addr = object->int_val;
-    section->shdr->sh_addr = addr;
+    codegen_addr(object->int_val);
+    section->shdr->sh_addr = object->int_val;
     return;
   }
-  if (strcasecmp("addr", name) == 0) { addr = object->int_val; return; }
+  if (strcasecmp("addr", name) == 0) { codegen_addr(object->int_val); return; }
   if (strcasecmp("pc", name) == 0) { pc = object->int_val; return; }
-  if (strcasecmp("longa", name) == 0) { longa = object->int_val; return; }
-  if (strcasecmp("longi", name) == 0) { longi = object->int_val; return; }
+  if (strcasecmp("longa", name) == 0) { codegen_setlonga(object->int_val); return; }
+  if (strcasecmp("longi", name) == 0) { codegen_setlongi(object->int_val); return; }
   if (strcasecmp("cpu", name) == 0) {
     if (object->type == typeString) {
 	  ELF_Half cpu;

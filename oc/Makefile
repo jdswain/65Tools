@@ -3,6 +3,10 @@
 # Makefile for 65Tools Oberon Compiler
 
 project = oc
+target = oc
+target_version = 1
+
+CFLAGS += -std=c11
 
 include $(BUILD_BASE)/build/rules/global
 
@@ -11,8 +15,6 @@ ocs \
 ocp \
 ocb \
 ocg \
-buffered_file \
-memory \
 
 objects = \
 $(src_objects) \
@@ -23,8 +25,13 @@ test_objects = \
 $(src_objects) \
 test_main
 
-target = oc
-target_version = 1
-
 include $(BUILD_BASE)/build/rules/exec
 
+test:
+	../bin/oc test/Module.Mod
+
+assemble:
+	../bin/as test/a.asm -o ret
+
+exec:
+	../bin/em16 -t ret | more 

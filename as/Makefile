@@ -3,6 +3,8 @@
 # Makefile for 65Tools assembler
 
 project = as
+target = as
+target_version = 1
 
 include $(BUILD_BASE)/build/rules/global
 
@@ -11,30 +13,16 @@ as \
 scanner \
 parser \
 interp \
-codegen \
-memory \
-buffered_file \
-value \
-elf_file \
-cpu \
 
 objects = \
 $(src_objects) \
-as
+$(target)
 
 dep_objects = \
-gen_02 \
-gen_C02 \
-gen_RC02 \
-gen_816 \
-gen_RC19 \
 
 test_objects = \
 $(src_objects) \
 test_main
-
-target = as
-target_version = 1
 
 include $(BUILD_BASE)/build/rules/exec
 

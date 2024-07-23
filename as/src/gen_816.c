@@ -132,7 +132,7 @@ void gen_816(char* filename, int line_num, Instr *instr, AddrMode mode, int valu
       {
 	int r = value1 - (addr + 1);
 	if ((r > 127) || (r < -128)) {
-	  if (pass() == 0) as_gen_warn(filename, line_num, "BRA promoted to BRL %d", value1);
+	  as_gen_warn(filename, line_num, "BRA promoted to BRL %d", value1);
 	  orl(filename, line_num, 0x82, value1);
 	} else {
 	  or(filename, line_num, 0x80, value1);
@@ -160,7 +160,7 @@ void gen_816(char* filename, int line_num, Instr *instr, AddrMode mode, int valu
 	if ((r > 127) || (r < -128)) {
 	  orl(filename, line_num, 0x82, value1);
 	} else {
-	  if (pass() == 0) as_gen_warn(filename, line_num, "BRL demoted to BRA %d", value1);
+	  as_gen_warn(filename, line_num, "BRL demoted to BRA %d", value1);
 	  or(filename, line_num, 0x80, value1);
 	}
       }
@@ -807,8 +807,7 @@ void gen_816(char* filename, int line_num, Instr *instr, AddrMode mode, int valu
   default:
       break;
   }
-  if (pass() == 0) as_gen_error(filename, line_num, "%s %s not supported on %s",
+  as_gen_error(filename, line_num, "%s %s not supported on 65C816",
 	   token_to_string(instr->opcode),
-	   mode_to_string(mode),
-	   cpu_string());
+			   mode_to_string(mode));
 }

@@ -1,7 +1,10 @@
-#ifndef ORB_H
-#define ORB_H
+#ifndef OCB_H
+#define OCB_H
+
+#include <stdbool.h>
 
 void base_init(void);
+void base_Import(const char *modid, const char *modid1);
 void base_export(char *module, bool newSF, long key); /* Temp */
 
 #define maxTypTab 64
@@ -46,7 +49,7 @@ struct Object {
 
 struct Module {
   struct Object; /* C11 */
-  char *orgname;
+  const char *orgname;
 };
 
 struct Type {
@@ -81,21 +84,21 @@ struct Type {
     Array    -        type of elements
     Record   fields   extension */
 
-struct Object topScope;
-struct Object universe;
-struct Object system;
-struct Type byteType;
-struct Type boolType;
-struct Type charType;
-struct Type intType;
-struct Type realType;
-struct Type setType;
-struct Type nilType;
-struct Type noType;
-struct Type strType;
-int nofmod;
-int Ref;
-struct Type *typtab[maxTypTab];
+extern struct Object *topScope;
+extern struct Object *universe;
+extern struct Object *systemScope;
+extern struct Type *byteType;
+extern struct Type *boolType;
+extern struct Type *charType;
+extern struct Type *intType;
+extern struct Type *realType;
+extern struct Type *setType;
+extern struct Type *nilType;
+extern struct Type *noType;
+extern struct Type *strType;
+extern int nofmod;
+extern int Ref;
+extern struct Type *typtab[maxTypTab];
 
 /* Insert new Object with name id */
 struct Object *base_NewObj(char *id, int class);
@@ -103,9 +106,9 @@ struct Object *base_NewObj(char *id, int class);
 /* The Object matching the current scanner symbol */
 struct Object *base_thisObj(void);
 
-struct Object *base_thisimport(struct Object mod);
+struct Object *base_thisimport(struct Object *mod);
 
-struct Object *base_thisfield(struct Type rec);
+struct Object *base_thisfield(struct Type *rec);
 
 void base_OpenScope(void);
 
@@ -215,7 +218,7 @@ void base_CloseScope(void);
   BEGIN
     IF modid1 = "SYSTEM" THEN
       thismod := ThisModule(modid, modid1, TRUE,  key); DEC(nofmod);
-      thismod.lev := 0; thismod.dsc := system; thismod.rdo := TRUE
+      thismod.lev := 0; thismod.dsc := systemScope; thismod.rdo := TRUE
     ELSE MakeFileName(fname, modid1, ".smb"); F := Files.Old(fname);
       IF F # NIL THEN
         Files.Set(R, F, 0); Files.ReadInt(R, key); Files.ReadInt(R, key); Files.ReadString(R, modname);
@@ -358,7 +361,5 @@ void base_CloseScope(void);
 
 
 struct Type *base_type(int ref, int form, long size);
-
-void base_enter(char *name, int cl, struct Type *type, long n);
 
 #endif

@@ -2,19 +2,11 @@
 #define SCANNER_H
 
 #include <stdbool.h>
+#include "cpu.h" /* For symbols */
 
 /*
-Scanner for 65Tools assembler and compiler
+Scanner for 65Tools assembler
 */  
-
-// Symbols
-typedef enum {
-#define DEF(tok, str, flags) s ## tok,
-#define TOK(tok) s ## tok,
-#include "as_tokens.h"
-#undef DEF
-#undef TOK
-} Symbol;
 
 extern const int IdLen;
 extern const int NofKeys;
@@ -26,20 +18,13 @@ extern double rval;
 
 extern int org;
 
-enum ScannerMode {
-  OberonMode,
-  ASMMode,
-};
-
 void scanner_ident(Symbol* sym);
 void scanner_get(Symbol* sym);
-void scanner_init(enum ScannerMode mode);
+void scanner_init(void);
 void scanner_start(void);
 
 bool is_instr(Symbol val);
 bool is_directive(Symbol val);
 bool is_asm_keyword(Symbol val);
-
-char *token_to_string(Symbol val);
 
 #endif

@@ -23,8 +23,6 @@ typedef struct Op Op;
 struct Item;
 typedef struct Item Item;
 
-extern elf_section_t *section; /* The active section */
-
 /* Macro */
 
 struct MacroDef {
@@ -326,17 +324,6 @@ void map_delete(MapNode *map);
 void object_bmap_delete(MapNode *map);
 
 void map_print(MapNode *map); /* Debug only */
-
-/*
-  Byte Buffer
-*/
-
-void buf_add_char(unsigned char **pbuf, ELF_Word *num_ptr, const char data);
-void buf_add_short(unsigned char **pbuf, ELF_Word *num_ptr, const short data);
-void buf_add_int(unsigned char **pbuf, ELF_Word *num_ptr, const int data);
-void buf_add_long(unsigned char **pbuf, ELF_Word *num_ptr, const long data);
-void buf_add_string(unsigned char **pbuf, ELF_Word *num_ptr, const char* data);
-void buf_reset(unsigned char **pbuf, ELF_Word *num_ptr);
 
 /*
 dsym_table - a list of strings ordered by address.

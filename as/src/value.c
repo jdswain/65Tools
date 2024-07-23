@@ -745,66 +745,6 @@ void map_delete(MapNode *map)
   as_free(map);
 }
 
-void buf_add(unsigned char **pbuf, ELF_Word *num_ptr, unsigned char *data, ELF_Word size)
-{
-  int num = *num_ptr;
-  int num_alloc = 1;
-  unsigned char *pp = *pbuf;
-  int i;
-  
-  // Every power of two we double array size
-  if ((num & (num - 1)) == 0) {
-    if (num) num_alloc = num * 2;
-    while (num_alloc < (num + size)) num_alloc = num_alloc * 2;
-    pp = as_realloc(pp, num_alloc * sizeof(unsigned char));
-    *pbuf = pp;
-  }
-  for (i = 0; i < size; i++)
-    pp[num++] = data[i];
-  *num_ptr = num;
-}
-
-void buf_add_char(unsigned char **pbuf, ELF_Word *num_ptr, const char data)
-{
-  unsigned char *buf = (unsigned char *)&data;
-  buf_add(pbuf, num_ptr, buf, 1);
-}
-
-void buf_add_short(unsigned char **pbuf, ELF_Word *num_ptr, const short data)
-{
-  unsigned char *buf = (unsigned char *)&data;
-  buf_add(pbuf, num_ptr, buf, 2);
-}
-
-void buf_add_int(unsigned char **pbuf, ELF_Word *num_ptr, const int data)
-{
-  unsigned char *buf = (unsigned char *)&data;
-  buf_add(pbuf, num_ptr, buf, 4);
-}
-
-void buf_add_long(unsigned char **pbuf, ELF_Word *num_ptr, const long data)
-{
-  unsigned char *buf = (unsigned char *)&data;
-  buf_add(pbuf, num_ptr, buf, 8);
-}
-
-void buf_add_string(unsigned char **pbuf, ELF_Word *num_ptr, const char* data)
-{
-  unsigned char *buf = (unsigned char *)&data;
-  buf_add(pbuf, num_ptr, buf, strlen(data) + 1);
-}
-
-
-void buf_reset(unsigned char **pbuf, ELF_Word *num_ptr)
-{
-  unsigned char *buf = *pbuf;
-  if (buf != 0) {
-    as_free(buf);
-    *pbuf = 0;
-    *num_ptr = 0;
-  }
-}
-
 void macro_delete(MacroDef *macro)
 {
   macro->num_instrs = 0;

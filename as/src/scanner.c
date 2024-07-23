@@ -12,8 +12,6 @@ Scanner for 65Tools assembler
 #define IdLen 1024
 #define NofKeys 202
 
-enum ScannerMode scannerMode;
-
 char id[IdLen];
 
 char ch; // lookahead
@@ -49,7 +47,7 @@ void next(void)
     // This is all a bit complex but we need to delay the line by one line
     // so that it matches up with the codegen.
     line[(lineno?1:0)][c] = '\0';
-    if ((scannerMode == ASMMode) && ((file == 0) || (bf_line() > 2))) print_line();
+    if ((file == 0) || (bf_line() > 2)) print_line();
     lineno = !lineno;
     c = 0;
   }
@@ -81,9 +79,7 @@ void ident(Symbol *sym) {
       if( strcasecmp(key[m],id) < 0 ) i = m + 1; else j = m;
     }
     if( strcasecmp(key[j],id) == 0 ) {
-      if (scannerMode == ASMMode) {
-		if (is_instr(j) || is_asm_keyword(j) || is_directive(j)) *sym = symno[j];
-      }
+	  if (is_instr(j) || is_asm_keyword(j) || is_directive(j)) *sym = symno[j];
     }
   }
   // printf("indent: %s\n", id);
@@ -293,10 +289,8 @@ void enter(char* word, Symbol val, uint8_t flag) {
   flags[K++] = flag;
 }
 
-void scanner_init(enum ScannerMode mode)
+void scanner_init()
 {
-  scannerMode = mode;
-  
   K = 0;
 
 #define DEF(tok, str, flags) enter(str, s ## tok, flags);
@@ -321,16 +315,5 @@ bool is_instr(Symbol val) { return (val < K) && (flags[val] & F_INSTR); }
 bool is_directive(Symbol val) { return (val < K) && (flags[val] & F_DIRECTIVE); }
 bool is_asm_keyword(Symbol val) { return (val < K) && (flags[val] & F_AKEYWORD); } 
 
-char *token_to_string(Symbol val)
-{
- switch( val ) {
-#define DEF(tok, str, flags) case s ## tok: return str;
-#define TOK(tok) case s ## tok: return #tok;
-#include "as_tokens.h"
-#undef DEF
-#undef TOK
- }
- return "Unknown token";
-}
 
 

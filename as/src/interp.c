@@ -432,7 +432,7 @@ void emit_line(Object *text, bool exec)
       i = i + 6;
     }
 	if (i > 6) fprintf(list_file, "\n");
-    out_addr = addr;
+    out_addr = codegen_here();
     line_start = section->shdr->sh_size;
   }
 }
@@ -541,9 +541,9 @@ void set_label_impl(Object *label)
 	scope_add_object(label->string_val, object);
   }
   if (object->type->form == ProcForm) {
-	object->addr = addr;
+	object->addr = codegen_here();
   } else {
-	object->int_val = addr;
+	object->int_val = codegen_here();
   }
 }
 
@@ -615,7 +615,7 @@ void scope_begin(Object* name)
   printf("Scope get %s\n", name->string_val);
   Object *value = scope_get_object(name->string_val);
   scope_push_object(value);
-  value->addr = addr; /* Set the address */
+  value->addr = codegen_here(); /* Set the address */
 }
 
 void interp_interp(Op **instrs, int num_instrs, bool exec[16], int exec_level, bool last_exec)
@@ -729,7 +729,7 @@ int interp_run(const char *filename)
 	printf("  Section %s, %d instructions.\n", elf_string_get(elf_context->shstrtab, section->shdr->sh_name), section->num_instrs);
 
       line_start = 0;
-      addr = section->shdr->sh_addr;
+      long addr = section->shdr->sh_addr;
       out_addr = addr;
       pc = 0;
       stack = 0;
@@ -741,8 +741,8 @@ int interp_run(const char *filename)
       stack_pointer = 0;
 
       // Reset all state to default values for each pass to ensure consistency
-      longa = false;
-      longi = false;
+      codegen_setlonga(false);
+      codegen_setlongi(false);
       
       // Clear all output buffers
       buf_reset(&(section->data), &(section->shdr->sh_size));

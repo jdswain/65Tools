@@ -181,7 +181,7 @@ void as_gen_error(char* filename, int line_num, char* message, ...)
 {
   va_list args;
   va_start(args, message);
-  fprintf(stdout, "%s:%d: ", filename, line_num - 1);
+  fprintf(stdout, "%s:%d: ", filename, line_num);
   fprintf(stdout, "Error: ");
   vfprintf(stdout, message, args);
   fprintf(stdout, "\n");
@@ -193,7 +193,7 @@ void as_error(char* message, ...)
   va_list args;
   va_start(args, message);
   if (file) 
-    fprintf(stdout, "%s(%d,%d): ", file->filename, file->line_num - 1, file->line_pos);
+    fprintf(stdout, "%s(%d,%d): ", file->filename, file->line_num, file->line_pos);
   fprintf(stdout, "Error: ");
   vfprintf(stdout, message, args);
   fprintf(stdout, "\n");
@@ -204,7 +204,7 @@ void as_error(char* message, ...)
 
 void as_gen_warn(char* filename, int line_num, char* message, ...) {
   va_list args;
-  fprintf(stdout, "%s:%d: ", filename, line_num - 1);
+  fprintf(stdout, "%s:%d: ", filename, line_num);
   fprintf(stdout, "Warning: ");
 
   vfprintf(stdout, message, args);
@@ -217,7 +217,7 @@ void as_warn(char* message, ...)
   va_list args;
   va_start(args, message);
   if (file) 
-    fprintf(stdout, "%s(%d,%d): ", file->filename, file->line_num - 1, file->line_pos);
+    fprintf(stdout, "%s(%d,%d): ", file->filename, file->line_num, file->line_pos);
   fprintf(stdout, "Warning: ");
   vfprintf(stdout, message, args);
   fprintf(stdout, "\n");
