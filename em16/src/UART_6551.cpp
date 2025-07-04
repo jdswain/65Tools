@@ -14,50 +14,76 @@
 
 void UART::reset()
 {
-  int slave;
-  char buf[128];
-  struct termios tty;
-  tty.c_iflag = (tcflag_t) 0;
-  tty.c_lflag = (tcflag_t) 0;
-  tty.c_cflag = CS8;
-  tty.c_oflag = (tcflag_t) 0;
-
-  auto e = openpty(&pty_fd, &slave, buf, &tty, nullptr);
-  if(0 > e) {
-    std::printf("Error: %s\n", strerror(errno));
-    return;
-  }
-
-  std::printf("Slave PTY: %s\n", buf);
-  char c;
-  std::cin.get(c);
-  statusReg = 0x10;
+    int slave_fd;
+    char pty_name[128];
+    struct termios tty;
+    
+    // Initialize termios structure for raw mode
+    memset(&tty, 0, sizeof(tty));
+    tty.c_cflag = CS8;
+    
+    // Create PTY pair
+    int result = openpty(&pty_fd, &slave_fd, pty_name, &tty, nullptr);
+    if (result < 0) {
+        std::fprintf(stderr, "Failed to create PTY: %s\n", strerror(errno));
+        return;
+    }
+    
+    std::printf("Slave PTY: %s\n", pty_name);
+    
+    // Wait for user input (consider removing this in production)
+    std::cout << "Press Enter to continue...";
+    std::cin.ignore();
+    
+    // Configure master PTY for raw mode
+    if (tcgetattr(pty_fd, &tty) < 0) {
+        std::fprintf(stderr, "Failed to get PTY attributes: %s\n", strerror(errno));
+        close(pty_fd);
+        close(slave_fd);
+        return;
+    }
+    
+    cfmakeraw(&tty);
+    
+    if (tcsetattr(pty_fd, TCSANOW, &tty) < 0) {
+        std::fprintf(stderr, "Failed to set PTY attributes: %s\n", strerror(errno));
+        close(pty_fd);
+        close(slave_fd);
+        return;
+    }
+    
+    // Close slave fd as we only need the master
+    close(slave_fd);
+    
+    statusReg = 0x10;
 }
 
 void UART::status() {
-  if (statusReg & 0x08) return;
-  
-  wdc816::Byte buf[1];
+    if (statusReg & 0x08) return;
     
-  fd_set read_fds, write_fds, except_fds;
-  FD_ZERO(&read_fds);
-  FD_ZERO(&write_fds);
-  FD_ZERO(&except_fds);
-  FD_SET(pty_fd, &read_fds);
-  
-  // Set timeout to 100us
-  struct timeval timeout;
-  timeout.tv_sec = 0;
-  timeout.tv_usec = 100;
-  
-  // Wait for input to become ready or until the time out
-  int bytesReady = select(pty_fd + 1, &read_fds, &write_fds, &except_fds, &timeout);
-
-  if ((bytesReady == 1) && (read(pty_fd, buf, 1) != 0)) {
-      statusReg |= 0x08;
-      receiveDataReg = *buf;
-      std::cout << "Byte" << std::hex << receiveDataReg << std::endl;
-  }
+    wdc816::Byte buf[1];
+    fd_set read_fds;
+    
+    // Clear and set the file descriptor set for reading only
+    FD_ZERO(&read_fds);
+    FD_SET(pty_fd, &read_fds);
+    
+    // Set timeout to 100us
+    struct timeval timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 100;
+    
+    // Wait for input to become ready or until timeout
+    int bytesReady = select(pty_fd + 1, &read_fds, nullptr, nullptr, &timeout);
+    
+    if (bytesReady > 0 && FD_ISSET(pty_fd, &read_fds)) {
+        ssize_t bytes_read = read(pty_fd, buf, 1);
+        if (bytes_read > 0) {
+            statusReg |= 0x08;
+            receiveDataReg = *buf;
+            std::cout << "Byte: 0x" << std::hex << static_cast<unsigned int>(receiveDataReg) << std::endl;
+        }
+    }
 }
 
 void UART::send(wdc816::Byte data) {

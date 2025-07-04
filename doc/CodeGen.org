@@ -1,6 +1,20 @@
+* Record
+Everything can be treated as a record, with a base and offset. Often this offset can be fixed.
+
+Globals
+Registers 
+Stack/Locals (special instructions LDA off,S)
+
+
+LDA off,X ; where X is the base
+
+This works well for 65C816 with 16-bit bases. It might be generalisable to 6502 with a very small memory model.
+
+
+
 * Procedure Definition
 
-Global var BASE contains the address of the top used of RAM, this is in ZP.
+Global var BASE contains the address of the top used of RAM, this is in DP.
 
 We use (BASE),Y addressing mode to access local variables, global variables are
 absolute.
