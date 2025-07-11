@@ -1577,10 +1577,16 @@ static void Declarations(LONGINT *varsize) {
             while (obj != NULL) {
                 obj->type = tp;
                 obj->lev = level;
-                if (tp->size > 1) {
-                    *varsize = ((*varsize + 3) / 4) * 4;
+                // 65C816: No alignment needed
+                if (level > 0) {
+                    // Local variable: calculate stack relative offset
+                    // Stack relative addressing starts at index 1, add offset from parameter space
+                    LONGINT local_offset = *varsize - 4;  // Remove parameter space (4 bytes)
+                    obj->val = 1 + local_offset;          // Start at 1, add offset
+                } else {
+                    // Global variable: use absolute address
+                    obj->val = *varsize;
                 }
-                obj->val = *varsize;
                 *varsize = *varsize + obj->type->size;
                 if (obj->expo) {
                     obj->exno = exno;
@@ -1592,7 +1598,7 @@ static void Declarations(LONGINT *varsize) {
         }
     }
     
-    *varsize = ((*varsize + 3) / 4) * 4;
+    // 65C816: No final alignment needed
     ptbase = pbsList;
     while (ptbase != NULL) {
         if (ptbase->type->base->form == Int) {
@@ -1622,7 +1628,7 @@ static void ProcedureDecl(void) {
     if (sym == ORS_ident) {
         strcpy(procid, ORS_id);
         ORS_Get(&sym);
-        NewObj(&proc, ORS_id, ORS_const);
+        NewObj(&proc, procid, ORB_Const);
         if (int_proc) {
             parblksize = 12;
         } else {
@@ -1646,7 +1652,7 @@ static void ProcedureDecl(void) {
         Check(ORS_semicolon, "no ;");
         locblksize = parblksize;
         Declarations(&locblksize);
-        proc->val = ORG_Here() * 4;
+        proc->val = ORG_Here();
         proc->type->dsc = topScope->next;
         if (sym == ORS_procedure) {
             L = 0;
@@ -1656,7 +1662,7 @@ static void ProcedureDecl(void) {
                 Check(ORS_semicolon, "no ;");
             } while (sym == ORS_procedure);
             ORG_FixOne(L);
-            proc->val = ORG_Here() * 4;
+            proc->val = ORG_Here();  // 65C816 uses byte addresses, no multiplication needed
             proc->type->dsc = topScope->next;
         }
         ORG_Enter(parblksize, locblksize, int_proc);
@@ -1718,7 +1724,7 @@ static void ORP_Import(void) {
 }
 
 static void ORP_Module(void) {
-    LONGINT key;
+    LONGINT key = 0;
     
     Texts_WriteString(&W, "  compiling ");
     ORS_Get(&sym);
@@ -1747,7 +1753,6 @@ static void ORP_Module(void) {
         Check(ORS_semicolon, "no ;");
         level = 0;
         exno = 1;
-        key = 0;
         if (sym == ORS_import) {
                 ORS_Get(&sym);
             ORP_Import();
@@ -1822,6 +1827,9 @@ void ORP_Compile(const char *filename, bool forceNewSF) {
         Texts_ClearWriter(&W);
         return;
     }
+    
+    // Set the source directory for output file placement
+    SetSourceDirectory(filename);
     
     newSF = forceNewSF;
     

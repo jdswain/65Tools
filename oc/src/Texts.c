@@ -181,7 +181,7 @@ void Texts_WriteInt(Texts_Writer *W, LONGINT x, LONGINT n) {
 void Texts_WriteHex(Texts_Writer *W, LONGINT x) {
     char temp[16];
     if (!W || !W->buf) return;
-    sprintf(temp, "%08lX", (unsigned long)x);
+    sprintf(temp, "%08X", (unsigned int)x);
     Texts_WriteString(W, temp);
 }
 

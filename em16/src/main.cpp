@@ -26,8 +26,10 @@
 using namespace std;
 
 #include <string.h>
-
 #include <time.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
 
 #include "emu816.h"
 
@@ -256,6 +258,149 @@ unsigned int loadELF(char * filename) {
 }
 
 //==============================================================================
+// Oberon Loader
+//------------------------------------------------------------------------------
+
+#define OBERON_BASE 0x2000
+
+unsigned int loadMod(char * filename) {
+  // Set up the machine
+  cout << "Configured for 65C816." << endl;
+  emu816::setStackPage(0x0100);
+  
+  
+  FILE *file = fopen(filename, "rb");
+  if (!file) {
+	printf("Error: Cannot open file %s\n", filename);
+	return 0;
+  }
+  
+  // Read module name (null-terminated string)
+  char module_name[64];
+  int name_len = 0;
+  while (name_len < 63) {
+	if (fread(&module_name[name_len], 1, 1, file) != 1) {
+	  printf("Error: Unexpected end of file reading module name\n");
+	  fclose(file);
+	  return 0;
+	}
+	if (module_name[name_len] == 0) break;
+	name_len++;
+  }
+  module_name[name_len] = 0;
+  
+  printf("Module: %s\n", module_name);
+  
+  // Read key (4 bytes)
+  uint32_t key;
+  if (fread(&key, 4, 1, file) != 1) {
+	printf("Error: Cannot read key\n");
+	fclose(file);
+	return 0;
+  }
+  
+  // Read version (1 byte)
+  uint8_t version;
+  if (fread(&version, 1, 1, file) != 1) {
+	printf("Error: Cannot read version\n");
+	fclose(file);
+	return 0;
+  }
+  
+  // Read size (4 bytes)
+  uint32_t size;
+  if (fread(&size, 4, 1, file) != 1) {
+	printf("Error: Cannot read size\n");
+	fclose(file);
+	return 0;
+  }
+  
+  printf("Key: %08X, Version: %d, Size: %d bytes\n", key, version, size);
+  
+  // Read entry point from end of file
+  long current_pos = ftell(file);
+  fseek(file, -5, SEEK_END);  // Entry point is 4 bytes before the final 'O'
+  uint32_t entry_point;
+  if (fread(&entry_point, 4, 1, file) == 1) {
+	printf("Entry point: $%04X (%d)\n", entry_point, entry_point);
+  }
+  fseek(file, current_pos, SEEK_SET);  // Restore position
+  
+  // Parse the file format step by step:
+  // 1. Module name, key, version, size already read
+  // 2. Skip import section
+  while (1) {
+	char ch;
+	if (fread(&ch, 1, 1, file) != 1) break;
+	if (ch == 0) break; // End of imports
+	// Skip module name
+	while (ch != 0) {
+	  if (fread(&ch, 1, 1, file) != 1) break;
+	}
+	// Skip module key (4 bytes)
+	fseek(file, 4, SEEK_CUR);
+  }
+  
+  // 3. Skip type descriptors
+  uint32_t td_size;
+  if (fread(&td_size, 4, 1, file) != 1) {
+	printf("Error: Cannot read type descriptor size\n");
+	fclose(file);
+	return 0;
+  }
+  fseek(file, td_size, SEEK_CUR);
+  
+  // 4. Skip variable section
+  uint32_t var_size;
+  if (fread(&var_size, 4, 1, file) != 1) {
+	printf("Error: Cannot read variable size\n");
+	fclose(file);
+	return 0;
+  }
+  
+  // 5. Skip string section
+  uint32_t str_size;
+  if (fread(&str_size, 4, 1, file) != 1) {
+	printf("Error: Cannot read string size\n");
+	fclose(file);
+	return 0;
+  }
+  fseek(file, str_size, SEEK_CUR);
+  
+  // 6. Read code section length
+  uint32_t code_length;
+  if (fread(&code_length, 4, 1, file) != 1) {
+	printf("Error: Cannot read code length\n");
+	fclose(file);
+	return 0;
+  }
+  uint8_t *code_data = (uint8_t*)malloc(code_length);
+  if (!code_data) {
+	printf("Error: Cannot allocate memory for code\n");
+	fclose(file);
+	return 0;
+  }
+  printf("Code length: %d bytes\n", code_length);
+    
+  if (fread(code_data, 1, code_length, file) != code_length) {
+	printf("Error: Cannot read code section\n");
+	free(code_data);
+	fclose(file);
+	return 0;
+  }
+
+  uint32_t count;
+  for (count = 0; count<code_length; count++) {
+	emu816::setByte(OBERON_BASE+count, code_data[count]);
+  }
+
+  free(code_data);
+  fclose(file);
+  printf("Code section: %d bytes\n\n", code_length);
+  return entry_point;
+}
+
+//==============================================================================
 // Command Handler
 //------------------------------------------------------------------------------
 
@@ -286,7 +431,15 @@ int main(int argc, char **argv)
   
   if (index < argc)
     do {
-      entry = loadELF(argv[index++]);
+	  char *suffix = strrchr(argv[index], '.');
+	  if (suffix == 0) {
+		entry = loadELF(argv[index]);
+	  } else if (strcmp(suffix, ".816") == 0) {
+		entry = loadMod(argv[index]);
+	  } else {
+		entry = loadELF(argv[index]);
+	  }
+	  index++;
     } while (index < argc);
   else {
     cerr << "No ELF files specified" << endl;
@@ -303,14 +456,16 @@ int main(int argc, char **argv)
 	cout << "Initialising at " << hex << entry << endl;
 	emu816::jumpLong(entry);
 
-	wdc816::Addr mainAddr = emu816::symbol("Main");
-	if (mainAddr != 0) {
-	  cout << "Running Main at " << hex << mainAddr << endl;
-	  emu816::jumpLong(mainAddr);
-	} else {
-	  cerr << "No Main procedure found." << endl;
+	if (false) {
+	  wdc816::Addr mainAddr = emu816::symbol("Main");
+	  if (mainAddr != 0) {
+		cout << "Running Main at " << hex << mainAddr << endl;
+		emu816::jumpLong(mainAddr);
+	  } else {
+		cerr << "No Main procedure found." << endl;
+	  }
+	  while (1) {}
 	}
-	while (1) {}
   } else {
 	 mem816::run();
   }

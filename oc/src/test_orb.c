@@ -51,6 +51,7 @@ void PrintObject(ObjectPtr obj, int indent) {
             case Array:   printf("Array[%d]", obj->type->len); break;
             case Record:  printf("Record"); break;
         }
+        printf(" size=%d", obj->type->size);
     }
     
     printf("\n");

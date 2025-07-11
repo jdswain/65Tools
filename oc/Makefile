@@ -15,7 +15,7 @@ SOURCES = $(wildcard $(SRCDIR)/*.c)
 OBJECTS = $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 
 # Executables
-TARGETS = $(BINDIR)/test_scanner $(BINDIR)/test_orb $(BINDIR)/oc
+TARGETS = $(BINDIR)/test_scanner $(BINDIR)/test_orb $(BINDIR)/oc $(BINDIR)/disasm
 
 # Create directories if they don't exist
 $(shell mkdir -p $(OBJDIR) $(BINDIR))
@@ -36,7 +36,11 @@ $(BINDIR)/test_orp: $(OBJDIR)/ORS.o $(OBJDIR)/ORB.o $(OBJDIR)/Files.o $(OBJDIR)/
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 # Main Oberon compiler
-$(BINDIR)/oc: $(OBJDIR)/ORS.o $(OBJDIR)/ORB.o $(OBJDIR)/ORP.o $(OBJDIR)/ORG.o $(OBJDIR)/Texts.o $(OBJDIR)/Files.o
+$(BINDIR)/oc: $(OBJDIR)/ORS.o $(OBJDIR)/ORB.o $(OBJDIR)/ORP.o $(OBJDIR)/ORG.o $(OBJDIR)/Texts.o $(OBJDIR)/Files.o $(OBJDIR)/cpu.o $(OBJDIR)/codegen.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+# Disassembler
+$(BINDIR)/disasm: $(OBJDIR)/disasm.o $(OBJDIR)/cpu.o $(OBJDIR)/Files.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 # Object files
@@ -50,6 +54,8 @@ $(OBJDIR)/ORP.o: $(SRCDIR)/ORP.c $(INCDIR)/ORP.h $(INCDIR)/ORB.h $(INCDIR)/ORS.h
 $(OBJDIR)/ORG.o: $(SRCDIR)/ORG.c $(INCDIR)/ORG.h $(INCDIR)/ORB.h $(INCDIR)/ORS.h
 $(OBJDIR)/Texts.o: $(SRCDIR)/Texts.c $(INCDIR)/Texts.h
 $(OBJDIR)/Files.o: $(SRCDIR)/Files.c $(INCDIR)/Files.h
+$(OBJDIR)/codegen.o: $(INCDIR)/cpu.h $(INCDIR)/codegen.h
+$(OBJDIR)/cpu.o: $(INCDIR)/cpu.h
 $(OBJDIR)/test_scanner.o: $(SRCDIR)/test_scanner.c $(INCDIR)/ORS.h
 $(OBJDIR)/test_orb.o: $(SRCDIR)/test_orb.c $(INCDIR)/ORB.h $(INCDIR)/ORS.h
 $(OBJDIR)/test_orp.o: $(SRCDIR)/test_orp.c $(INCDIR)/ORP.h $(INCDIR)/ORB.h $(INCDIR)/ORS.h
@@ -116,4 +122,11 @@ install: $(TARGETS)
 	install -m 755 $(BINDIR)/test_orb $(PREFIX)/bin/oberon-orb-test
 	install -m 755 $(BINDIR)/test_orp $(PREFIX)/bin/oberon-parser
 
-.PHONY: all clean test test_scanner test_orb test_orp install
+# Test disassembler
+test_disasm: $(BINDIR)/disasm
+	@echo "=== Testing 65C816 Disassembler ==="
+	@echo 'MODULE DisasmDemo; VAR x: INTEGER; y: INTEGER; BEGIN x := 10; y := x + 5 END DisasmDemo.' > test/DisasmDemo.Mod
+	@$(BINDIR)/oc test/DisasmDemo.Mod
+	@$(BINDIR)/disasm DisasmDemo.816
+
+.PHONY: all clean test test_scanner test_orb test_orp test_disasm install

@@ -3,9 +3,14 @@
 #ifndef ORG_H
 #define ORG_H
 
+#include <stdint.h>
 #include "ORB.h"  // For ORB_Type, ORB_Object
 #include "ORS.h"  // For ORS_Ident
 #include "Oberon.h"
+
+#define maxCode 32000  // Increased for 65C816 byte-per-element usage
+extern LONGINT ORG_pc;
+extern uint8_t code[maxCode];
 
 // Type definitions
 typedef struct {

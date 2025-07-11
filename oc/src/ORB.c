@@ -23,6 +23,7 @@ TypePtr byteType = NULL;
 TypePtr boolType = NULL;
 TypePtr charType = NULL;
 TypePtr intType = NULL;
+TypePtr longType = NULL;
 TypePtr realType = NULL;
 TypePtr setType = NULL;
 TypePtr nilType = NULL;
@@ -33,6 +34,9 @@ TypePtr strType = NULL;
 static int nofmod;
 static int Ref;
 static TypePtr typtab[maxTypTab];
+
+/* Source file directory for output file placement */
+static char source_dir[256] = "";
 
 /* All file operations now handled by Files.h/Files.c */
 
@@ -114,15 +118,46 @@ void CloseScope(void) {
 }
 
 /* Import/Export operations */
+void SetSourceDirectory(const char *source_filename) {
+    int i = strlen(source_filename) - 1;
+    
+    // Find the last directory separator
+    while (i >= 0 && source_filename[i] != '/' && source_filename[i] != '\\') {
+        i--;
+    }
+    
+    if (i >= 0) {
+        // Copy directory path including the separator
+        int len = i + 1;
+        if (len >= sizeof(source_dir)) len = sizeof(source_dir) - 1;
+        strncpy(source_dir, source_filename, len);
+        source_dir[len] = '\0';
+    } else {
+        // No directory separator found, use current directory
+        source_dir[0] = '\0';
+    }
+}
+
 void MakeFileName(char *FName, const char *name, const char *ext) {
     int i = 0, j = 0;
     
-    while ((i < ORS_IDENT_LEN-5) && (name[i] != '\0')) {
-        FName[i] = name[i];
+    // Start with the source directory
+    while (source_dir[i] != '\0' && i < ORS_IDENT_LEN - 20) {
+        FName[i] = source_dir[i];
         i++;
     }
     
-    while (ext[j] != '\0') {
+    // Add the module name
+    j = 0;
+    while ((i < ORS_IDENT_LEN-5) && (name[j] != '\0')) {
+        FName[i] = name[j];
+        i++;
+        j++;
+    }
+    
+    // Add the extension
+    j = 0;
+    while (ext[j] != '\0' && i < ORS_IDENT_LEN - 1) {
         FName[i] = ext[j];
         i++;
         j++;
@@ -686,7 +721,8 @@ void ORB_Initialize(void) {
     byteType = type(Byte, Int, 1);
     boolType = type(Bool, Bool, 1);
     charType = type(Char, Char, 1);
-    intType = type(Int, Int, 4);
+    intType = type(Int, Int, 2);
+    longType = type(Int, Int, 4);
     realType = type(Real, Real, 4);
     setType = type(Set, Set, 4);
     nilType = type(NilTyp, NilTyp, 4);
@@ -694,7 +730,7 @@ void ORB_Initialize(void) {
     strType = type(String, String, 8);
     
     /* Initialize universe with data types and in-line procedures;
-       LONGINT is synonym to INTEGER, LONGREAL to REAL.
+       INTEGER is 16-bit, LONGINT is 32-bit, LONGREAL is synonym to REAL.
        LED, ADC, SBC; LDPSR, LDREG, REG, COND are not in language definition */
     systemScope = NULL;  /* n = procno*10 + nofpar */
     
@@ -731,7 +767,7 @@ void ORB_Initialize(void) {
     enter("CHAR", Typ, charType, 0);
     enter("LONGREAL", Typ, realType, 0);
     enter("REAL", Typ, realType, 0);
-    enter("LONGINT", Typ, intType, 0);
+    enter("LONGINT", Typ, longType, 0);
     enter("INTEGER", Typ, intType, 0);
     
     topScope = NULL;
