@@ -11,3 +11,6 @@ as-old/*
 listing.lst
 *.o
 *.hex
+*.rsc
+*.816
+*.smb

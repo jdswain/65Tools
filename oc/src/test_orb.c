@@ -19,15 +19,15 @@ void PrintObject(ObjectPtr obj, int indent) {
     printf("Object: %s", obj->name);
     
     switch (obj->class) {
-        case Head:  printf(" [Head]"); break;
-        case Const: printf(" [Const] val=%d", obj->val); break;
-        case Var:   printf(" [Var]"); break;
-        case Par:   printf(" [Par]"); break;
-        case Fld:   printf(" [Fld] offset=%d", obj->val); break;
-        case Typ:   printf(" [Type]"); break;
-        case SProc: printf(" [SProc] code=%d", obj->val); break;
-        case SFunc: printf(" [SFunc] code=%d", obj->val); break;
-        case Mod:   printf(" [Module]"); break;
+        case ORB_Head:  printf(" [Head]"); break;
+        case ORB_Const: printf(" [Const] val=%d", obj->val); break;
+        case ORB_Var:   printf(" [Var]"); break;
+        case ORB_Par:   printf(" [Par]"); break;
+        case ORB_Fld:   printf(" [Fld] offset=%d", obj->val); break;
+        case ORB_Typ:   printf(" [Type]"); break;
+        case ORB_SProc: printf(" [SProc] code=%d", obj->val); break;
+        case ORB_SFunc: printf(" [SFunc] code=%d", obj->val); break;
+        case ORB_Mod:   printf(" [Module]"); break;
     }
     
     if (obj->expo) printf(" (exported)");
@@ -37,19 +37,19 @@ void PrintObject(ObjectPtr obj, int indent) {
     if (obj->type != NULL) {
         printf(" type=");
         switch (obj->type->form) {
-            case Byte:    printf("Byte"); break;
-            case Bool:    printf("Bool"); break;
-            case Char:    printf("Char"); break;
-            case Int:     printf("Int"); break;
-            case Real:    printf("Real"); break;
-            case Set:     printf("Set"); break;
-            case Pointer: printf("Pointer"); break;
-            case NilTyp:  printf("Nil"); break;
-            case NoTyp:   printf("NoType"); break;
-            case Proc:    printf("Proc"); break;
-            case String:  printf("String"); break;
-            case Array:   printf("Array[%d]", obj->type->len); break;
-            case Record:  printf("Record"); break;
+            case ORB_Byte:    printf("Byte"); break;
+            case ORB_Bool:    printf("Bool"); break;
+            case ORB_Char:    printf("Char"); break;
+            case ORB_Int:     printf("Int"); break;
+            case ORB_Real:    printf("Real"); break;
+            case ORB_Set:     printf("Set"); break;
+            case ORB_Pointer: printf("Pointer"); break;
+            case ORB_NilTyp:  printf("Nil"); break;
+            case ORB_NoTyp:   printf("NoType"); break;
+            case ORB_Proc:    printf("Proc"); break;
+            case ORB_String:  printf("String"); break;
+            case ORB_Array:   printf("Array[%d]", obj->type->len); break;
+            case ORB_Record:  printf("Record"); break;
         }
         printf(" size=%d", obj->type->size);
     }
@@ -81,20 +81,20 @@ void TestBasicOperations() {
     printf("\n1. Creating new objects:\n");
     
     strcpy(ORS_id, "myVar");
-    NewObj(&obj, ORS_id, Var);
+    NewObj(&obj, ORS_id, ORB_Var);
     obj->type = intType;
     obj->expo = true;
     printf("   Created: %s\n", obj->name);
     
     strcpy(ORS_id, "myConst");
-    NewObj(&obj, ORS_id, Const);
+    NewObj(&obj, ORS_id, ORB_Const);
     obj->type = intType;
     obj->val = 42;
     printf("   Created: %s = %d\n", obj->name, obj->val);
     
     /* Test duplicate detection */
     strcpy(ORS_id, "myVar");
-    NewObj(&obj, ORS_id, Var);
+    NewObj(&obj, ORS_id, ORB_Var);
     printf("   Tried to create duplicate 'myVar' - should show error above\n");
     
     /* Test thisObj */
@@ -124,7 +124,7 @@ void TestScopes() {
     
     /* Create objects in outer scope */
     strcpy(ORS_id, "outerVar");
-    NewObj(&obj, ORS_id, Var);
+    NewObj(&obj, ORS_id, ORB_Var);
     obj->type = intType;
     printf("Created in outer scope: %s\n", obj->name);
     
@@ -134,13 +134,13 @@ void TestScopes() {
     
     /* Create objects in inner scope */
     strcpy(ORS_id, "innerVar");
-    NewObj(&obj, ORS_id, Var);
+    NewObj(&obj, ORS_id, ORB_Var);
     obj->type = intType;
     printf("Created in inner scope: %s\n", obj->name);
     
     /* Shadow outer variable */
     strcpy(ORS_id, "outerVar");
-    NewObj(&obj, ORS_id, Var);
+    NewObj(&obj, ORS_id, ORB_Var);
     obj->type = realType;
     printf("Created shadow in inner scope: %s\n", obj->name);
     
@@ -178,14 +178,14 @@ void TestTypes() {
     
     /* Create a record type */
     recType = (TypePtr)calloc(1, sizeof(ORB_Type));
-    recType->form = Record;
+    recType->form = ORB_Record;
     recType->size = 8;
     recType->dsc = NULL;
     
     /* Add fields to record */
     fld = (ObjectPtr)calloc(1, sizeof(ORB_Object));
     strcpy(fld->name, "x");
-    fld->class = Fld;
+    fld->class = ORB_Fld;
     fld->type = intType;
     fld->val = 0;  /* offset */
     fld->next = recType->dsc;
@@ -193,7 +193,7 @@ void TestTypes() {
     
     fld = (ObjectPtr)calloc(1, sizeof(ORB_Object));
     strcpy(fld->name, "y");
-    fld->class = Fld;
+    fld->class = ORB_Fld;
     fld->type = intType;
     fld->val = 4;  /* offset */
     fld->next = recType->dsc;
@@ -201,7 +201,7 @@ void TestTypes() {
     
     /* Create type object */
     strcpy(ORS_id, "Point");
-    NewObj(&obj, ORS_id, Typ);
+    NewObj(&obj, ORS_id, ORB_Typ);
     obj->type = recType;
     recType->typobj = obj;
     printf("Created record type: %s\n", obj->name);
@@ -218,24 +218,24 @@ void TestTypes() {
     
     /* Create array type */
     arrType = (TypePtr)calloc(1, sizeof(ORB_Type));
-    arrType->form = Array;
+    arrType->form = ORB_Array;
     arrType->base = intType;
     arrType->len = 10;
     arrType->size = 40;  /* 10 * 4 */
     
     strcpy(ORS_id, "IntArray");
-    NewObj(&obj, ORS_id, Typ);
+    NewObj(&obj, ORS_id, ORB_Typ);
     obj->type = arrType;
     printf("\nCreated array type: %s[10]\n", obj->name);
     
     /* Create pointer type */
     ptrType = (TypePtr)calloc(1, sizeof(ORB_Type));
-    ptrType->form = Pointer;
+    ptrType->form = ORB_Pointer;
     ptrType->base = recType;
     ptrType->size = 4;
     
     strcpy(ORS_id, "PointPtr");
-    NewObj(&obj, ORS_id, Typ);
+    NewObj(&obj, ORS_id, ORB_Typ);
     obj->type = ptrType;
     printf("Created pointer type: %s -> Point\n", obj->name);
 }

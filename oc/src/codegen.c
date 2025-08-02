@@ -55,6 +55,20 @@ void or(uint8_t op, int v) {
   o(r & 0xff);
 }
 
+void of(uint8_t op, int v) {
+  // Fixup branch: store opcode and fixup chain link
+  o(op);
+  if (v == 0) {
+    // First forward branch in chain
+    o(0);
+  } else {
+    // Forward branch - store relative offset to previous branch in chain
+    // v is the address of the previous offset byte
+    int chain_offset = v - (ORG_pc + 1);
+    o(chain_offset & 0xff);
+  }
+}
+
 /* 65C816 formats */
 
 void orl(uint8_t op, int v) {
@@ -123,9 +137,9 @@ void codegen_gen(OpCode opcode, AddrMode mode, int value1, int value2)
   if (mode == Absolute) {
     if (is_dp(value1)) mode = DirectPage;
   }
-  else if (mode == AbsoluteIndexedX) {
-    if (is_dp(value1)) mode = DirectPageIndexedX;
-  }
+  //  else if (mode == AbsoluteIndexedX) {
+  //    if (is_dp(value1)) mode = DirectPageIndexedX;
+  //  }
   else if (mode == AbsoluteIndexedY) {
     if (is_dp(value1)) mode = DirectPageIndexedY;
   }
@@ -164,6 +178,7 @@ char *codegen_format_mode(AddrMode mode, int value1, int value2)
   /* Stack, */
   case ProgramCounterRelative: sprintf(buffer, "$%02x", value1); break;
   case ProgramCounterRelativeLong: sprintf(buffer, "$%04x", value1); break;
+  case Fixup: sprintf(buffer, "*%02x", value1); break;
   case AbsoluteIndirectLong: sprintf(buffer, "[$%04x]", value1); break;
   case BlockMove: sprintf(buffer, "$%02x,$%02x", value1, value2); break;
   case DirectPageIndexedIndirectX: sprintf(buffer, "($%02x,X)", value1); break;
@@ -200,6 +215,7 @@ char *codegen_format_mode_str(AddrMode mode, char *value1, int value2)
   /* Stack, */
   case ProgramCounterRelative: sprintf(buffer, "%s", value1); break;
   case ProgramCounterRelativeLong: sprintf(buffer, "%s", value1); break;
+  case Fixup: sprintf(buffer, "*%s", value1); break;
   case AbsoluteIndirectLong: sprintf(buffer, "[%s]", value1); break;
   case BlockMove: sprintf(buffer, "%s,$%02x", value1, value2); break;
   case DirectPageIndexedIndirectX: sprintf(buffer, "(%s,X)", value1); break;

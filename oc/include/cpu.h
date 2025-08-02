@@ -29,6 +29,7 @@ enum AddrMode {
   /* Stack, */
   ProgramCounterRelative,        /* nearlabel */
   ProgramCounterRelativeLong,    /* label */
+  Fixup,                         /* forward branch fixup */
   AbsoluteIndirectLong,          /* [addr] */
   BlockMove,                     /* srcbk,destbk */
   DirectPageIndexedIndirectX,    /* (dp,X) */

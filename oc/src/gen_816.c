@@ -59,29 +59,29 @@ void gen_816(OpCode opcode, AddrMode mode, int value1, int value2)
     }
     break;
   case sBCC:
-    if (value1 == 0) return; /* Optimisation */
     switch( mode ) {
     case DirectPage:
     case Absolute:
     case ProgramCounterRelative:         or(0x90, value1); return;
+    case Fixup:                          of(0x90, value1); return;
     default:                             break;
     }
     break;
   case sBCS:
-    if (value1 == 0) return; /* Optimisation */
     switch( mode ) {
     case DirectPage:
     case Absolute:
     case ProgramCounterRelative:         or(0xb0, value1); return;
+    case Fixup:                          of(0xb0, value1); return;
     default:                             break;
     }
     break;
   case sBEQ:
-    if (value1 == 0) return; /* Optimisation */
     switch( mode ) {
     case DirectPage:
     case Absolute:
     case ProgramCounterRelative:         or(0xf0, value1); return;
+    case Fixup:                          of(0xf0, value1); return;
     default:                             break;
     }
     break;
@@ -96,49 +96,50 @@ void gen_816(OpCode opcode, AddrMode mode, int value1, int value2)
     }
     break;
   case sBMI:
-    if (value1 == 0) return; /* Optimisation */
     switch( mode ) {
     case DirectPage:
     case Absolute:
     case ProgramCounterRelative:         or(0x30, value1); return;
+    case Fixup:                          of(0x30, value1); return;
     default:                             break;
     }
     break;
   case sBNE:
-    if (value1 == 0) return; /* Optimisation */
     switch( mode ) {
     case DirectPage:
     case Absolute:
     case ProgramCounterRelative:         or(0xd0, value1); return;
+    case Fixup:                          of(0xd0, value1); return;
     default:                             break;
     }
     break;
   case sBPL:
-    if (value1 == 0) return; /* Optimisation */
     switch( mode ) {
     case DirectPage:
     case Absolute:
     case ProgramCounterRelative:         or(0x10, value1); return;
+    case Fixup:                          of(0x10, value1); return;
     default:                             break;
     }
     
     break;
   case sBRA:
-    if (value1 == 0) return; /* Optimisation */
     switch( mode ) {
     case DirectPage:
     case Absolute:
     case ProgramCounterRelative:
       {
-	int r = value1 - (ORG_pc + 1);
-	if ((r > 127) || (r < -128)) {
+		//int r = value1 - (ORG_pc + 1);
+	// We remove size promotion for now
+	//if ((r > 127) || (r < -128)) {
 	  // as_gen_warn(filename, line_num, "BRA promoted to BRL %d", value1);
-	  orl(0x82, value1);
-	} else {
+	  //orl(0x82, value1);
+	//} else {
 	  or(0x80, value1);
-	}
+	  //}
       }
       return;
+    case Fixup:                          of(0x80, value1); return;
     default:                             break;
     }
     break;
@@ -150,26 +151,24 @@ void gen_816(OpCode opcode, AddrMode mode, int value1, int value2)
     }
     break;
   case sBRL:
-    if (value1 == 0) return; /* Optimisation */
     switch( mode ) {
     case DirectPage:
     case Absolute:
     case ProgramCounterRelative:
       {
-	int r = value1 - (ORG_pc + 1);
-	if ((r > 127) || (r < -128)) {
+		//int r = value1 - (ORG_pc + 1);
+	//	if ((r > 127) || (r < -128)) {
 	  orl(0x82, value1);
-	} else {
+	  //	} else {
 	  // as_gen_warn(filename, line_num, "BRL demoted to BRA %d", value1);
-	  or(0x80, value1);
-	}
+	  //	  or(0x80, value1);
+	  //	}
       }
       return;
     default:                             break;
     }
     break;
   case sBVC:
-    if (value1 == 0) return; /* Optimisation */
     switch( mode ) {
     case DirectPage:
     case Absolute:
@@ -178,7 +177,6 @@ void gen_816(OpCode opcode, AddrMode mode, int value1, int value2)
     }
     break;
   case sBVS:
-    if (value1 == 0) return; /* Optimisation */
     switch( mode ) {
     case DirectPage:
     case Absolute:

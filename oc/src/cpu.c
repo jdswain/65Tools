@@ -62,6 +62,7 @@ OpCode byte_to_opcode(unsigned char byte) {
         case 0xA9: return sLDA;    // LDA Immediate
         case 0xA5: return sLDA;    // LDA Direct Page
         case 0xAD: return sLDA;    // LDA Absolute
+        case 0xA7: return sLDA;    // LDA [Direct Page] (Direct Page Indirect Long)
         case 0xB5: return sLDA;    // LDA Direct Page,X
         case 0xBD: return sLDA;    // LDA Absolute,X
         case 0xB9: return sLDA;    // LDA Absolute,Y
@@ -69,9 +70,14 @@ OpCode byte_to_opcode(unsigned char byte) {
         // STA variants
         case 0x85: return sSTA;    // STA Direct Page
         case 0x8D: return sSTA;    // STA Absolute
+        case 0x87: return sSTA;    // STA [Direct Page] (Direct Page Indirect Long)
+        case 0x92: return sSTA;    // STA Direct Page Indirect
         case 0x95: return sSTA;    // STA Direct Page,X
         case 0x9D: return sSTA;    // STA Absolute,X
         case 0x99: return sSTA;    // STA Absolute,Y
+        
+        // LDX variants
+        case 0xA6: return sLDX;    // LDX Direct Page
         
         // ADC variants
         case 0x69: return sADC;    // ADC Immediate
@@ -89,6 +95,32 @@ OpCode byte_to_opcode(unsigned char byte) {
         case 0xFD: return sSBC;    // SBC Absolute,X
         case 0xF9: return sSBC;    // SBC Absolute,Y
         
+        // CMP variants
+        case 0xC9: return sCMP;    // CMP Immediate
+        case 0xC5: return sCMP;    // CMP Direct Page
+        case 0xCD: return sCMP;    // CMP Absolute
+        case 0xD5: return sCMP;    // CMP Direct Page,X
+        case 0xDD: return sCMP;    // CMP Absolute,X
+        case 0xD9: return sCMP;    // CMP Absolute,Y
+        
+        // Branch instructions
+        case 0x10: return sBPL;    // BPL - Branch if Plus
+        case 0x30: return sBMI;    // BMI - Branch if Minus
+        case 0x50: return sBVC;    // BVC - Branch if Overflow Clear
+        case 0x70: return sBVS;    // BVS - Branch if Overflow Set
+        case 0x90: return sBCC;    // BCC - Branch if Carry Clear
+        case 0xB0: return sBCS;    // BCS - Branch if Carry Set
+        case 0xD0: return sBNE;    // BNE - Branch if Not Equal
+        case 0xF0: return sBEQ;    // BEQ - Branch if Equal
+        case 0x80: return sBRA;    // BRA - Branch Always
+        case 0x82: return sBRL;    // BRL - Branch Long Always
+        
+        // Transfer instructions
+        case 0xAA: return sTAX;    // TAX - Transfer A to X
+        case 0xA8: return sTAY;    // TAY - Transfer A to Y
+        case 0x8A: return sTXA;    // TXA - Transfer X to A
+        case 0x98: return sTYA;    // TYA - Transfer Y to A
+        
         // Other common instructions
         case 0x20: return sJSR;    // JSR Absolute
         case 0xEA: return sNOP;    // NOP
@@ -100,10 +132,16 @@ OpCode byte_to_opcode(unsigned char byte) {
         // Stack operations
         case 0x3B: return sTSC;    // TSC - Transfer Stack Pointer to A
         case 0x1B: return sTCS;    // TCS - Transfer A to Stack Pointer
+        case 0xFA: return sPLX;    // PLX - Pull X from Stack
+        case 0xDA: return sPHX;    // PHX - Push X to Stack
         
         // Stack relative addressing
         case 0xA3: return sLDA;    // LDA sr,S (Stack Relative)
         case 0x83: return sSTA;    // STA sr,S (Stack Relative)
+        
+        // Stack relative indirect indexed Y addressing
+        case 0xB3: return sLDA;    // LDA (sr,S),Y (Stack Relative Indirect Indexed Y)
+        case 0x93: return sSTA;    // STA (sr,S),Y (Stack Relative Indirect Indexed Y)
         
         default: return sNOP;      // Unknown opcode, treat as NOP for safety
     }

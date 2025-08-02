@@ -4,7 +4,7 @@
    called "symbol table". Contains procedures for creation of Objects, and for search:
    NewObj, this, thisimport, thisfield (and OpenScope, CloseScope).
    Handling of import and export, i.e. reading and writing of "symbol files" is done by procedures
-   Import and Export. This module contains the list of standard identifiers, with which
+   Import and Export. Thismodule contains the list of standard identifiers, with which
    the symbol table (universe), and that of the pseudo-module SYSTEM are initialized. */
 
 #include <stdio.h>
@@ -107,7 +107,7 @@ ObjectPtr thisfield(TypePtr rec) {
 
 void OpenScope(void) {
     ObjectPtr s = (ObjectPtr)calloc(1, sizeof(ORB_Object));
-    s->class = Head;
+    s->class = ORB_Head;
     s->dsc = topScope;
     s->next = NULL;
     topScope = s;
@@ -166,7 +166,7 @@ void MakeFileName(char *FName, const char *name, const char *ext) {
     FName[i] = '\0';
 }
 
-static ObjectPtr ThisModule(const char *name, const char *orgname, bool decl, int32_t key) {
+static ObjectPtr ThisORB_Module(const char *name, const char *orgname, bool decl, int32_t key) {
     ModulePtr mod;
     ObjectPtr obj, obj1;
     
@@ -189,7 +189,7 @@ static ObjectPtr ThisModule(const char *name, const char *orgname, bool decl, in
         if (obj == NULL) {
             /* Insert new module */
             mod = (ModulePtr)calloc(1, sizeof(ORB_Module));
-            mod->base.class = Mod;
+            mod->base.class = ORB_Mod;
             mod->base.rdo = false;
             strcpy(mod->base.name, name);
             strcpy(mod->orgname, orgname);
@@ -208,7 +208,7 @@ static ObjectPtr ThisModule(const char *name, const char *orgname, bool decl, in
             obj1->next = (ObjectPtr)mod;
             obj = (ObjectPtr)mod;
         } else if (decl) {
-            if (obj->type->form == NoTyp) {
+            if (obj->type->form == ORB_NoTyp) {
                 ORS_Mark("mult def");
             } else {
                 ORS_Mark("invalid import order");
@@ -217,8 +217,8 @@ static ObjectPtr ThisModule(const char *name, const char *orgname, bool decl, in
             ORS_Mark("conflict with alias");
         }
     } else if (decl) {
-        /* Module already present, explicit import by declaration */
-        if (obj->type->form == NoTyp) {
+        /* ORB_Module already present, explicit import by declaration */
+        if (obj->type->form == ORB_NoTyp) {
             ORS_Mark("mult def");
         } else {
             ORS_Mark("invalid import order");
@@ -261,16 +261,16 @@ static void InType(Files_Rider *R, ObjectPtr thismod, TypePtr *T) {
         Read(R, &form);
         t->form = form;
         
-        if (form == Pointer) {
+        if (form == ORB_Pointer) {
             InType(R, thismod, &t->base);
             t->size = 4;
-        } else if (form == Array) {
+        } else if (form == ORB_Array) {
             InType(R, thismod, &t->base);
             Files_ReadNum(R, &t->len);
             Files_ReadNum(R, &t->size);
-        } else if (form == Record) {
+        } else if (form == ORB_Record) {
             InType(R, thismod, &t->base);
-            if (t->base->form == NoTyp) {
+            if (t->base->form == ORB_NoTyp) {
                 t->base = NULL;
                 obj = NULL;
             } else {
@@ -313,7 +313,7 @@ static void InType(Files_Rider *R, ObjectPtr thismod, TypePtr *T) {
             } else {
                 last->next = obj;
             }
-        } else if (form == Proc) {
+        } else if (form == ORB_Proc) {
             InType(R, thismod, &t->base);
             obj = NULL;
             np = 0;
@@ -340,7 +340,7 @@ static void InType(Files_Rider *R, ObjectPtr thismod, TypePtr *T) {
         if (modname[0] != '\0') {  /* Re-import */
             Files_ReadInt(R, &key);
             Files_ReadString(R, name);
-            mod = ThisModule(modname, modname, false, key);
+            mod = ThisORB_Module(modname, modname, false, key);
             obj = mod->dsc;
             
             /* Search type */
@@ -354,7 +354,7 @@ static void InType(Files_Rider *R, ObjectPtr thismod, TypePtr *T) {
                 /* Insert new type object */
                 obj = (ObjectPtr)calloc(1, sizeof(ORB_Object));
                 strcpy(obj->name, name);
-                obj->class = Typ;
+                obj->class = ORB_Typ;
                 obj->next = mod->dsc;
                 mod->dsc = obj;
                 obj->type = t;
@@ -378,7 +378,7 @@ void Import(char *modid, char *modid1) {
     Files_Rider R;
     
     if (strcmp(modid1, "SYSTEM") == 0) {
-        thismod = ThisModule(modid, modid1, true, key);
+        thismod = ThisORB_Module(modid, modid1, true, key);
         nofmod--;
         thismod->lev = 0;
         thismod->dsc = systemScope;
@@ -392,7 +392,7 @@ void Import(char *modid, char *modid1) {
             Files_ReadInt(&R, &key);
             Files_ReadInt(&R, &key);
             Files_ReadString(&R, modname);
-            thismod = ThisModule(modid, modid1, true, key);
+            thismod = ThisORB_Module(modid, modid1, true, key);
             thismod->rdo = true;
             
             Read(&R, &class);  /* version key */
@@ -408,7 +408,7 @@ void Import(char *modid, char *modid1) {
                 InType(&R, thismod, &obj->type);
                 obj->lev = -thismod->lev;
                 
-                if (class == Typ) {
+                if (class == ORB_Typ) {
                     t = obj->type;
                     t->typobj = obj;
                     Read(&R, &k);
@@ -419,13 +419,13 @@ void Import(char *modid, char *modid1) {
                         Read(&R, &k);
                     }
                 } else {
-                    if (class == Const) {
-                        if (obj->type->form == Real) {
+                    if (class == ORB_Const) {
+                        if (obj->type->form == ORB_Real) {
                             Files_ReadInt(&R, &obj->val);
                         } else {
                             Files_ReadNum(&R, &obj->val);
                         }
-                    } else if (class == Var) {
+                    } else if (class == ORB_Var) {
                         Files_ReadNum(&R, &obj->val);
                         obj->rdo = true;
                     }
@@ -461,25 +461,25 @@ static void OutPar(Files_Rider *R, ObjectPtr par, int n) {
     }
 }
 
-static void FindHiddenPointers(Files_Rider *R, TypePtr typ, int32_t offset) {
+static void FindHiddenORB_Pointers(Files_Rider *R, TypePtr typ, int32_t offset) {
     ObjectPtr fld;
     int32_t i, n;
     
-    if ((typ->form == Pointer) || (typ->form == NilTyp)) {
-        Write(R, Fld);
+    if ((typ->form == ORB_Pointer) || (typ->form == ORB_NilTyp)) {
+        Write(R, ORB_Fld);
         Write(R, 0);
         Files_WriteNum(R, offset);
-    } else if (typ->form == Record) {
+    } else if (typ->form == ORB_Record) {
         fld = typ->dsc;
         while (fld != NULL) {
-            FindHiddenPointers(R, fld->type, fld->val + offset);
+            FindHiddenORB_Pointers(R, fld->type, fld->val + offset);
             fld = fld->next;
         }
-    } else if (typ->form == Array) {
+    } else if (typ->form == ORB_Array) {
         i = 0;
         n = typ->len;
         while (i < n) {
-            FindHiddenPointers(R, typ->base, typ->base->size * i + offset);
+            FindHiddenORB_Pointers(R, typ->base, typ->base->size * i + offset);
             i++;
         }
     }
@@ -504,13 +504,13 @@ static void OutType(Files_Rider *R, TypePtr t) {
         
         Write(R, t->form);
         
-        if (t->form == Pointer) {
+        if (t->form == ORB_Pointer) {
             OutType(R, t->base);
-        } else if (t->form == Array) {
+        } else if (t->form == ORB_Array) {
             OutType(R, t->base);
             Files_WriteNum(R, t->len);
             Files_WriteNum(R, t->size);
-        } else if (t->form == Record) {
+        } else if (t->form == ORB_Record) {
             if (t->base != NULL) {
                 OutType(R, t->base);
                 bot = t->base->dsc;
@@ -531,17 +531,17 @@ static void OutType(Files_Rider *R, TypePtr t) {
             fld = t->dsc;
             while (fld != bot) {
                 if (fld->expo) {
-                    Write(R, Fld);
+                    Write(R, ORB_Fld);
                     Files_WriteString(R, fld->name);
                     OutType(R, fld->type);
                     Files_WriteNum(R, fld->val);  /* offset */
                 } else {
-                    FindHiddenPointers(R, fld->type, fld->val);
+                    FindHiddenORB_Pointers(R, fld->type, fld->val);
                 }
                 fld = fld->next;
             }
             Write(R, 0);
-        } else if (t->form == Proc) {
+        } else if (t->form == ORB_Proc) {
             OutType(R, t->base);
             OutPar(R, t->dsc, t->nofpar);
             Write(R, 0);
@@ -575,7 +575,7 @@ void Export(const char *modid, BOOLEAN *newSF, int32_t *key) {
     Files_File *F, *F1;
     Files_Rider R, R1;
     
-    Ref = Record + 1;
+    Ref = ORB_Record + 1;
     MakeFileName(filename, modid, ".smb");
     
     /* Read old checksum first before overwriting file */
@@ -603,12 +603,12 @@ void Export(const char *modid, BOOLEAN *newSF, int32_t *key) {
             Files_WriteString(&R, obj->name);
             OutType(&R, obj->type);
             
-            if (obj->class == Typ) {
-                if (obj->type->form == Record) {
+            if (obj->class == ORB_Typ) {
+                if (obj->type->form == ORB_Record) {
                     obj0 = topScope->next;
                     /* Check whether this is base of previously declared pointer types */
                     while (obj0 != obj) {
-                        if ((obj0->type->form == Pointer) && 
+                        if ((obj0->type->form == ORB_Pointer) && 
                             (obj0->type->base == obj->type) && 
                             (obj0->type->ref > 0)) {
                             Write(&R, obj0->type->ref);
@@ -617,15 +617,15 @@ void Export(const char *modid, BOOLEAN *newSF, int32_t *key) {
                     }
                 }
                 Write(&R, 0);
-            } else if (obj->class == Const) {
-                if (obj->type->form == Proc) {
+            } else if (obj->class == ORB_Const) {
+                if (obj->type->form == ORB_Proc) {
                     Files_WriteNum(&R, obj->exno);
-                } else if (obj->type->form == Real) {
+                } else if (obj->type->form == ORB_Real) {
                     Files_WriteInt(&R, obj->val);
                 } else {
                     Files_WriteNum(&R, obj->val);
                 }
-            } else if (obj->class == Var) {
+            } else if (obj->class == ORB_Var) {
                 Files_WriteNum(&R, obj->exno);
             }
         }
@@ -638,7 +638,7 @@ void Export(const char *modid, BOOLEAN *newSF, int32_t *key) {
     } while (Files_Length(F) % 4 != 0);
     
     /* Clear type table */
-    for (Ref = Record + 1; Ref < maxTypTab; Ref++) {
+    for (Ref = ORB_Record + 1; Ref < maxTypTab; Ref++) {
         typtab[Ref] = NULL;
     }
     
@@ -707,7 +707,7 @@ static void enter(const char *name, int cl, TypePtr type, int32_t n) {
     obj->val = n;
     obj->dsc = NULL;
     
-    if (cl == Typ) {
+    if (cl == ORB_Typ) {
         type->typobj = obj;
     }
     
@@ -715,19 +715,19 @@ static void enter(const char *name, int cl, TypePtr type, int32_t n) {
     systemScope = obj;
 }
 
-/* Module initialization - call this once at program start */
+/* ORB_Module initialization - call this once at program start */
 void ORB_Initialize(void) {
     /* Initialize basic types */
-    byteType = type(Byte, Int, 1);
-    boolType = type(Bool, Bool, 1);
-    charType = type(Char, Char, 1);
-    intType = type(Int, Int, 2);
-    longType = type(Int, Int, 4);
-    realType = type(Real, Real, 4);
-    setType = type(Set, Set, 4);
-    nilType = type(NilTyp, NilTyp, 4);
-    noType = type(NoTyp, NoTyp, 4);
-    strType = type(String, String, 8);
+    byteType = type(ORB_Byte, ORB_Int, 1);
+    boolType = type(ORB_Bool, ORB_Bool, 1);
+    charType = type(ORB_Char, ORB_Char, 1);
+    intType = type(ORB_Int, ORB_Int, 2);
+    longType = type(ORB_Int, ORB_Int, 4);
+    realType = type(ORB_Real, ORB_Real, 4);
+    setType = type(ORB_Set, ORB_Set, 4);
+    nilType = type(ORB_NilTyp, ORB_NilTyp, 2);
+    noType = type(ORB_NoTyp, ORB_NoTyp, 2);
+    strType = type(ORB_String, ORB_String, 8);
     
     /* Initialize universe with data types and in-line procedures;
        INTEGER is 16-bit, LONGINT is 32-bit, LONGREAL is synonym to REAL.
@@ -735,40 +735,40 @@ void ORB_Initialize(void) {
     systemScope = NULL;  /* n = procno*10 + nofpar */
     
     /* Functions */
-    enter("UML", SFunc, intType, 132);
-    enter("SBC", SFunc, intType, 122);
-    enter("ADC", SFunc, intType, 112);
-    enter("ROR", SFunc, intType, 92);
-    enter("ASR", SFunc, intType, 82);
-    enter("LSL", SFunc, intType, 72);
-    enter("LEN", SFunc, intType, 61);
-    enter("CHR", SFunc, charType, 51);
-    enter("ORD", SFunc, intType, 41);
-    enter("FLT", SFunc, realType, 31);
-    enter("FLOOR", SFunc, intType, 21);
-    enter("ODD", SFunc, boolType, 11);
-    enter("ABS", SFunc, intType, 1);
+    enter("UML", ORB_SFunc, intType, 132);
+    enter("SBC", ORB_SFunc, intType, 122);
+    enter("ADC", ORB_SFunc, intType, 112);
+    enter("ROR", ORB_SFunc, intType, 92);
+    enter("ASR", ORB_SFunc, intType, 82);
+    enter("LSL", ORB_SFunc, intType, 72);
+    enter("LEN", ORB_SFunc, intType, 61);
+    enter("CHR", ORB_SFunc, charType, 51);
+    enter("ORD", ORB_SFunc, intType, 41);
+    enter("FLT", ORB_SFunc, realType, 31);
+    enter("FLOOR", ORB_SFunc, intType, 21);
+    enter("ODD", ORB_SFunc, boolType, 11);
+    enter("ABS", ORB_SFunc, intType, 1);
     
     /* Procedures */
-    enter("LED", SProc, noType, 81);
-    enter("UNPK", SProc, noType, 72);
-    enter("PACK", SProc, noType, 62);
-    enter("NEW", SProc, noType, 51);
-    enter("ASSERT", SProc, noType, 41);
-    enter("EXCL", SProc, noType, 32);
-    enter("INCL", SProc, noType, 22);
-    enter("DEC", SProc, noType, 11);
-    enter("INC", SProc, noType, 1);
+    enter("LED", ORB_SProc, noType, 81);
+    enter("UNPK", ORB_SProc, noType, 72);
+    enter("PACK", ORB_SProc, noType, 62);
+    enter("NEW", ORB_SProc, noType, 51);
+    enter("ASSERT", ORB_SProc, noType, 41);
+    enter("EXCL", ORB_SProc, noType, 32);
+    enter("INCL", ORB_SProc, noType, 22);
+    enter("DEC", ORB_SProc, noType, 11);
+    enter("INC", ORB_SProc, noType, 1);
     
     /* Types */
-    enter("SET", Typ, setType, 0);
-    enter("BOOLEAN", Typ, boolType, 0);
-    enter("BYTE", Typ, byteType, 0);
-    enter("CHAR", Typ, charType, 0);
-    enter("LONGREAL", Typ, realType, 0);
-    enter("REAL", Typ, realType, 0);
-    enter("LONGINT", Typ, longType, 0);
-    enter("INTEGER", Typ, intType, 0);
+    enter("SET", ORB_Typ, setType, 0);
+    enter("BOOLEAN", ORB_Typ, boolType, 0);
+    enter("BYTE", ORB_Typ, byteType, 0);
+    enter("CHAR", ORB_Typ, charType, 0);
+    enter("LONGREAL", ORB_Typ, realType, 0);
+    enter("REAL", ORB_Typ, realType, 0);
+    enter("LONGINT", ORB_Typ, longType, 0);
+    enter("INTEGER", ORB_Typ, intType, 0);
     
     topScope = NULL;
     OpenScope();
@@ -779,18 +779,18 @@ void ORB_Initialize(void) {
     systemScope = NULL;
     
     /* Functions */
-    enter("H", SFunc, intType, 201);
-    enter("COND", SFunc, boolType, 191);
-    enter("SIZE", SFunc, intType, 181);
-    enter("ADR", SFunc, intType, 171);
-    enter("VAL", SFunc, intType, 162);
-    enter("REG", SFunc, intType, 151);
-    enter("BIT", SFunc, boolType, 142);
+    enter("H", ORB_SFunc, intType, 201);
+    enter("COND", ORB_SFunc, boolType, 191);
+    enter("SIZE", ORB_SFunc, intType, 181);
+    enter("ADR", ORB_SFunc, intType, 171);
+    enter("VAL", ORB_SFunc, intType, 162);
+    enter("REG", ORB_SFunc, intType, 151);
+    enter("BIT", ORB_SFunc, boolType, 142);
     
     /* Procedures */
-    enter("LDREG", SProc, noType, 142);
-    enter("LDPSR", SProc, noType, 131);
-    enter("COPY", SProc, noType, 123);
-    enter("PUT", SProc, noType, 112);
-    enter("GET", SProc, noType, 102);
+    enter("LDREG", ORB_SProc, noType, 142);
+    enter("LDPSR", ORB_SProc, noType, 131);
+    enter("COPY", ORB_SProc, noType, 123);
+    enter("PUT", ORB_SProc, noType, 112);
+    enter("GET", ORB_SProc, noType, 102);
 }

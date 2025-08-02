@@ -465,6 +465,8 @@ private:
     else
       ia = getWord(bank(0) | (sp.w + disp));
 
+	std::cout << "disp = " << std::hex << disp << ", addr = " << sp.w + disp << ",ia = " << ia << std::endl;
+	
     return (bank(dbr) | (Word)(ia + y.w));
   }
 
@@ -865,8 +867,7 @@ private:
     else {
       Word	data = getWord(ea);
       Addr	temp = a.w - data;
-
-      setc(temp & 0x10000L);
+      setc(a.w >= temp);
       setnz_w((Word)temp);
       cycles += 3;
     }

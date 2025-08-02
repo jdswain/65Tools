@@ -15,17 +15,6 @@
 #define maxTypTab 64
 
 /* Class values */
-#define Head 0
-#define Const 1
-#define Var 2
-#define Par 3
-#define Fld 4
-#define Typ 5
-#define SProc 6
-#define SFunc 7
-#define Mod 8
-
-/* Class values with ORB_ prefix */
 #define ORB_Head 0
 #define ORB_Const 1
 #define ORB_Var 2
@@ -37,21 +26,6 @@
 #define ORB_Mod 8
 
 /* Form values */
-#define Byte 1
-#define Bool 2
-#define Char 3
-#define Int 4
-#define Real 5
-#define Set 6
-#define Pointer 7
-#define NilTyp 8
-#define NoTyp 9
-#define Proc 10
-#define String 11
-#define Array 12
-#define Record 13
-
-/* Form values with ORB_ prefix */
 #define ORB_Byte 1
 #define ORB_Bool 2
 #define ORB_Char 3

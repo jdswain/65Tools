@@ -93,7 +93,7 @@ void ORG_FixLink(LONGINT L);
 // Procedure call operations
 void ORG_PrepCall(ORG_Item *x, LONGINT *r);
 void ORG_Call(ORG_Item *x, LONGINT r);
-void ORG_Enter(LONGINT parblksize, LONGINT locblksize, BOOLEAN int_proc);
+void ORG_Enter(ORB_Object *params, LONGINT locblksize, BOOLEAN int_proc);
 void ORG_Return(INTEGER form, ORG_Item *x, LONGINT size, BOOLEAN int_proc);
 
 // Inline procedures

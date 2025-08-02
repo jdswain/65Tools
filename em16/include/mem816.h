@@ -42,11 +42,11 @@ public:
   // Fetch a byte from memory
   INLINE static Byte getByte(Addr ea)
   {
-	//if ((ea >= 0xC000) && (ea <= 0xC004))
-	//  return uart.getByte(ea);
+	if ((ea >= 0xC000) && (ea <= 0xC004))
+	  return uart.getByte(ea);
 
-	 if ((ea >= 0x0000) && (ea <= 0x0FF))
-	   return r6501.getByte(ea);
+	// if ((ea >= 0x0000) && (ea <= 0x0FF))
+	//   return r6501.getByte(ea);
 
 	//if ((ea >= 0x9000) && (ea <= 0xA000))
 	//	return video.getByte(ea - 0x9000);
@@ -73,10 +73,10 @@ public:
   INLINE static void setByte(Addr ea, Byte data)
   {
 	// std::cout << "Set byte at " << ea << std::endl;
-	//if ((ea >= 0xC000) && (ea <= 0xC004))
-	//  uart.setByte(ea, data);
-	 if ((ea >= 0x0000) && (ea <= 0x00FF))
-	  r6501.setByte(ea, data);
+	if ((ea >= 0xC000) && (ea <= 0xC004))
+	  uart.setByte(ea, data);
+	// if ((ea >= 0x0000) && (ea <= 0x00FF))
+	//  r6501.setByte(ea, data);
 
 	//if ((ea >= 0x9000) && (ea <= 0xA000))
 	//  return video.setByte(ea - 0x9000, data);

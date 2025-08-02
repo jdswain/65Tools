@@ -171,27 +171,36 @@ static void ReadScaleFactor(void) {
 
 // Read number (integer or real)
 static void ReadNumber(void) {
-  INTEGER i, k, d; //, n;
+    INTEGER i, k, d, h;
     REAL x;
-    // BOOLEAN negE;
+    INTEGER digits[16];  // Store digit values for potential hex conversion
     
     ORS_ival = 0;
     k = 0;
     
-    // Read integer part
+    // Read digits and hex characters (0-9, A-F)
     do {
         if (k < 16) {  // Avoid overflow
-            d = ch - '0';
+            if (ch >= '0' && ch <= '9') {
+                d = ch - '0';
+            } else if (ch >= 'A' && ch <= 'F') {
+                d = ch - 'A' + 10;
+            } else {
+                break;  // Not a valid digit/hex character
+            }
+            
+            digits[k] = d;  // Store for potential hex conversion
             if (ORS_ival <= (LONGINT)(2147483647 - d) / 10) {
-                ORS_ival = ORS_ival * 10 + d;
+                ORS_ival = ORS_ival * 10 + d;  // Assume decimal for now
                 k++;
             } else {
                 ORS_Mark("number too large");
                 ORS_ival = 0;
+                break;
             }
         }
         ReadChar();
-    } while (isdigit(ch));
+    } while ((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'F'));
     
     if (ch == '.') {
         ReadChar();
@@ -216,22 +225,35 @@ static void ReadNumber(void) {
             }
         }
     } else if (ch == 'H') {
-        // Hexadecimal number
+        // Hexadecimal number - convert stored digits from decimal to hex interpretation
         ReadChar();
-        if (ORS_ival > (LONGINT)0xFFFFFFFF) {
-            ORS_Mark("hexadecimal number too large");
-            ORS_ival = 0;
+        ORS_ival = 0;
+        for (i = 0; i < k; i++) {
+            h = digits[i];
+            // h is already correct: 0-9 = 0-9, A-F = 10-15
+            if (ORS_ival <= (LONGINT)0x0FFFFFFF) {  // Check for hex overflow
+                ORS_ival = ORS_ival * 16 + h;  // Build hex value
+            } else {
+                ORS_Mark("hexadecimal number too large");
+                ORS_ival = 0;
+                break;
+            }
         }
     } else if (ch == 'X') {
-        // Character constant
+        // Character constant - convert stored digits to hex value
         ReadChar();
-        if (ORS_ival < 256) {
-            // Valid character code
-        } else {
+        ORS_ival = 0;
+        for (i = 0; i < k; i++) {
+            h = digits[i];
+            // h is already correct: 0-9 = 0-9, A-F = 10-15
+            ORS_ival = ORS_ival * 16 + h;
+        }
+        if (ORS_ival >= 256) {
             ORS_Mark("invalid character");
             ORS_ival = 0;
         }
     }
+    // If no suffix, ORS_ival already contains the decimal interpretation
 }
 
 // Read identifier

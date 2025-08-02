@@ -30,7 +30,7 @@ static void Type0(ORB_Type **type);
 static void FormalType0(ORB_Type **typ, INTEGER dim);
 static void StatSequence(void);
 static void ProcedureType(ORB_Type *ptype, LONGINT *parblksize);
-static void Declarations(LONGINT *varsize);
+static void Declarations(LONGINT *varsize, LONGINT parblksize);
 static void ProcedureDecl(void);
 
 // Basic utility functions
@@ -49,7 +49,7 @@ static void qualident(ORB_Object **obj) {
         ORS_Mark("undef");
         *obj = dummy;
     }
-    if ((sym == ORS_period) && ((*obj)->class == Mod)) {
+    if ((sym == ORS_period) && ((*obj)->class == ORB_Mod)) {
         ORS_Get(&sym);
         if (sym == ORS_ident) {
             *obj = thisimport(*obj);
@@ -66,38 +66,38 @@ static void qualident(ORB_Object **obj) {
 }
 
 static void CheckBool(ORG_Item *x) {
-    if (x->type->form != Bool) {
+    if (x->type->form != ORB_Bool) {
         ORS_Mark("not Boolean");
         x->type = boolType;
     }
 }
 
 static void CheckInt(ORG_Item *x) {
-    if (x->type->form != Int) {
+    if (x->type->form != ORB_Int) {
         ORS_Mark("not Integer");
         x->type = intType;
     }
 }
 
 static void CheckReal(ORG_Item *x) {
-    if (x->type->form != Real) {
+    if (x->type->form != ORB_Real) {
         ORS_Mark("not Real");
         x->type = realType;
     }
 }
 
 static void CheckSet(ORG_Item *x) {
-    if (x->type->form != Set) {
+    if (x->type->form != ORB_Set) {
         ORS_Mark("not Set");
         x->type = setType;
     }
 }
 
 static void CheckSetVal(ORG_Item *x) {
-    if (x->type->form != Int) {
+    if (x->type->form != ORB_Int) {
         ORS_Mark("not Int");
         x->type = setType;
-    } else if (x->mode == ORS_const) {
+    } else if (x->mode == ORB_Const) {
         if ((x->a < 0) || (x->a >= 32)) {
             ORS_Mark("invalid set");
         }
@@ -105,9 +105,9 @@ static void CheckSetVal(ORG_Item *x) {
 }
 
 static void CheckConst(ORG_Item *x) {
-    if (x->mode != Const) {
+    if (x->mode != ORB_Const) {
         ORS_Mark("not a constant");
-        x->mode = ORS_const;
+        x->mode = ORB_Const;
     }
 }
 
@@ -141,8 +141,8 @@ static void TypeTest(ORG_Item *x, ORB_Type *T, BOOLEAN guard) {
     ORB_Type *xt = x->type;
     
     if ((T->form == xt->form) && 
-        ((T->form == Pointer) || 
-         ((T->form == Record) && (x->mode == Par)))) {
+        ((T->form == ORB_Pointer) || 
+         ((T->form == ORB_Record) && (x->mode == ORB_Par)))) {
         
         while ((xt != T) && (xt != NULL)) {
             xt = xt->base;
@@ -150,14 +150,14 @@ static void TypeTest(ORG_Item *x, ORB_Type *T, BOOLEAN guard) {
         
         if (xt != T) {
             xt = x->type;
-            if (xt->form == Pointer) {
+            if (xt->form == ORB_Pointer) {
                 if (IsExtension(xt->base, T->base)) {
                     ORG_TypeTest(x, T->base, FALSE, guard);
                     x->type = T;
                 } else {
                     ORS_Mark("not an extension");
                 }
-            } else if ((xt->form == Record) && (x->mode == Par)) {
+            } else if ((xt->form == ORB_Record) && (x->mode == ORB_Par)) {
                 if (IsExtension(xt, T)) {
                     ORG_TypeTest(x, T, TRUE, guard);
                     x->type = T;
@@ -185,13 +185,13 @@ static void selector(ORG_Item *x) {
     
     while ((sym == ORS_lbrak) || (sym == ORS_period) || (sym == ORS_arrow) ||
            ((sym == ORS_lparen) && 
-            ((x->type->form == Record) || (x->type->form == Pointer)))) {
+            ((x->type->form == ORB_Record) || (x->type->form == ORB_Pointer)))) {
         
         if (sym == ORS_lbrak) {
             do {
                 ORS_Get(&sym);
                 expression(&y);
-                if (x->type->form == Array) {
+                if (x->type->form == ORB_Array) {
                     CheckInt(&y);
                     ORG_Index(x, &y);
                     x->type = x->type->base;
@@ -204,11 +204,11 @@ static void selector(ORG_Item *x) {
         } else if (sym == ORS_period) {
             ORS_Get(&sym);
             if (sym == ORS_ident) {
-                if (x->type->form == Pointer) {
+                if (x->type->form == ORB_Pointer) {
                     ORG_DeRef(x);
                     x->type = x->type->base;
                 }
-                if (x->type->form == Record) {
+                if (x->type->form == ORB_Record) {
                     obj = thisfield(x->type);
                     ORS_Get(&sym);
                     if (obj != NULL) {
@@ -226,7 +226,7 @@ static void selector(ORG_Item *x) {
             
         } else if (sym == ORS_arrow) {
             ORS_Get(&sym);
-            if (x->type->form == Pointer) {
+            if (x->type->form == ORB_Pointer) {
                 ORG_DeRef(x);
                 x->type = x->type->base;
             } else {
@@ -234,11 +234,11 @@ static void selector(ORG_Item *x) {
             }
             
         } else if ((sym == ORS_lparen) && 
-                   ((x->type->form == Record) || (x->type->form == Pointer))) {
+                   ((x->type->form == ORB_Record) || (x->type->form == ORB_Pointer))) {
             ORS_Get(&sym);
             if (sym == ORS_ident) {
                 qualident(&obj);
-                if (obj->class == Typ) {
+                if (obj->class ==ORB_Typ) {
                     TypeTest(x, obj->type, TRUE);
                 } else {
                     ORS_Mark("guard type expected");
@@ -261,9 +261,9 @@ static BOOLEAN EqualSignatures(ORB_Type *t0, ORB_Type *t1) {
         while (p0 != NULL) {
             if ((p0->class == p1->class) && (p0->rdo == p1->rdo) &&
                 ((p0->type == p1->type) ||
-                 ((p0->type->form == Array) && (p1->type->form == Array) &&
+                 ((p0->type->form == ORB_Array) && (p1->type->form == ORB_Array) &&
                   (p0->type->len == p1->type->len) && (p0->type->base == p1->type->base)) ||
-                 ((p0->type->form == Proc) && (p1->type->form == Proc) &&
+                 ((p0->type->form == ORB_Proc) && (p1->type->form == ORB_Proc) &&
                   EqualSignatures(p0->type, p1->type)))) {
                 p0 = p0->next;
                 p1 = p1->next;
@@ -280,17 +280,17 @@ static BOOLEAN EqualSignatures(ORB_Type *t0, ORB_Type *t1) {
 
 static BOOLEAN CompTypes(ORB_Type *t0, ORB_Type *t1, BOOLEAN varpar) {
     return (t0 == t1) ||
-           ((t0->form == Array) && (t1->form == Array) && 
+           ((t0->form == ORB_Array) && (t1->form == ORB_Array) && 
             (t0->base == t1->base) && (t0->len == t1->len)) ||
-           ((t0->form == Record) && (t1->form == Record) && 
+           ((t0->form == ORB_Record) && (t1->form == ORB_Record) && 
             IsExtension(t0, t1)) ||
            (!varpar &&
-            (((t0->form == Pointer) && (t1->form == Pointer) && 
+            (((t0->form == ORB_Pointer) && (t1->form == ORB_Pointer) && 
               IsExtension(t0->base, t1->base)) ||
-             ((t0->form == Proc) && (t1->form == Proc) && 
+             ((t0->form == ORB_Proc) && (t1->form == ORB_Proc) && 
               EqualSignatures(t0, t1)) ||
-             (((t0->form == Pointer) || (t0->form == Proc)) && 
-              (t1->form == NilTyp))));
+             (((t0->form == ORB_Pointer) || (t0->form == ORB_Proc)) && 
+              (t1->form == ORB_NilTyp))));
 }
 
 /* ORP.c - Parser Implementation - Stage 3: Statement Parsing */
@@ -303,7 +303,7 @@ static void Parameter(ORB_Object *par) {
     
     expression(&x);
     if (par != NULL) {
-        varpar = (par->class == Par);
+        varpar = (par->class == ORB_Par);
         if (CompTypes(par->type, x.type, varpar)) {
             if (!varpar) {
                 ORG_ValueParam(&x);
@@ -313,23 +313,23 @@ static void Parameter(ORB_Object *par) {
                 }
                 ORG_VarParam(&x, par->type);
             }
-        } else if ((x.type->form == Array) && (par->type->form == Array) &&
+        } else if ((x.type->form == ORB_Array) && (par->type->form == ORB_Array) &&
                    (x.type->base == par->type->base) && (par->type->len < 0)) {
             if (!par->rdo) {
                 CheckReadOnly(&x);
             }
             ORG_OpenArrayParam(&x);
-        } else if ((x.type->form == String) && varpar && par->rdo &&
-                   (par->type->form == Array) && (par->type->base->form == Char) &&
+        } else if ((x.type->form == ORB_String) && varpar && par->rdo &&
+                   (par->type->form == ORB_Array) && (par->type->base->form == ORB_Char) &&
                    (par->type->len < 0)) {
             ORG_StringParam(&x);
-        } else if (!varpar && (par->type->form == Int) && (x.type->form == Int)) {
+        } else if (!varpar && (par->type->form == ORB_Int) && (x.type->form == ORB_Int)) {
             ORG_ValueParam(&x);  // BYTE
-        } else if ((x.type->form == String) && (x.b == 2) && 
-                   (par->class == Var) && (par->type->form == Char)) {
+        } else if ((x.type->form == ORB_String) && (x.b == 2) && 
+                   (par->class == ORB_Var) && (par->type->form == ORB_Char)) {
             ORG_StrToChar(&x);
             ORG_ValueParam(&x);
-        } else if ((par->type->form == Array) && (par->type->base == byteType) &&
+        } else if ((par->type->form == ORB_Array) && (par->type->base == byteType) &&
                    (par->type->len >= 0) && (par->type->size == x.type->size)) {
             ORG_VarParam(&x, par->type);
         } else {
@@ -384,7 +384,7 @@ static void StandFunc(ORG_Item *x, LONGINT fct, ORB_Type *restyp) {
     
     if (n == npar) {
         if (fct == 0) {  // ABS
-            if ((x->type->form == Int) || (x->type->form == Real)) {
+            if ((x->type->form == ORB_Int) || (x->type->form == ORB_Real)) {
                 ORG_Abs(x);
                 restyp = x->type;
             } else {
@@ -400,9 +400,9 @@ static void StandFunc(ORG_Item *x, LONGINT fct, ORB_Type *restyp) {
             CheckInt(x);
             ORG_Float(x);
         } else if (fct == 4) {  // ORD
-            if (x->type->form <= Proc) {
+            if (x->type->form <= ORB_Proc) {
                 ORG_Ord(x);
-            } else if ((x->type->form == String) && (x->b == 2)) {
+            } else if ((x->type->form == ORB_String) && (x->b == 2)) {
                 ORG_StrToChar(x);
             } else {
                 ORS_Mark("bad type");
@@ -411,14 +411,14 @@ static void StandFunc(ORG_Item *x, LONGINT fct, ORB_Type *restyp) {
             CheckInt(x);
             ORG_Ord(x);
         } else if (fct == 6) {  // LEN
-            if (x->type->form == Array) {
+            if (x->type->form == ORB_Array) {
                 ORG_Len(x);
             } else {
                 ORS_Mark("not an array");
             }
         } else if ((fct >= 7) && (fct <= 9)) {  // LSL, ASR, ROR
             CheckInt(&y);
-            if ((x->type->form == Int) || (x->type->form == Set)) {
+            if ((x->type->form == ORB_Int) || (x->type->form == ORB_Set)) {
                 ORG_Shift(fct - 7, x, &y);
                 restyp = x->type;
             } else {
@@ -439,7 +439,7 @@ static void StandFunc(ORG_Item *x, LONGINT fct, ORB_Type *restyp) {
             CheckInt(x);
             ORG_Register(x);
         } else if (fct == 16) {  // VAL
-            if ((x->mode == Typ) && (x->type->size <= y.type->size)) {
+            if ((x->mode ==ORB_Typ) && (x->type->size <= y.type->size)) {
                 restyp = x->type;
                 *x = y;
             } else {
@@ -448,7 +448,7 @@ static void StandFunc(ORG_Item *x, LONGINT fct, ORB_Type *restyp) {
         } else if (fct == 17) {  // ADR
             ORG_Adr(x);
         } else if (fct == 18) {  // SIZE
-            if (x->mode == Typ) {
+            if (x->mode ==ORB_Typ) {
                 ORG_MakeConstItem(x, intType, x->type->size);
             } else {
                 ORS_Mark("must be a type");
@@ -524,14 +524,14 @@ static void factor(ORG_Item *x) {
     
     if (sym == ORS_ident) {
         qualident(&obj);
-        if (obj->class == SFunc) {
+        if (obj->class == ORB_SFunc) {
             StandFunc(x, obj->val, obj->type);
         } else {
             ORG_MakeItem(x, obj, level);
             selector(x);
             if (sym == ORS_lparen) {
                 ORS_Get(&sym);
-                if ((x->type->form == Proc) && (x->type->base->form != NoTyp)) {
+                if ((x->type->form == ORB_Proc) && (x->type->base->form != ORB_NoTyp)) {
                     ORG_PrepCall(x, &rx);
                     ParamList(x);
                     ORG_Call(x, rx);
@@ -594,15 +594,15 @@ static void term(ORG_Item *x) {
         ORS_Get(&sym);
         
         if (op == ORS_times) {
-            if (f == Int) {
+            if (f == ORB_Int) {
                 factor(&y);
                 CheckInt(&y);
                 ORG_MulOp(x, &y);
-            } else if (f == Real) {
+            } else if (f == ORB_Real) {
                 factor(&y);
                 CheckReal(&y);
                 ORG_RealOp(op, x, &y);
-            } else if (f == Set) {
+            } else if (f == ORB_Set) {
                 factor(&y);
                 CheckSet(&y);
                 ORG_SetOp(op, x, &y);
@@ -615,11 +615,11 @@ static void term(ORG_Item *x) {
             CheckInt(&y);
             ORG_DivOp(op, x, &y);
         } else if (op == ORS_rdiv) {
-            if (f == Real) {
+            if (f == ORB_Real) {
                 factor(&y);
                 CheckReal(&y);
                 ORG_RealOp(op, x, &y);
-            } else if (f == Set) {
+            } else if (f == ORB_Set) {
                 factor(&y);
                 CheckSet(&y);
                 ORG_SetOp(op, x, &y);
@@ -643,8 +643,8 @@ static void SimpleExpression(ORG_Item *x) {
     if (sym == ORS_minus) {
         ORS_Get(&sym);
         term(x);
-        if ((x->type->form == Int) || (x->type->form == Real) || 
-            (x->type->form == Set)) {
+        if ((x->type->form == ORB_Int) || (x->type->form == ORB_Real) || 
+            (x->type->form == ORB_Set)) {
             ORG_Neg(x);
         } else {
             CheckInt(x);
@@ -666,11 +666,11 @@ static void SimpleExpression(ORG_Item *x) {
             term(&y);
             CheckBool(&y);
             ORG_Or2(x, &y);
-        } else if (x->type->form == Int) {
+        } else if (x->type->form == ORB_Int) {
             term(&y);
             CheckInt(&y);
             ORG_AddOp(op, x, &y);
-        } else if (x->type->form == Real) {
+        } else if (x->type->form == ORB_Real) {
             term(&y);
             CheckReal(&y);
             ORG_RealOp(op, x, &y);
@@ -690,7 +690,7 @@ static void expression0(ORG_Item *x) {
     
     SimpleExpression(x);
     
-    if ((sym >= ORS_eql) && (sym <= ORS_geq)) {
+    if ((sym >= ORS_eql) && (sym <= ORS_gtr)) {
         rel = sym;
         ORS_Get(&sym);
         SimpleExpression(&y);
@@ -698,53 +698,53 @@ static void expression0(ORG_Item *x) {
         yf = y.type->form;
         
         if (x->type == y.type) {
-            if ((xf == Char) || (xf == Int)) {
+            if ((xf == ORB_Char) || (xf == ORB_Int)) {
                 ORG_IntRelation(rel, x, &y);
-            } else if (xf == Real) {
+            } else if (xf == ORB_Real) {
                 ORG_RealRelation(rel, x, &y);
-            } else if ((xf == Set) || (xf == Pointer) || (xf == Proc) || 
-                       (xf == NilTyp) || (xf == Bool)) {
+            } else if ((xf == ORB_Set) || (xf == ORB_Pointer) || (xf == ORB_Proc) || 
+                       (xf == ORB_NilTyp) || (xf == ORB_Bool)) {
                 if (rel <= ORS_neq) {
                     ORG_IntRelation(rel, x, &y);
                 } else {
                     ORS_Mark("only = or #");
                 }
-            } else if (((xf == Array) && (x->type->base->form == Char)) || 
-                       (xf == String)) {
+            } else if (((xf == ORB_Array) && (x->type->base->form == ORB_Char)) || 
+                       (xf == ORB_String)) {
                 ORG_StringRelation(rel, x, &y);
             } else {
                 ORS_Mark("illegal comparison");
             }
-        } else if (((xf == Pointer) || ((xf == Proc) && (yf == NilTyp))) ||
-                   ((yf == Pointer) || ((yf == Proc) && (xf == NilTyp)))) {
+        } else if (((xf == ORB_Pointer) || ((xf == ORB_Proc) && (yf == ORB_NilTyp))) ||
+                   ((yf == ORB_Pointer) || ((yf == ORB_Proc) && (xf == ORB_NilTyp)))) {
             if (rel <= ORS_neq) {
                 ORG_IntRelation(rel, x, &y);
             } else {
                 ORS_Mark("only = or #");
             }
-        } else if ((((xf == Pointer) && (yf == Pointer)) &&
+        } else if ((((xf == ORB_Pointer) && (yf == ORB_Pointer)) &&
 					((IsExtension(x->type->base, y.type->base)) || 
                     (IsExtension(y.type->base, x->type->base)))) ||
-                   ((xf == Proc) && (yf == Proc) && 
+                   ((xf == ORB_Proc) && (yf == ORB_Proc) && 
                     EqualSignatures(x->type, y.type))) {
             if (rel <= ORS_neq) {
                 ORG_IntRelation(rel, x, &y);
             } else {
                 ORS_Mark("only = or #");
             }
-        } else if (((xf == Array) && (x->type->base->form == Char) &&
-                    ((yf == String) || ((yf == Array) && 
-                     (y.type->base->form == Char)))) ||
-                   ((yf == Array) && (y.type->base->form == Char) && 
-                    (xf == String))) {
+        } else if (((xf == ORB_Array) && (x->type->base->form == ORB_Char) &&
+                    ((yf == ORB_String) || ((yf == ORB_Array) && 
+                     (y.type->base->form == ORB_Char)))) ||
+                   ((yf == ORB_Array) && (y.type->base->form == ORB_Char) && 
+                    (xf == ORB_String))) {
             ORG_StringRelation(rel, x, &y);
-        } else if ((xf == Char) && (yf == String) && (y.b == 2)) {
+        } else if ((xf == ORB_Char) && (yf == ORB_String) && (y.b == 2)) {
             ORG_StrToChar(&y);
             ORG_IntRelation(rel, x, &y);
-        } else if ((yf == Char) && (xf == String) && (x->b == 2)) {
+        } else if ((yf == ORB_Char) && (xf == ORB_String) && (x->b == 2)) {
             ORG_StrToChar(x);
             ORG_IntRelation(rel, x, &y);
-        } else if ((xf == Int) && (yf == Int)) {
+        } else if ((xf == ORB_Int) && (yf == ORB_Int)) {
             ORG_IntRelation(rel, x, &y);  // BYTE
         } else {
             ORS_Mark("illegal comparison");
@@ -812,7 +812,7 @@ static void StandProc(LONGINT pno) {
             ORG_Assert(&x);
         } else if (pno == 5) {  // NEW
             CheckReadOnly(&x);
-            if ((x.type->form == Pointer) && (x.type->base->form == Record)) {
+            if ((x.type->form == ORB_Pointer) && (x.type->base->form == ORB_Record)) {
                 ORG_New(&x);
             } else {
                 ORS_Mark("not a pointer to record");
@@ -828,7 +828,7 @@ static void StandProc(LONGINT pno) {
             CheckReadOnly(&x);
             ORG_Unpk(&x, &y);
         } else if (pno == 8) {  // LED
-            if (x.type->form <= Set) {
+            if (x.type->form <= ORB_Set) {
                 ORG_Led(&x);
             } else {
                 ORS_Mark("bad type");
@@ -869,7 +869,7 @@ static void StatSequence(void) {
         if (sym == ORS_ident) {
             qualident(&typobj);
             ORG_MakeItem(x, obj, level);
-            if (typobj->class != Typ) {
+            if (typobj->class !=ORB_Typ) {
                 ORS_Mark("not a type");
             }
             TypeTest(x, typobj->type, FALSE);
@@ -906,7 +906,7 @@ static void StatSequence(void) {
         if (sym == ORS_ident) {
             qualident(&obj);
             ORG_MakeItem(&x, obj, level);
-            if (x.mode == SProc) {
+            if (x.mode == ORB_SProc) {
                 StandProc(obj->val);
             } else {
                 selector(&x);
@@ -915,20 +915,20 @@ static void StatSequence(void) {
                     CheckReadOnly(&x);
                     expression(&y);
                     if (CompTypes(x.type, y.type, FALSE)) {
-                        if ((x.type->form <= Pointer) || (x.type->form == Proc)) {
+                        if ((x.type->form <= ORB_Pointer) || (x.type->form == ORB_Proc)) {
                             ORG_Store(&x, &y);
                         } else {
                             ORG_StoreStruct(&x, &y);
                         }
-                    } else if ((x.type->form == Array) && (y.type->form == Array) &&
+                    } else if ((x.type->form == ORB_Array) && (y.type->form == ORB_Array) &&
                                (x.type->base == y.type->base) && (y.type->len < 0)) {
                         ORG_StoreStruct(&x, &y);
-                    } else if ((x.type->form == Array) && (x.type->base->form == Char) &&
-                               (y.type->form == String)) {
+                    } else if ((x.type->form == ORB_Array) && (x.type->base->form == ORB_Char) &&
+                               (y.type->form == ORB_String)) {
                         ORG_CopyString(&x, &y);
-                    } else if ((x.type->form == Int) && (y.type->form == Int)) {
+                    } else if ((x.type->form == ORB_Int) && (y.type->form == ORB_Int)) {
                         ORG_Store(&x, &y);  // BYTE
-                    } else if ((x.type->form == Char) && (y.type->form == String) &&
+                    } else if ((x.type->form == ORB_Char) && (y.type->form == ORB_String) &&
                                (y.b == 2)) {
                         ORG_StrToChar(&y);
                         ORG_Store(&x, &y);
@@ -941,7 +941,7 @@ static void StatSequence(void) {
                     expression(&y);
                 } else if (sym == ORS_lparen) {  // procedure call
                     ORS_Get(&sym);
-                    if ((x.type->form == Proc) && (x.type->base->form == NoTyp)) {
+                    if ((x.type->form == ORB_Proc) && (x.type->base->form == ORB_NoTyp)) {
                         ORG_PrepCall(&x, &rx);
                         ParamList(&x);
                         ORG_Call(&x, rx);
@@ -949,17 +949,17 @@ static void StatSequence(void) {
                         ORS_Mark("not a procedure");
                         ParamList(&x);
                     }
-                } else if (x.type->form == Proc) {  // procedure call without parameters
+                } else if (x.type->form == ORB_Proc) {  // procedure call without parameters
                     if (x.type->nofpar > 0) {
                         ORS_Mark("missing parameters");
                     }
-                    if (x.type->base->form == NoTyp) {
+                    if (x.type->base->form == ORB_NoTyp) {
                         ORG_PrepCall(&x, &rx);
                         ORG_Call(&x, rx);
                     } else {
                         ORS_Mark("not a procedure");
                     }
-                } else if (x.mode == Typ) {
+                } else if (x.mode ==ORB_Typ) {
                     ORS_Mark("illegal assignment");
                 } else {
                     ORS_Mark("not a procedure");
@@ -1070,8 +1070,8 @@ static void StatSequence(void) {
             if (sym == ORS_ident) {
                 qualident(&obj);
                 orgtype = obj->type;
-                if ((orgtype->form == Pointer) ||
-                    ((orgtype->form == Record) && (obj->class == Par))) {
+                if ((orgtype->form == ORB_Pointer) ||
+                    ((orgtype->form == ORB_Record) && (obj->class == ORB_Par))) {
                     Check(ORS_of, "OF expected");
                     TypeCase(obj, &x);
                     L0 = 0;
@@ -1142,10 +1142,10 @@ static void ArrayType(ORB_Type **type) {
     LONGINT len;
     
     typ = (ORB_Type*)malloc(sizeof(ORB_Type));
-    typ->form = NoTyp;
+    typ->form = ORB_NoTyp;
     expression(&x);
     
-    if ((x.mode == ORS_const) && (x.type->form == Int) && (x.a >= 0)) {
+    if ((x.mode == ORB_Const) && (x.type->form == ORB_Int) && (x.a >= 0)) {
         len = x.a;
     } else {
         len = 1;
@@ -1155,7 +1155,7 @@ static void ArrayType(ORB_Type **type) {
     if (sym == ORS_of) {
         ORS_Get(&sym);
         Type(&typ->base);
-        if ((typ->base->form == Array) && (typ->base->len < 0)) {
+        if ((typ->base->form == ORB_Array) && (typ->base->len < 0)) {
             ORS_Mark("dyn array not allowed");
         }
     } else if (sym == ORS_comma) {
@@ -1167,7 +1167,7 @@ static void ArrayType(ORB_Type **type) {
     }
     
     typ->size = (len * typ->base->size + 3) / 4 * 4;
-    typ->form = Array;
+    typ->form = ORB_Array;
     typ->len = len;
     *type = typ;
 }
@@ -1178,7 +1178,7 @@ static void RecordType(ORB_Type **type) {
     LONGINT offset, off, n;
     
     typ = (ORB_Type*)malloc(sizeof(ORB_Type));
-    typ->form = NoTyp;
+    typ->form = ORB_NoTyp;
     typ->base = NULL;
     typ->mno = -level;
     typ->nofpar = 0;
@@ -1192,8 +1192,8 @@ static void RecordType(ORB_Type **type) {
         }
         if (sym == ORS_ident) {
             qualident(&base);
-            if (base->class == Typ) {
-                if (base->type->form == Record) {
+            if (base->class ==ORB_Typ) {
+                if (base->type->form == ORB_Record) {
                     typ->base = base->type;
                 } else {
                     typ->base = intType;
@@ -1224,7 +1224,7 @@ static void RecordType(ORB_Type **type) {
             }
             new_obj = (ORB_Object*)malloc(sizeof(ORB_Object));
             strcpy(new_obj->name, ORS_id);
-            new_obj->class = Fld;
+            new_obj->class = ORB_Fld;
             new_obj->next = obj;
             obj = new_obj;
             n++;
@@ -1238,7 +1238,7 @@ static void RecordType(ORB_Type **type) {
         }
         Check(ORS_colon, "colon expected");
         Type(&tp);
-        if ((tp->form == Array) && (tp->len < 0)) {
+        if ((tp->form == ORB_Array) && (tp->len < 0)) {
             ORS_Mark("dyn array not allowed");
         }
         if (tp->size > 1) {
@@ -1262,7 +1262,7 @@ static void RecordType(ORB_Type **type) {
         }
     }
     
-    typ->form = Record;
+    typ->form = ORB_Record;
     typ->dsc = bot;
     typ->size = (offset + 3) / 4 * 4;
     *type = typ;
@@ -1277,24 +1277,26 @@ static void FPSection(LONGINT *adr, INTEGER *nofpar) {
     
     if (sym == ORS_var) {
         ORS_Get(&sym);
-        cl = Par;
+        cl = ORB_Par;
     } else {
-        cl = Var;
+        cl = ORB_Var;
     }
     
     IdentList(cl, &first);
     FormalType(&tp, 0);
     rdo = FALSE;
     
-    if ((cl == Var) && (tp->form >= Array)) {
-        cl = Par;
+    if ((cl == ORB_Var) && (tp->form >= ORB_Array)) {
+        cl = ORB_Par;
         rdo = TRUE;
     }
     
-    if (((tp->form == Array) && (tp->len < 0)) || (tp->form == Record)) {
-        parsize = 2 * 4;
+    if (((tp->form == ORB_Array) && (tp->len < 0)) || (tp->form == ORB_Record)) {
+        parsize = 2 * 4;  // Complex types still use 4-byte addressing
+    } else if ((cl == ORB_Par) && !rdo) {
+        parsize = 4;  // VAR parameters use 4-byte pointers
     } else {
-        parsize = 4;
+        parsize = tp->size;  // 65C816: Use actual type size (INTEGER = 2 bytes)
     }
     
     obj = first;
@@ -1304,7 +1306,7 @@ static void FPSection(LONGINT *adr, INTEGER *nofpar) {
         obj->type = tp;
         obj->rdo = rdo;
         obj->lev = level;
-        obj->val = *adr;
+        obj->val = *adr + 3;  // 65C816 stack relative addressing starts at 3 (1 + 2 for return address)
         *adr = *adr + parsize;
         obj = obj->next;
     }
@@ -1342,9 +1344,9 @@ static void ProcedureType(ORB_Type *ptype, LONGINT *parblksize) {
             if (sym == ORS_ident) {
                 qualident(&obj);
                 ptype->base = obj->type;
-                if (!((obj->class == Typ) && 
-                      (((obj->type->form >= Byte) && (obj->type->form <= Pointer)) ||
-                      (obj->type->form == Proc)))) {
+                if (!((obj->class ==ORB_Typ) && 
+                      (((obj->type->form >= ORB_Byte) && (obj->type->form <= ORB_Pointer)) ||
+                      (obj->type->form == ORB_Proc)))) {
                     ORS_Mark("illegal function type");
                 }
             } else {
@@ -1363,7 +1365,7 @@ static void FormalType0(ORB_Type **typ, INTEGER dim) {
     
     if (sym == ORS_ident) {
         qualident(&obj);
-        if (obj->class == Typ) {
+        if (obj->class ==ORB_Typ) {
             *typ = obj->type;
         } else {
             ORS_Mark("not a type");
@@ -1376,7 +1378,7 @@ static void FormalType0(ORB_Type **typ, INTEGER dim) {
             ORS_Mark("multi-dimensional open arrays not implemented");
         }
         *typ = (ORB_Type*)malloc(sizeof(ORB_Type));
-        (*typ)->form = Array;
+        (*typ)->form = ORB_Array;
         (*typ)->len = -1;
         (*typ)->size = 2 * 4;
         FormalType(&(*typ)->base, dim + 1);
@@ -1384,7 +1386,7 @@ static void FormalType0(ORB_Type **typ, INTEGER dim) {
         ORS_Get(&sym);
         OpenScope();
         *typ = (ORB_Type*)malloc(sizeof(ORB_Type));
-        (*typ)->form = Proc;
+        (*typ)->form = ORB_Proc;
         (*typ)->size = 4;
         dmy = 0;
         ProcedureType(*typ, &dmy);
@@ -1417,8 +1419,8 @@ static void Type0(ORB_Type **type) {
     
     if (sym == ORS_ident) {
         qualident(&obj);
-        if (obj->class == Typ) {
-            if ((obj->type != NULL) && (obj->type->form != NoTyp)) {
+        if (obj->class ==ORB_Typ) {
+            if ((obj->type != NULL) && (obj->type->form != ORB_NoTyp)) {
                 *type = obj->type;
             }
         } else {
@@ -1435,18 +1437,18 @@ static void Type0(ORB_Type **type) {
         ORS_Get(&sym);
         Check(ORS_to, "no TO");
         *type = (ORB_Type*)malloc(sizeof(ORB_Type));
-        (*type)->form = Pointer;
+        (*type)->form = ORB_Pointer;
         (*type)->size = 4;
         (*type)->base = intType;
         
         if (sym == ORS_ident) {
             obj = thisObj();
             if (obj != NULL) {
-                if ((obj->class == Typ) && 
-                    ((obj->type->form == Record) || (obj->type->form == NoTyp))) {
+                if ((obj->class ==ORB_Typ) && 
+                    ((obj->type->form == ORB_Record) || (obj->type->form == ORB_NoTyp))) {
                     CheckRecLevel(obj->lev);
                     (*type)->base = obj->type;
-                } else if (obj->class == Mod) {
+                } else if (obj->class == ORB_Mod) {
                     ORS_Mark("external base type not implemented");
                 } else {
                     ORS_Mark("no valid base type");
@@ -1462,7 +1464,7 @@ static void Type0(ORB_Type **type) {
             ORS_Get(&sym);
         } else {
             Type(type);
-            if (((*type)->base->form != Record) || ((*type)->base->typobj == NULL)) {
+            if (((*type)->base->form != ORB_Record) || ((*type)->base->typobj == NULL)) {
                 ORS_Mark("must point to named record");
             }
             CheckRecLevel(level);
@@ -1471,7 +1473,7 @@ static void Type0(ORB_Type **type) {
         ORS_Get(&sym);
         OpenScope();
         *type = (ORB_Type*)malloc(sizeof(ORB_Type));
-        (*type)->form = Proc;
+        (*type)->form = ORB_Proc;
         (*type)->size = 4;
         dmy = 0;
         ProcedureType(*type, &dmy);
@@ -1482,7 +1484,7 @@ static void Type0(ORB_Type **type) {
     }
 }
 
-static void Declarations(LONGINT *varsize) {
+static void Declarations(LONGINT *varsize, LONGINT parblksize) {
     ORB_Object *obj, *first;
     ORG_Item x;
     ORB_Type *tp;
@@ -1510,12 +1512,12 @@ static void Declarations(LONGINT *varsize) {
                 ORS_Mark("= ?");
             }
             expression(&x);
-            if ((x.type->form == String) && (x.b == 2)) {
+            if ((x.type->form == ORB_String) && (x.b == 2)) {
                 ORG_StrToChar(&x);
             }
-            NewObj(&obj, id, ORS_const);
+            NewObj(&obj, id, ORB_Const);
             obj->expo = expo;
-            if (x.mode == ORS_const) {
+            if (x.mode == ORB_Const) {
                 obj->val = x.a;
                 obj->lev = x.b;
                 obj->type = x.type;
@@ -1539,20 +1541,20 @@ static void Declarations(LONGINT *varsize) {
                 ORS_Mark("=?");
             }
             Type(&tp);
-            NewObj(&obj, id, Typ);
+            NewObj(&obj, id,ORB_Typ);
             obj->type = tp;
             obj->expo = expo;
             obj->lev = level;
             if (tp->typobj == NULL) {
                 tp->typobj = obj;
             }
-            if (expo && (obj->type->form == Record)) {
+            if (expo && (obj->type->form == ORB_Record)) {
                 obj->exno = exno;
                 exno++;
             } else {
                 obj->exno = 0;
             }
-            if (tp->form == Record) {
+            if (tp->form == ORB_Record) {
                 ptbase = pbsList;
                 while (ptbase != NULL) {
                     if (strcmp(obj->name, ptbase->name) == 0) {
@@ -1571,7 +1573,7 @@ static void Declarations(LONGINT *varsize) {
     if (sym == ORS_var) {
         ORS_Get(&sym);
         while (sym == ORS_ident) {
-            IdentList(Var, &first);
+            IdentList(ORB_Var, &first);
             Type(&tp);
             obj = first;
             while (obj != NULL) {
@@ -1580,9 +1582,8 @@ static void Declarations(LONGINT *varsize) {
                 // 65C816: No alignment needed
                 if (level > 0) {
                     // Local variable: calculate stack relative offset
-                    // Stack relative addressing starts at index 1, add offset from parameter space
-                    LONGINT local_offset = *varsize - 4;  // Remove parameter space (4 bytes)
-                    obj->val = 1 + local_offset;          // Start at 1, add offset
+                    // Stack relative addressing starts at 1, locals come after parameters
+                    obj->val = *varsize + parblksize + 3;  // Add parblksize offset + stack relative base (1 + 2 for return address)
                 } else {
                     // Global variable: use absolute address
                     obj->val = *varsize;
@@ -1601,7 +1602,7 @@ static void Declarations(LONGINT *varsize) {
     // 65C816: No final alignment needed
     ptbase = pbsList;
     while (ptbase != NULL) {
-        if (ptbase->type->base->form == Int) {
+        if (ptbase->type->base->form == ORB_Int) {
             ORS_Mark("undefined pointer base of");
         }
         ptbase = ptbase->next;
@@ -1632,10 +1633,10 @@ static void ProcedureDecl(void) {
         if (int_proc) {
             parblksize = 12;
         } else {
-            parblksize = 4;
+            parblksize = 0;  // 65C816: Start with 0, let ProcedureType calculate actual parameter space
         }
         type = (ORB_Type*)malloc(sizeof(ORB_Type));
-        type->form = Proc;
+        type->form = ORB_Proc;
         type->size = 4;
         proc->type = type;
         proc->val = -1;
@@ -1651,7 +1652,7 @@ static void ProcedureDecl(void) {
         ProcedureType(type, &parblksize);
         Check(ORS_semicolon, "no ;");
         locblksize = parblksize;
-        Declarations(&locblksize);
+        Declarations(&locblksize, parblksize);
         proc->val = ORG_Here();
         proc->type->dsc = topScope->next;
         if (sym == ORS_procedure) {
@@ -1665,7 +1666,9 @@ static void ProcedureDecl(void) {
             proc->val = ORG_Here();  // 65C816 uses byte addresses, no multiplication needed
             proc->type->dsc = topScope->next;
         }
-        ORG_Enter(parblksize, locblksize, int_proc);
+        // Store frame size in procedure type for caller access  
+        type->size = locblksize;
+        ORG_Enter(topScope->next, locblksize, int_proc);
         if (sym == ORS_begin) {
             ORS_Get(&sym);
             StatSequence();
@@ -1678,7 +1681,7 @@ static void ProcedureDecl(void) {
             } else if (!CompTypes(type->base, x.type, FALSE)) {
                 ORS_Mark("wrong result type");
             }
-        } else if (type->base->form != NoTyp) {
+        } else if (type->base->form != ORB_NoTyp) {
             ORS_Mark("function without result");
             type->base = noType;
         }
@@ -1763,7 +1766,7 @@ static void ORP_Module(void) {
             Check(ORS_semicolon, "; missing");
         }
         ORG_Open(version);
-        Declarations(&dc);
+        Declarations(&dc, 0);  // Module level - no parameters
         ORG_SetDataSize(((dc + 3) / 4) * 4);
         while (sym == ORS_procedure) {
             ProcedureDecl();
@@ -1900,7 +1903,7 @@ int main(int argc, char **argv) {
     
     // Set up dummy object for parser
     dummy = (ORB_Object*)malloc(sizeof(ORB_Object));
-    dummy->class = Var;
+    dummy->class = ORB_Var;
     dummy->type = intType;
     
     // Set up function pointers for parser

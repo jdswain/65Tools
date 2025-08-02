@@ -32,8 +32,8 @@ void UART::reset()
     std::printf("Slave PTY: %s\n", pty_name);
     
     // Wait for user input (consider removing this in production)
-    std::cout << "Press Enter to continue...";
-    std::cin.ignore();
+    // std::cout << "Press Enter to continue...";
+    // std::cin.ignore();
     
     // Configure master PTY for raw mode
     if (tcgetattr(pty_fd, &tty) < 0) {
@@ -87,7 +87,7 @@ void UART::status() {
 }
 
 void UART::send(wdc816::Byte data) {
-  std::cout << "char: " << data << std::endl;
+  // std::cout << "char: " << data << std::endl;
   int bytes = write(pty_fd, &data, 1);
   if (bytes != 1) {
     fprintf(stderr, "Couldn't write to serial port");

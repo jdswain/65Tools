@@ -93,7 +93,7 @@ void Video::run()
 
   while (true) {
 	while (SDL_PollEvent(&Event)) {
-	  std::cout << "Event" << std::endl;
+	  // std::cout << "Event" << std::endl;
 	  if (Event.type == SDL_QUIT) [[unlikely]] {
 		std::cout << "Quitting" << std::endl;
 		SDL_Quit();
@@ -101,7 +101,7 @@ void Video::run()
 	  }
 	}
 	if (emu816::isStopped ()) {
-	  std::cout << "Stopped" << std::endl;
+	  // std::cout << "Stopped" << std::endl;
 	  // SDL_Quit();
 	  return;
 	}

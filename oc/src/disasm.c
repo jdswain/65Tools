@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include "cpu.h"
 #include "Files.h"
 #include "Oberon.h"
@@ -25,6 +26,35 @@ typedef struct {
     int value;
 } DisasmInstr;
 
+// 65C816 processor status tracking
+typedef struct {
+    bool m_flag;  // Memory/Accumulator size (0=16-bit, 1=8-bit)
+    bool x_flag;  // Index register size (0=16-bit, 1=8-bit)
+    bool emulation_mode;
+} ProcessorStatus;
+
+static ProcessorStatus cpu_status = {true, true, true}; // Start in emulation mode
+
+// Update processor status based on instruction
+static void update_processor_status(uint8_t opcode, int operand) {
+    switch (opcode) {
+        case 0xFB: // XCE - Exchange Carry and Emulation
+            // This toggles emulation mode based on carry, but we'll assume native mode
+            cpu_status.emulation_mode = false;
+            break;
+            
+        case 0xE2: // SEP - Set Processor Status
+            if (operand & 0x20) cpu_status.m_flag = true;  // Set M flag (8-bit A)
+            if (operand & 0x10) cpu_status.x_flag = true;  // Set X flag (8-bit X/Y)
+            break;
+            
+        case 0xC2: // REP - Reset Processor Status
+            if (operand & 0x20) cpu_status.m_flag = false; // Clear M flag (16-bit A)
+            if (operand & 0x10) cpu_status.x_flag = false; // Clear X flag (16-bit X/Y)
+            break;
+    }
+}
+
 // Determine addressing mode and operand length from opcode
 static void decode_instruction(uint8_t opcode, AddrMode *mode, int *length) {
     switch (opcode) {
@@ -41,12 +71,22 @@ static void decode_instruction(uint8_t opcode, AddrMode *mode, int *length) {
             *length = 1;
             break;
             
-        // Immediate mode (2-3 bytes depending on A/M flag)
+        // Immediate mode - length depends on M flag for A instructions
         case 0xA9: // LDA #
         case 0x69: // ADC #
         case 0xE9: // SBC #
+        case 0xC9: // CMP #
             *mode = Immediate;
-            *length = 3; // Assuming 16-bit mode
+            *length = cpu_status.m_flag ? 2 : 3; // 8-bit or 16-bit A
+            break;
+            
+        // Immediate mode - length depends on X flag for X/Y instructions
+        case 0xA2: // LDX #
+        case 0xA0: // LDY #
+        case 0xE0: // CPX #
+        case 0xC0: // CPY #
+            *mode = Immediate;
+            *length = cpu_status.x_flag ? 2 : 3; // 8-bit or 16-bit X/Y
             break;
             
         case 0xC2: // REP #
@@ -55,9 +95,30 @@ static void decode_instruction(uint8_t opcode, AddrMode *mode, int *length) {
             *length = 2; // Always 8-bit operand
             break;
             
+        // Branch instructions (2 bytes)
+        case 0x10: // BPL
+        case 0x30: // BMI
+        case 0x50: // BVC
+        case 0x70: // BVS
+        case 0x90: // BCC
+        case 0xB0: // BCS
+        case 0xD0: // BNE
+        case 0xF0: // BEQ
+        case 0x80: // BRA
+            *mode = ProgramCounterRelative;
+            *length = 2;
+            break;
+            
+        // Branch long (3 bytes)
+        case 0x82: // BRL
+            *mode = ProgramCounterRelativeLong;
+            *length = 3;
+            break;
+            
         // Direct Page (2 bytes)
         case 0xA5: // LDA dp
         case 0x85: // STA dp
+        case 0xA6: // LDX dp
         case 0x65: // ADC dp
         case 0xE5: // SBC dp
             *mode = DirectPage;
@@ -101,10 +162,33 @@ static void decode_instruction(uint8_t opcode, AddrMode *mode, int *length) {
             *length = 3;
             break;
             
+        // Direct Page Indirect (2 bytes)
+        case 0xB2: // LDA (dp)
+        case 0x92: // STA (dp)
+        case 0x72: // ADC (dp)
+        case 0xF2: // SBC (dp)
+            *mode = DirectPageIndirect;
+            *length = 2;
+            break;
+            
+        // Direct Page Indirect Long (2 bytes)
+        case 0xA7: // LDA [dp]
+        case 0x87: // STA [dp]
+            *mode = DirectPageIndirectLong;
+            *length = 2;
+            break;
+            
         // Stack Relative (2 bytes)
         case 0xA3: // LDA sr,S
         case 0x83: // STA sr,S
             *mode = StackRelative;
+            *length = 2;
+            break;
+            
+        // Stack Relative Indirect Indexed Y (2 bytes)
+        case 0xB3: // LDA (sr,S),Y
+        case 0x93: // STA (sr,S),Y
+            *mode = StackRelativeIndirectIndexedY;
             *length = 2;
             break;
             
@@ -124,13 +208,24 @@ static char* format_operand(AddrMode mode, int value) {
             buffer[0] = '\0';
             break;
         case Immediate:
-            sprintf(buffer, "#$%04X", value);
+            // Format based on instruction width (8-bit or 16-bit)
+            if (value <= 0xFF) {
+                sprintf(buffer, "#$%02X", value & 0xFF);
+            } else {
+                sprintf(buffer, "#$%04X", value & 0xFFFF);
+            }
             break;
         case DirectPage:
             sprintf(buffer, "$%02X", value & 0xFF);
             break;
         case DirectPageIndexedX:
             sprintf(buffer, "$%02X,X", value & 0xFF);
+            break;
+        case DirectPageIndirect:
+            sprintf(buffer, "($%02X)", value & 0xFF);
+            break;
+        case DirectPageIndirectLong:
+            sprintf(buffer, "[$%02X]", value & 0xFF);
             break;
         case Absolute:
             sprintf(buffer, "$%04X", value);
@@ -143,6 +238,16 @@ static char* format_operand(AddrMode mode, int value) {
             break;
         case StackRelative:
             sprintf(buffer, "$%02X,S", value & 0xFF);
+            break;
+        case StackRelativeIndirectIndexedY:
+            sprintf(buffer, "($%02X,S),Y", value & 0xFF);
+            break;
+        case ProgramCounterRelative:
+            // For branch instructions, show relative offset
+            sprintf(buffer, "$%02X", value & 0xFF);
+            break;
+        case ProgramCounterRelativeLong:
+            sprintf(buffer, "$%04X", value & 0xFFFF);
             break;
         default:
             sprintf(buffer, "???");
@@ -179,6 +284,11 @@ static int disassemble_instruction(uint8_t *code, int pc, DisasmInstr *instr) {
         case 4:
             instr->value = instr->operand1 | (instr->operand2 << 8) | (instr->operand3 << 16);
             break;
+    }
+    
+    // Update processor status for REP/SEP instructions
+    if (instr->opcode == 0xC2 || instr->opcode == 0xE2 || instr->opcode == 0xFB) {
+        update_processor_status(instr->opcode, instr->value);
     }
     
     return instr->length;
