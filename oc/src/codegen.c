@@ -64,7 +64,8 @@ void of(uint8_t op, int v) {
   } else {
     // Forward branch - store relative offset to previous branch in chain
     // v is the address of the previous offset byte
-    int chain_offset = v - (ORG_pc + 1);
+    // ORG_pc now points to current offset byte location (after emitting opcode)
+    int chain_offset = v - ORG_pc;
     o(chain_offset & 0xff);
   }
 }
@@ -133,6 +134,7 @@ bool is_long_data(int addr)
 
 void codegen_gen(OpCode opcode, AddrMode mode, int value1, int value2)
 {
+  
   // Optimisations
   if (mode == Absolute) {
     if (is_dp(value1)) mode = DirectPage;

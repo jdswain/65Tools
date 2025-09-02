@@ -416,28 +416,28 @@ static void StandFunc(ORG_Item *x, LONGINT fct, ORB_Type *restyp) {
             } else {
                 ORS_Mark("not an array");
             }
-        } else if ((fct >= 7) && (fct <= 9)) {  // LSL, ASR, ROR
+        } else if ((fct >= 7) && (fct <= 9)) {  // AND, EOR, ORA
             CheckInt(&y);
             if ((x->type->form == ORB_Int) || (x->type->form == ORB_Set)) {
-                ORG_Shift(fct - 7, x, &y);
+                ORG_Bitwise(fct - 7, x, &y);
                 restyp = x->type;
             } else {
                 ORS_Mark("bad type");
             }
-        } else if (fct == 11) {  // ADC
-            ORG_ADC(x, &y);
-        } else if (fct == 12) {  // SBC
-            ORG_SBC(x, &y);
+        } else if ((fct >= 10) && (fct <= 12)) {  // ASL, LSR, ROL
+            CheckInt(&y);
+            if ((x->type->form == ORB_Int) || (x->type->form == ORB_Set)) {
+                ORG_Shift(fct - 10, x, &y);
+                restyp = x->type;
+            } else {
+                ORS_Mark("bad type");
+            }
         } else if (fct == 13) {  // UML
             ORG_UML(x, &y);
         } else if (fct == 14) {  // BIT
             CheckInt(x);
             CheckInt(&y);
             ORG_Bit(x, &y);
-        } else if (fct == 15) {  // REG
-            CheckConst(x);
-            CheckInt(x);
-            ORG_Register(x);
         } else if (fct == 16) {  // VAL
             if ((x->mode ==ORB_Typ) && (x->type->size <= y.type->size)) {
                 restyp = x->type;
@@ -795,65 +795,63 @@ static void StandProc(LONGINT pno) {
     Check(ORS_rparen, "no )");
     
     if ((npar == nap) || ((pno == 0) || (pno == 1))) {
-        if ((pno == 0) || (pno == 1)) {  // INC, DEC
-            CheckInt(&x);
-            CheckReadOnly(&x);
-            if (y.type != noType) {
-                CheckInt(&y);
-            }
-            ORG_Increment(pno, &x, &y);
-        } else if ((pno == 2) || (pno == 3)) {  // INCL, EXCL
-            CheckSet(&x);
-            CheckReadOnly(&x);
-            CheckInt(&y);
-            ORG_Include(pno - 2, &x, &y);
-        } else if (pno == 4) {  // ASSERT
-            CheckBool(&x);
-            ORG_Assert(&x);
-        } else if (pno == 5) {  // NEW
-            CheckReadOnly(&x);
-            if ((x.type->form == ORB_Pointer) && (x.type->base->form == ORB_Record)) {
-                ORG_New(&x);
-            } else {
-                ORS_Mark("not a pointer to record");
-            }
-        } else if (pno == 6) {  // PACK
-            CheckReal(&x);
-            CheckInt(&y);
-            CheckReadOnly(&x);
-            ORG_Pack(&x, &y);
-        } else if (pno == 7) {  // UNPK
-            CheckReal(&x);
-            CheckInt(&y);
-            CheckReadOnly(&x);
-            ORG_Unpk(&x, &y);
-        } else if (pno == 8) {  // LED
-            if (x.type->form <= ORB_Set) {
-                ORG_Led(&x);
-            } else {
-                ORS_Mark("bad type");
-            }
-        } else if (pno == 10) {  // GET
-            CheckInt(&x);
-            ORG_Get(&x, &y);
-        } else if (pno == 11) {  // PUT
-            CheckInt(&x);
-            ORG_Put(&x, &y);
-        } else if (pno == 12) {  // COPY
-            CheckInt(&x);
-            CheckInt(&y);
-            CheckInt(&z);
-            ORG_Copy(&x, &y, &z);
-        } else if (pno == 13) {  // LDPSR
-            CheckConst(&x);
-            CheckInt(&x);
-            ORG_LDPSR(&x);
-        } else if (pno == 14) {  // LDREG
-            CheckInt(&x);
-            ORG_LDREG(&x, &y);
-        }
-    } else {
-        ORS_Mark("wrong nof parameters");
+	  if ((pno == 0) || (pno == 1)) {  // INC, DEC
+		CheckInt(&x);
+		CheckReadOnly(&x);
+		if (y.type != noType) {
+		  CheckInt(&y);
+		}
+		ORG_Increment(pno, &x, &y);
+	  } else if ((pno == 2) || (pno == 3)) {  // INCL, EXCL
+		CheckSet(&x);
+		CheckReadOnly(&x);
+		CheckInt(&y);
+		ORG_Include(pno - 2, &x, &y);
+	  } else if (pno == 4) {  // ASSERT
+		CheckBool(&x);
+		ORG_Assert(&x);
+	  } else if (pno == 5) {  // NEW
+		CheckReadOnly(&x);
+		if ((x.type->form == ORB_Pointer) && (x.type->base->form == ORB_Record)) {
+		  ORG_New(&x);
+		} else {
+		  ORS_Mark("not a pointer to record");
+		}
+	  } else if (pno == 6) {  // PACK
+		CheckReal(&x);
+		CheckInt(&y);
+		CheckReadOnly(&x);
+		ORG_Pack(&x, &y);
+	  } else if (pno == 7) {  // UNPK
+		CheckReal(&x);
+		CheckInt(&y);
+		CheckReadOnly(&x);
+		ORG_Unpk(&x, &y);
+	  } else if (pno == 9) {  // INTEN
+		CheckBool(&x);
+		ORG_IntEn(&x);
+	  } else if (pno == 10) {  // GET
+		CheckInt(&x);
+		ORG_Get(&x, &y);
+	  } else if (pno == 11) {  // PUT
+		CheckInt(&x);
+		ORG_Put(&x, &y);
+	  } else if (pno == 12) {  // COPY
+		CheckInt(&x);
+		CheckInt(&y);
+		CheckInt(&z);
+		ORG_Copy(&x, &y, &z);
+	  } else if (pno == 13) {  // TRB
+		CheckInt(&x);
+		CheckInt(&y);
+		ORG_TRB(&x, &y);
+	  } else if (pno == 14) {  // TSB
+		CheckInt(&x);
+		CheckInt(&y);
+		ORG_TSB(&x, &y);
+	  }
+	} else {
+	  ORS_Mark("wrong nof parameters");
     }
 }
 
@@ -996,11 +994,13 @@ static void StatSequence(void) {
         } else if (sym == ORS_while) {
             ORS_Get(&sym);
             L0 = ORG_Here();
+            printf("DEBUG: WHILE loop start - Label L0 = %d, ORG_pc = %d\n", L0, ORG_pc);
             expression(&x);
             CheckBool(&x);
             ORG_CFJump(&x);
             Check(ORS_do, "no DO");
             StatSequence();
+            printf("DEBUG: WHILE backward jump - Label L0 = %d, ORG_pc = %d\n", L0, ORG_pc);
             ORG_BJump(L0);
             while (sym == ORS_elsif) {
                 ORS_Get(&sym);
@@ -1010,6 +1010,7 @@ static void StatSequence(void) {
                 ORG_CFJump(&x);
                 Check(ORS_do, "no DO");
                 StatSequence();
+                printf("DEBUG: WHILE ELSIF backward jump - Label L0 = %d, ORG_pc = %d\n", L0, ORG_pc);
                 ORG_BJump(L0);
             }
             ORG_Fixup(&x);
@@ -1166,8 +1167,8 @@ static void ArrayType(ORB_Type **type) {
         typ->base = intType;
     }
     
-    typ->size = (len * typ->base->size + 3) / 4 * 4;
-    typ->form = ORB_Array;
+    typ->size = len * typ->base->size + 3;
+    typ->form  = ORB_Array;
     typ->len = len;
     *type = typ;
 }
@@ -1264,7 +1265,7 @@ static void RecordType(ORB_Type **type) {
     
     typ->form = ORB_Record;
     typ->dsc = bot;
-    typ->size = (offset + 3) / 4 * 4;
+    typ->size = offset + 3;
     *type = typ;
 }
 
@@ -1293,6 +1294,7 @@ static void FPSection(LONGINT *adr, INTEGER *nofpar) {
     
     if (((tp->form == ORB_Array) && (tp->len < 0)) || (tp->form == ORB_Record)) {
         parsize = 2 * 4;  // Complex types still use 4-byte addressing
+		// ToDo: Not sure this is correct
     } else if ((cl == ORB_Par) && !rdo) {
         parsize = 4;  // VAR parameters use 4-byte pointers
     } else {
@@ -1306,7 +1308,7 @@ static void FPSection(LONGINT *adr, INTEGER *nofpar) {
         obj->type = tp;
         obj->rdo = rdo;
         obj->lev = level;
-        obj->val = *adr + 3;  // 65C816 stack relative addressing starts at 3 (1 + 2 for return address)
+        obj->val = *adr + 1;  // 65C816 stack relative addressing starts at 1 (stack frame allocated before JSR)
         *adr = *adr + parsize;
         obj = obj->next;
     }
@@ -1581,9 +1583,9 @@ static void Declarations(LONGINT *varsize, LONGINT parblksize) {
                 obj->lev = level;
                 // 65C816: No alignment needed
                 if (level > 0) {
-                    // Local variable: calculate stack relative offset
-                    // Stack relative addressing starts at 1, locals come after parameters
-                    obj->val = *varsize + parblksize + 3;  // Add parblksize offset + stack relative base (1 + 2 for return address)
+                    // Local variable: calculate stack relative offset  
+                    // 65C816: params start at 1, locals start at 1+parblksize
+                    obj->val = 1 + parblksize + *varsize;
                 } else {
                     // Global variable: use absolute address
                     obj->val = *varsize;
@@ -1651,7 +1653,7 @@ static void ProcedureDecl(void) {
         type->base = noType;
         ProcedureType(type, &parblksize);
         Check(ORS_semicolon, "no ;");
-        locblksize = parblksize;
+        locblksize = 0;
         Declarations(&locblksize, parblksize);
         proc->val = ORG_Here();
         proc->type->dsc = topScope->next;
@@ -1675,17 +1677,21 @@ static void ProcedureDecl(void) {
         }
         if (sym == ORS_return) {
             ORS_Get(&sym);
-            expression(&x);
-            if (type->base == noType) {
-                ORS_Mark("this is not a function");
-            } else if (!CompTypes(type->base, x.type, FALSE)) {
-                ORS_Mark("wrong result type");
+            if (type->base->form != ORB_NoTyp) {
+                // Function - must have expression
+                expression(&x);
+                if (!CompTypes(type->base, x.type, FALSE)) {
+                    ORS_Mark("wrong result type");
+                }
+            } else {
+                // Procedure - no expression allowed
+                x.type = noType;
             }
         } else if (type->base->form != ORB_NoTyp) {
             ORS_Mark("function without result");
             type->base = noType;
         }
-        ORG_Return(type->base->form, &x, locblksize, int_proc);
+        ORG_Return(type->base->form, &x, parblksize + locblksize, int_proc);
         CloseScope();
         level--;
         Check(ORS_end, "no END");
@@ -1767,7 +1773,7 @@ static void ORP_Module(void) {
         }
         ORG_Open(version);
         Declarations(&dc, 0);  // Module level - no parameters
-        ORG_SetDataSize(((dc + 3) / 4) * 4);
+        ORG_SetDataSize(dc);
         while (sym == ORS_procedure) {
             ProcedureDecl();
             Check(ORS_semicolon, "no ;");

@@ -76,7 +76,7 @@ static KeyWord keyTab[] = {
 // Forward declarations
 static void ReadChar(void);
 static void ReadString(void);
-static void ReadNumber(void);
+static void ReadNumber(INTEGER *sym);
 static void ReadScaleFactor(void);
 static void ReadIdent(void);
 static void Comment(void);
@@ -170,7 +170,7 @@ static void ReadScaleFactor(void) {
 }
 
 // Read number (integer or real)
-static void ReadNumber(void) {
+static void ReadNumber(INTEGER *sym) {
     INTEGER i, k, d, h;
     REAL x;
     INTEGER digits[16];  // Store digit values for potential hex conversion
@@ -203,6 +203,7 @@ static void ReadNumber(void) {
     } while ((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'F'));
     
     if (ch == '.') {
+	  *sym = ORS_real;
         ReadChar();
         if (ch == '.') {
             // This is ".." (range operator), back up
@@ -225,6 +226,7 @@ static void ReadNumber(void) {
             }
         }
     } else if (ch == 'H') {
+	  *sym = ORS_int;
         // Hexadecimal number - convert stored digits from decimal to hex interpretation
         ReadChar();
         ORS_ival = 0;
@@ -240,6 +242,7 @@ static void ReadNumber(void) {
             }
         }
     } else if (ch == 'X') {
+	  *sym = ORS_char;
         // Character constant - convert stored digits to hex value
         ReadChar();
         ORS_ival = 0;
@@ -252,7 +255,9 @@ static void ReadNumber(void) {
             ORS_Mark("invalid character");
             ORS_ival = 0;
         }
-    }
+    } else {
+	  *sym = ORS_int;
+	}
     // If no suffix, ORS_ival already contains the decimal interpretation
 }
 
@@ -336,12 +341,7 @@ void ORS_Get(INTEGER *sym) {
         *sym = ORS_ident;
         
     } else if (isdigit(ch)) {
-        ReadNumber();
-        if (ch == '.') {
-            *sym = ORS_real;
-        } else {
-            *sym = ORS_int;
-        }
+        ReadNumber(sym);
         
     } else {
         switch (ch) {

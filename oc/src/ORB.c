@@ -736,11 +736,12 @@ void ORB_Initialize(void) {
     
     /* Functions */
     enter("UML", ORB_SFunc, intType, 132);
-    enter("SBC", ORB_SFunc, intType, 122);
-    enter("ADC", ORB_SFunc, intType, 112);
-    enter("ROR", ORB_SFunc, intType, 92);
-    enter("ASR", ORB_SFunc, intType, 82);
-    enter("LSL", ORB_SFunc, intType, 72);
+    enter("ROL", ORB_SFunc, intType, 122);
+    enter("LSR", ORB_SFunc, intType, 112);
+    enter("ASL", ORB_SFunc, intType, 102);
+    enter("ORA", ORB_SFunc, intType, 92);
+    enter("EOR", ORB_SFunc, intType, 82);
+    enter("AND", ORB_SFunc, intType, 72);
     enter("LEN", ORB_SFunc, intType, 61);
     enter("CHR", ORB_SFunc, charType, 51);
     enter("ORD", ORB_SFunc, intType, 41);
@@ -750,7 +751,6 @@ void ORB_Initialize(void) {
     enter("ABS", ORB_SFunc, intType, 1);
     
     /* Procedures */
-    enter("LED", ORB_SProc, noType, 81);
     enter("UNPK", ORB_SProc, noType, 72);
     enter("PACK", ORB_SProc, noType, 62);
     enter("NEW", ORB_SProc, noType, 51);
@@ -784,12 +784,12 @@ void ORB_Initialize(void) {
     enter("SIZE", ORB_SFunc, intType, 181);
     enter("ADR", ORB_SFunc, intType, 171);
     enter("VAL", ORB_SFunc, intType, 162);
-    enter("REG", ORB_SFunc, intType, 151);
     enter("BIT", ORB_SFunc, boolType, 142);
     
     /* Procedures */
-    enter("LDREG", ORB_SProc, noType, 142);
-    enter("LDPSR", ORB_SProc, noType, 131);
+    enter("TSB", ORB_SProc, noType, 142);
+    enter("TRB", ORB_SProc, noType, 132);
+    enter("INTEN", ORB_SProc, noType, 91);
     enter("COPY", ORB_SProc, noType, 123);
     enter("PUT", ORB_SProc, noType, 112);
     enter("GET", ORB_SProc, noType, 102);

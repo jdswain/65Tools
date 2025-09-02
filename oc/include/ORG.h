@@ -10,6 +10,7 @@
 
 #define maxCode 32000  // Increased for 65C816 byte-per-element usage
 extern LONGINT ORG_pc;
+extern LONGINT ORG_varsize; // Size of module variables
 extern uint8_t code[maxCode];
 
 // Type definitions
@@ -18,6 +19,7 @@ typedef struct {
     ORB_Type *type;
     LONGINT a, b, r;
     BOOLEAN rdo;  // read only
+    ORB_Type *orig_type;  // Original operand type for signed comparisons
 } ORG_Item;
 
 // Global variables
@@ -103,12 +105,12 @@ void ORG_Assert(ORG_Item *x);
 void ORG_New(ORG_Item *x);
 void ORG_Pack(ORG_Item *x, ORG_Item *y);
 void ORG_Unpk(ORG_Item *x, ORG_Item *y);
-void ORG_Led(ORG_Item *x);
+void ORG_IntEn(ORG_Item *x);
 void ORG_Get(ORG_Item *x, ORG_Item *y);
 void ORG_Put(ORG_Item *x, ORG_Item *y);
 void ORG_Copy(ORG_Item *x, ORG_Item *y, ORG_Item *z);
-void ORG_LDPSR(ORG_Item *x);
-void ORG_LDREG(ORG_Item *x, ORG_Item *y);
+void ORG_TRB(ORG_Item *x, ORG_Item *y);
+void ORG_TSB(ORG_Item *x, ORG_Item *y);
 
 // Inline functions
 void ORG_Abs(ORG_Item *x);
@@ -118,11 +120,9 @@ void ORG_Float(ORG_Item *x);
 void ORG_Ord(ORG_Item *x);
 void ORG_Len(ORG_Item *x);
 void ORG_Shift(LONGINT fct, ORG_Item *x, ORG_Item *y);
-void ORG_ADC(ORG_Item *x, ORG_Item *y);
-void ORG_SBC(ORG_Item *x, ORG_Item *y);
+void ORG_Bitwise(LONGINT fct, ORG_Item *x, ORG_Item *y);
 void ORG_UML(ORG_Item *x, ORG_Item *y);
 void ORG_Bit(ORG_Item *x, ORG_Item *y);
-void ORG_Register(ORG_Item *x);
 void ORG_HH(ORG_Item *x);
 void ORG_Adr(ORG_Item *x);
 void ORG_Condition(ORG_Item *x);

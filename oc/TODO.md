@@ -14,75 +14,75 @@ x Get GT working
 x Tidy up PutChar
 x WHILE
 x REPEAT
-xVar Params
+x Var Params
  x Module level
  x Local level
   x Test for nested calls
 x ORB constants
+x REP and SEP management. Always Sep() when calling funcs. Use Rep() and Sep() in functions to only change when needed.
+x Global and Local Array
+x Open Array Param
+x Bounds checking is disabled in Open Arrays. Fix this.
+x Test Bounds checking on open array
+x String
+x Find out what RegI is and implement or remove
+x INC()
+x String copy
+x Sized array param - not supported
+x Test INTEGER array
+x Record
+x Signed INTEGER
+x Type alias
+x Open Array LEN() doesn't work 
+x Test functions in expressions, does the call handle registers correctly.
+x Shift ASL, LSR, ROL
+x Bitwise AND, EOR, ORA
 
-Signed INTEGER
-mul, div, mod
-
-* Complex Types
-
-Pointer arrow period
-Array
-String
+**Current**
 Set - in, is, upto
-Record
-Real
-Type definition
+StringRelation
+Some load operations
+DeRef Var and Par
+Singleton
+StoreStruct
+CopyString test
+VarParam two cases
+StringParam?
+Some call stuff
+PACK/UNPACK
+Copy
+Abs/Odd/Floor/Float
+Return of exit code
 
-* Memory
+**Complex Types**
+Pointers
+Type CASE/TypeTest
 
+**Memory and Environment**
 Exported procedures and JSL
  Adjust local calls for exported procs
  Adjust stack calculations, including local VAR offsets
 Static Base (SB), use loader fixup chain
 Loader fixup chain for module procedures
-
-* Control flow
-
-Type CASE
-
-* Environment
-
 Import
-SProc's
+NEW
 Interrupt procedures
 
--- Tidy
+**Later**
+- mul, div, mod
+Real
+LONGINT (INTEGER is fine for most things, but LONGINT may be useful)
+Add checks for branch out of range. Compile error.
+Numeric CASE.
+Change Trap to end in OsExit() call.
+Enums
 
---
-Test framework, might require module linking
-
--- Later
-LONGINT
-Need to add checks for branch out of range.
+**Optimisation**
 Maybe optimise out reads to registers, do reads directly from globals or locals?
 Maybe optimise by looking back at the code to avoid duplicated effort?
 The LE case in emitBranch is less efficient than it could be due to the need to only have one fixup.
-STARTED: REP and SEP management. Always Sep() when calling funcs. Use Rep() and Sep() in functions to only change when needed.
-Numeric CASE.
 
--- Local var params
-item->a = 3
-r0 := nothing
-loadAddr(item->a + our stack frame + 2)
+**Status**
+VAR array params don't set length correctly on stack.
+Implement Modules next, so we can create a Math Module for signed maths.
 
-3,s
-
-tsa
-sec
-sbc #3
-sta rn
-
-phb
-lda #00
-pha
-plb
-lda (r0)
-plb
-sta rx
-
-This should be working with local vars providing DBR is 00. 

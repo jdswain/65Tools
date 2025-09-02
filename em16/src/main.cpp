@@ -261,9 +261,12 @@ unsigned int loadELF(char * filename) {
 // Oberon Loader
 //------------------------------------------------------------------------------
 
+#define MODULE_BASE 0x1000
 #define OBERON_BASE 0x2000
 
 unsigned int loadMod(char * filename) {
+  uint32_t count;
+
   // Set up the machine
   cout << "Configured for 65C816." << endl;
   emu816::setStackPage(0x0100);
@@ -358,15 +361,33 @@ unsigned int loadMod(char * filename) {
 	return 0;
   }
   
-  // 5. Skip string section
+  // 5. Read string section
   uint32_t str_size;
   if (fread(&str_size, 4, 1, file) != 1) {
 	printf("Error: Cannot read string size\n");
 	fclose(file);
 	return 0;
   }
-  fseek(file, str_size, SEEK_CUR);
-  
+
+  uint8_t *string_data = (uint8_t*)malloc(str_size);
+  if (!string_data) {
+	printf("Error: Cannot allocate memory for string\n");
+	fclose(file);
+	return 0;
+  }
+  printf("String length: %d bytes\n", str_size);
+    
+  if (fread(string_data, 1, str_size, file) != str_size) {
+	printf("Error: Cannot read string section\n");
+	free(string_data);
+	fclose(file);
+	return 0;
+  }
+
+  for (count = 0; count<str_size; count++) {
+	emu816::setByte(MODULE_BASE+var_size+count, string_data[count]);
+  }
+
   // 6. Read code section length
   uint32_t code_length;
   if (fread(&code_length, 4, 1, file) != 1) {
@@ -389,7 +410,6 @@ unsigned int loadMod(char * filename) {
 	return 0;
   }
 
-  uint32_t count;
   for (count = 0; count<code_length; count++) {
 	emu816::setByte(OBERON_BASE+count, code_data[count]);
   }

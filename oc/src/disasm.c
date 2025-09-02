@@ -63,7 +63,6 @@ static void decode_instruction(uint8_t opcode, AddrMode *mode, int *length) {
         case 0x38: // SEC
         case 0xFB: // XCE
         case 0xEA: // NOP
-        case 0x00: // BRK
         case 0x40: // RTI
         case 0x60: // RTS
         case 0x6B: // RTL
@@ -71,11 +70,36 @@ static void decode_instruction(uint8_t opcode, AddrMode *mode, int *length) {
             *length = 1;
             break;
             
+        // Accumulator mode (1 byte) - shift/rotate operations
+        case 0x0A: // ASL A
+        case 0x4A: // LSR A
+        case 0x2A: // ROL A
+            *mode = Accumulator;
+            *length = 1;
+            break;
+            
+        // Direct Page Indexed Indirect X (2 bytes)
+        case 0x21: // AND (dp,X)
+        case 0x41: // EOR (dp,X)
+        case 0x01: // ORA (dp,X)
+            *mode = DirectPageIndexedIndirectX;
+            *length = 2;
+            break;
+            
+        // BRK instruction (2 bytes: opcode + signature)
+        case 0x00: // BRK
+            *mode = Immediate;
+            *length = 2;
+            break;
+            
         // Immediate mode - length depends on M flag for A instructions
         case 0xA9: // LDA #
         case 0x69: // ADC #
         case 0xE9: // SBC #
         case 0xC9: // CMP #
+        case 0x29: // AND #
+        case 0x49: // EOR #
+        case 0x09: // ORA #
             *mode = Immediate;
             *length = cpu_status.m_flag ? 2 : 3; // 8-bit or 16-bit A
             break;
@@ -119,8 +143,15 @@ static void decode_instruction(uint8_t opcode, AddrMode *mode, int *length) {
         case 0xA5: // LDA dp
         case 0x85: // STA dp
         case 0xA6: // LDX dp
+        case 0xA4: // LDY dp
         case 0x65: // ADC dp
         case 0xE5: // SBC dp
+        case 0x25: // AND dp
+        case 0x45: // EOR dp
+        case 0x05: // ORA dp
+        case 0x06: // ASL dp
+        case 0x46: // LSR dp
+        case 0x26: // ROL dp
             *mode = DirectPage;
             *length = 2;
             break;
@@ -130,6 +161,12 @@ static void decode_instruction(uint8_t opcode, AddrMode *mode, int *length) {
         case 0x95: // STA dp,X
         case 0x75: // ADC dp,X
         case 0xF5: // SBC dp,X
+        case 0x35: // AND dp,X
+        case 0x55: // EOR dp,X
+        case 0x15: // ORA dp,X
+        case 0x16: // ASL dp,X
+        case 0x56: // LSR dp,X
+        case 0x36: // ROL dp,X
             *mode = DirectPageIndexedX;
             *length = 2;
             break;
@@ -140,6 +177,12 @@ static void decode_instruction(uint8_t opcode, AddrMode *mode, int *length) {
         case 0x6D: // ADC abs
         case 0xED: // SBC abs
         case 0x20: // JSR abs
+        case 0x2D: // AND abs
+        case 0x4D: // EOR abs
+        case 0x0D: // ORA abs
+        case 0x0E: // ASL abs
+        case 0x4E: // LSR abs
+        case 0x2E: // ROL abs
             *mode = Absolute;
             *length = 3;
             break;
@@ -149,6 +192,12 @@ static void decode_instruction(uint8_t opcode, AddrMode *mode, int *length) {
         case 0x9D: // STA abs,X
         case 0x7D: // ADC abs,X
         case 0xFD: // SBC abs,X
+        case 0x3D: // AND abs,X
+        case 0x5D: // EOR abs,X
+        case 0x1D: // ORA abs,X
+        case 0x1E: // ASL abs,X
+        case 0x5E: // LSR abs,X
+        case 0x3E: // ROL abs,X
             *mode = AbsoluteIndexedX;
             *length = 3;
             break;
@@ -158,6 +207,9 @@ static void decode_instruction(uint8_t opcode, AddrMode *mode, int *length) {
         case 0x99: // STA abs,Y
         case 0x79: // ADC abs,Y
         case 0xF9: // SBC abs,Y
+        case 0x39: // AND abs,Y
+        case 0x59: // EOR abs,Y
+        case 0x19: // ORA abs,Y
             *mode = AbsoluteIndexedY;
             *length = 3;
             break;
@@ -167,20 +219,47 @@ static void decode_instruction(uint8_t opcode, AddrMode *mode, int *length) {
         case 0x92: // STA (dp)
         case 0x72: // ADC (dp)
         case 0xF2: // SBC (dp)
+        case 0x32: // AND (dp)
+        case 0x52: // EOR (dp)
+        case 0x12: // ORA (dp)
             *mode = DirectPageIndirect;
             *length = 2;
             break;
             
         // Direct Page Indirect Long (2 bytes)
+        case 0x07: // ORA [dp]
         case 0xA7: // LDA [dp]
         case 0x87: // STA [dp]
+        case 0x27: // AND [dp]
+        case 0x47: // EOR [dp]
             *mode = DirectPageIndirectLong;
+            *length = 2;
+            break;
+            
+        // Direct Page Indirect Long Indexed Y (2 bytes)
+        case 0xB7: // LDA [dp],Y
+        case 0x97: // STA [dp],Y
+        case 0x37: // AND [dp],Y
+        case 0x57: // EOR [dp],Y
+        case 0x17: // ORA [dp],Y
+            *mode = DirectPageIndirectLongIndexedY;
+            *length = 2;
+            break;
+            
+        // Direct Page Indirect Indexed Y (2 bytes)
+        case 0xB1: // LDA (dp),Y
+        case 0x91: // STA (dp),Y
+        case 0x31: // AND (dp),Y
+        case 0x51: // EOR (dp),Y
+        case 0x11: // ORA (dp),Y
+            *mode = DirectPageIndirectIndexedY;
             *length = 2;
             break;
             
         // Stack Relative (2 bytes)
         case 0xA3: // LDA sr,S
         case 0x83: // STA sr,S
+        case 0xC3: // CMP sr,S
             *mode = StackRelative;
             *length = 2;
             break;
@@ -207,6 +286,9 @@ static char* format_operand(AddrMode mode, int value) {
         case Implied:
             buffer[0] = '\0';
             break;
+        case Accumulator:
+            strcpy(buffer, "A");
+            break;
         case Immediate:
             // Format based on instruction width (8-bit or 16-bit)
             if (value <= 0xFF) {
@@ -226,6 +308,12 @@ static char* format_operand(AddrMode mode, int value) {
             break;
         case DirectPageIndirectLong:
             sprintf(buffer, "[$%02X]", value & 0xFF);
+            break;
+        case DirectPageIndirectLongIndexedY:
+            sprintf(buffer, "[$%02X],Y", value & 0xFF);
+            break;
+        case DirectPageIndirectIndexedY:
+            sprintf(buffer, "($%02X),Y", value & 0xFF);
             break;
         case Absolute:
             sprintf(buffer, "$%04X", value);
@@ -320,7 +408,16 @@ static void print_instruction(DisasmInstr *instr) {
     printf("%-4s %s", mnemonic, operand);
     
     // Add comments for special cases
-    if (instr->instruction == sREP && instr->value == 0x30) {
+    if (instr->mode == ProgramCounterRelative) {
+        // Calculate branch target for relative branches
+        int target = instr->address + instr->length + (int8_t)instr->operand1;
+        printf("  ; -> $%04X", target);
+    } else if (instr->mode == ProgramCounterRelativeLong) {
+        // Calculate branch target for long relative branches  
+        int16_t offset = instr->operand1 | (instr->operand2 << 8);
+        int target = instr->address + instr->length + offset;
+        printf("  ; -> $%04X", target);
+    } else if (instr->instruction == sREP && instr->value == 0x30) {
         printf("  ; 16-bit A/X/Y");
     } else if (instr->instruction == sSEP && instr->value == 0x30) {
         printf("  ; 8-bit A/X/Y");
@@ -426,14 +523,53 @@ static int parse_816_file(const char *filename, uint8_t **code_data, int *code_s
         return 0;
     }
     
-    // 5. Skip string section
+    // 5. Read and display string section
     uint32_t str_size;
     if (fread(&str_size, 4, 1, file) != 1) {
         printf("Error: Cannot read string size\n");
         fclose(file);
         return 0;
     }
-    fseek(file, str_size, SEEK_CUR);
+    
+    printf("String section: %d bytes\n", str_size);
+    if (str_size > 0) {
+        char *str_data = (char*)malloc(str_size);
+        if (str_data && fread(str_data, 1, str_size, file) == str_size) {
+            printf("String storage:\n");
+            for (uint32_t i = 0; i < str_size; i += 16) {
+                printf("  $%04X: ", 0x1000 + var_size + i); // Strings stored after variables at MODULE_VAR_BASE + varsize
+                
+                // Print hex bytes (16 per line with space after 8th byte)
+                for (int j = 0; j < 16; j++) {
+                    if ((i + j) < str_size) {
+                        printf("%02X ", (unsigned char)str_data[i + j]);
+                    } else {
+                        printf("   ");
+                    }
+                    if (j == 7) printf(" "); // Extra space after 8th byte
+                }
+                
+                // Print ASCII representation
+                printf(" \"");
+                for (int j = 0; j < 16 && (i + j) < str_size; j++) {
+                    char c = str_data[i + j];
+                    if (c >= 32 && c < 127) {
+                        printf("%c", c);
+                    } else if (c == 0) {
+                        printf("\\0");
+                    } else {
+                        printf("\\x%02X", (unsigned char)c);
+                    }
+                }
+                printf("\"\n");
+            }
+            free(str_data);
+        } else {
+            printf("Error: Cannot read string data\n");
+            fseek(file, str_size, SEEK_CUR);
+        }
+    }
+    printf("\n");
     
     // 6. Read code section length
     uint32_t code_length;

@@ -129,14 +129,14 @@ void gen_816(OpCode opcode, AddrMode mode, int value1, int value2)
     case Absolute:
     case ProgramCounterRelative:
       {
-		//int r = value1 - (ORG_pc + 1);
-	// We remove size promotion for now
-	//if ((r > 127) || (r < -128)) {
-	  // as_gen_warn(filename, line_num, "BRA promoted to BRL %d", value1);
-	  //orl(0x82, value1);
-	//} else {
+	int r = value1 - (ORG_pc + 1);
+	// Check if we need BRL instead of BRA
+	if ((r > 127) || (r < -128)) {
+	  printf("DEBUG: BRA promoted to BRL, offset %d, target $%04X\n", r, value1);
+	  orl(0x82, value1);
+	} else {
 	  or(0x80, value1);
-	  //}
+	}
       }
       return;
     case Fixup:                          of(0x80, value1); return;
@@ -145,7 +145,7 @@ void gen_816(OpCode opcode, AddrMode mode, int value1, int value2)
     break;
   case sBRK:
     switch( mode ) {
-    case Implied:                        o(0x00); return;
+    case Implied:                        ob(0x00, 0x00); return;
     case Immediate:                      ob(0x00, value1); return;
     default:                             break;
     }

@@ -24,7 +24,7 @@ BEGIN
   i := 1;
   WHILE i <= 3 DO
     PutNum(i);
-    PutByte(20H);  (* space *)
+    PutByte(22H);  (* space *)
     i := i + 1;
   END;
   
