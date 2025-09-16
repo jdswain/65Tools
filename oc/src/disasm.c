@@ -33,7 +33,7 @@ typedef struct {
     bool emulation_mode;
 } ProcessorStatus;
 
-static ProcessorStatus cpu_status = {true, true, true}; // Start in emulation mode
+static ProcessorStatus cpu_status = {false, false, false}; // Start in native mode with 16-bit A/X/Y (longa/longi on)
 
 // Update processor status based on instruction
 static void update_processor_status(uint8_t opcode, int operand) {
@@ -41,6 +41,8 @@ static void update_processor_status(uint8_t opcode, int operand) {
         case 0xFB: // XCE - Exchange Carry and Emulation
             // This toggles emulation mode based on carry, but we'll assume native mode
             cpu_status.emulation_mode = false;
+            // When switching to native mode, processor flags retain their values
+            // but M and X flags become meaningful for register sizes
             break;
             
         case 0xE2: // SEP - Set Processor Status
@@ -187,6 +189,12 @@ static void decode_instruction(uint8_t opcode, AddrMode *mode, int *length) {
             *length = 3;
             break;
             
+        // Absolute Long (4 bytes)
+        case 0x22: // JSL abs
+            *mode = AbsoluteLong;
+            *length = 4;
+            break;
+            
         // Absolute,X (3 bytes)
         case 0xBD: // LDA abs,X
         case 0x9D: // STA abs,X
@@ -317,6 +325,9 @@ static char* format_operand(AddrMode mode, int value) {
             break;
         case Absolute:
             sprintf(buffer, "$%04X", value);
+            break;
+        case AbsoluteLong:
+            sprintf(buffer, "$%06X", value);
             break;
         case AbsoluteIndexedX:
             sprintf(buffer, "$%04X,X", value);

@@ -121,7 +121,6 @@ void gen_816(OpCode opcode, AddrMode mode, int value1, int value2)
     case Fixup:                          of(0x10, value1); return;
     default:                             break;
     }
-    
     break;
   case sBRA:
     switch( mode ) {
@@ -129,14 +128,15 @@ void gen_816(OpCode opcode, AddrMode mode, int value1, int value2)
     case Absolute:
     case ProgramCounterRelative:
       {
-	int r = value1 - (ORG_pc + 1);
-	// Check if we need BRL instead of BRA
-	if ((r > 127) || (r < -128)) {
-	  printf("DEBUG: BRA promoted to BRL, offset %d, target $%04X\n", r, value1);
-	  orl(0x82, value1);
-	} else {
-	  or(0x80, value1);
-	}
+		int r = value1 - (ORG_pc + 1);
+		// Check if we need BRL instead of BRA
+		if ((r > 127) || (r < -128)) {
+		  // Use correct BRL offset calculation: target - (pc + 3)
+		  int brl_offset = value1 - (ORG_pc + 3);
+		  ow(0x82, brl_offset);
+		} else {
+		  or(0x80, value1);
+		}
       }
       return;
     case Fixup:                          of(0x80, value1); return;
@@ -156,15 +156,13 @@ void gen_816(OpCode opcode, AddrMode mode, int value1, int value2)
     case Absolute:
     case ProgramCounterRelative:
       {
-		//int r = value1 - (ORG_pc + 1);
-	//	if ((r > 127) || (r < -128)) {
-	  orl(0x82, value1);
-	  //	} else {
-	  // as_gen_warn(filename, line_num, "BRL demoted to BRA %d", value1);
-	  //	  or(0x80, value1);
-	  //	}
+		int r = value1 - (ORG_pc + 3);  // BRL is 3 bytes, not 1
+		ow(0x82, r);  // Use ow instead of orl to directly emit the calculated offset
       }
       return;
+    case Fixup:                          
+        ofl(0x82, value1); 
+        return;
     default:                             break;
     }
     break;

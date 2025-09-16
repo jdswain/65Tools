@@ -13,7 +13,7 @@
 
 // Constants
 #define CODE_ORG 0x2000         // Code starts at $2000 (must match codegen.c)
-#define WordSize 2
+// WordSize now defined in ORG.h
 #define StkOrg0 (-64)
 #define VarOrg0 0
 #define MT 12
@@ -127,6 +127,9 @@ static void incR(void) {
 }
 
 void ORG_CheckRegs(void) {
+  Set16(1, 1);  // We reset here as this is called at the end of every statement.
+  // This is required because the start of any statement may be a branch target and we
+  // need to ensure that if the statement needs to switch to 8-bit we always generate the SEP.
     if (RH != 0) {
         ORS_Mark("Reg Stack");
         RH = 0;
@@ -155,6 +158,7 @@ static void SetCC(ORG_Item *x, LONGINT n) {
 static void Trap(LONGINT cond, LONGINT num) {
   // In future we can use this for exception exits, but for now...
   // It would be useful to print a stack trace
+  // ToDo: Should this be signed maths?
   switch (cond) {
   case EQ:  // Branch if Equal (Zero flag set)
 	codegen_gen(sBEQ, ProgramCounterRelative, ORG_pc + 4, 0);
@@ -215,7 +219,7 @@ static LONGINT negated(LONGINT cond) {
         case AL: return NV;   // 7 -> 15
         case NV: return AL;   // 15 -> 7
         default: 
-            printf("ERROR: Unknown condition code %ld in negated()\n", cond);
+            printf("ERROR: Unknown condition code $%04X in negated()\n", cond);
             return cond;
     }
 }
@@ -223,115 +227,117 @@ static LONGINT negated(LONGINT cond) {
 // Generate 65C816 branch instruction based on condition code
 // target parameter is always a fixup chain link for forward branches
 // (actual target will be resolved later by ORG_FixLink)
-static void emitBranch(LONGINT cond, ORB_Type *type, LONGINT target) {
+static void emitBranch(LONGINT cond, ORB_Type *type, AddrMode mode, LONGINT target) {
     // Debug output to trace condition codes
-    // printf("DEBUG: emitBranch called with cond=%ld, type->form=%d, type->size=%ld, target=%ld\n", cond, type->form, type->size, target);
-    
-    // For now, assume all branches from compiler are forward branches needing fixup
-    // TODO: Detect backward branches properly when implementing loops
-    AddrMode mode = Fixup;
-    
+    // printf("DEBUG: emitBranch called with cond=$%04X, type->form=%d, type->size=$%04X, mode=%d, target=$%04X\n", cond, type->form, type->size, mode, target);
+
     switch (cond) {
         case EQ:  // Branch if Equal (Zero flag set)
-            codegen_gen(sBEQ, mode, target, 0);
+            codegen_gen(sBNE, ProgramCounterRelative, ORG_pc + 2 + 3, 0);
+            codegen_gen(sBRL, mode, target, 0);
             break;
         case NE:  // Branch if Not Equal (Zero flag clear)
-            codegen_gen(sBNE, mode, target, 0);
+            codegen_gen(sBEQ, ProgramCounterRelative, ORG_pc + 2 + 3, 0);
+			// This BRL is 1+ for some reason
+            // printf("DEBUG: About to call codegen_gen(sBRL, mode=%d, target=$%04X, 0)\n", mode, target);
+            codegen_gen(sBRL, mode, target, 0);
             break;
         case MI:  // Branch if Minus (Negative flag set)
-            codegen_gen(sBMI, mode, target, 0);
+            codegen_gen(sBPL, ProgramCounterRelative, ORG_pc + 2 + 3, 0);
+            codegen_gen(sBRL, mode, target, 0);
             break;
         case PL:  // Branch if Plus (Negative flag clear)
-            codegen_gen(sBPL, mode, target, 0);
+            codegen_gen(sBMI, ProgramCounterRelative, ORG_pc + 2 + 3, 0);
+            codegen_gen(sBRL, mode, target, 0);
             break;
         case LT:  // Branch if Less Than
-            if (type->size == 2 && type->form == ORB_Int) {
-                // Signed 16-bit comparison with single fixup point - INVERTED LOGIC
-                // Branch to target when NOT less than (condition is FALSE)
-                // Pattern: BVS INVERT; BPL TO_TARGET; BRA SKIP; INVERT: BMI TO_TARGET; BRA SKIP; TO_TARGET: BRA target; SKIP: ...
-                
-                codegen_gen(sBVS, ProgramCounterRelative, ORG_pc + 2 + 4, 0);  // BVS: if overflow, jump to INVERT
-                codegen_gen(sBPL, ProgramCounterRelative, ORG_pc + 2 + 4, 0);  // BPL: if no overflow & positive, jump to TO_TARGET (NOT less)
-                codegen_gen(sBRA, ProgramCounterRelative, ORG_pc + 2 + 4, 0);  // BRA: skip to SKIP (is less than)
-                // INVERT section: overflow inverts meaning  
-                codegen_gen(sBPL, ProgramCounterRelative, ORG_pc + 2 + 2, 0);  // BMI: if overflow & negative, jump to TO_TARGET (NOT less)
-                codegen_gen(sBRA, ProgramCounterRelative, ORG_pc + 2 + 2, 0);  // BRA: skip to SKIP (is less than)
-                // TO_TARGET: single fixup point
-                codegen_gen(sBRA, mode, target, 0);                            // BRA target (single fixup)
-                // SKIP: fall through when condition is TRUE (less than)
-            } else {
-                // Unsigned comparison - use BCC
-                codegen_gen(sBCC, mode, target, 0);
-            }
-            break;
-        case GE:  // Branch if Greater or Equal  
             if (type->size == 2 && type->form == ORB_Int) {
                 // Signed 16-bit comparison with single fixup point - INVERTED LOGIC
                 // Branch to target when NOT greater or equal (condition is FALSE, i.e., less than)
                 // Pattern: BVS INVERT; BMI TO_TARGET; BRA SKIP; INVERT: BPL TO_TARGET; BRA SKIP; TO_TARGET: BRA target; SKIP: ...
                 
                 codegen_gen(sBVS, ProgramCounterRelative, ORG_pc + 2 + 4, 0);  // BVS: if overflow, jump to INVERT
-                codegen_gen(sBMI, ProgramCounterRelative, ORG_pc + 2 + 4, 0);  // BMI: if no overflow & negative, jump to TO_TARGET (less than)
-                codegen_gen(sBRA, ProgramCounterRelative, ORG_pc + 2 + 4, 0);  // BRA: skip to SKIP (greater or equal)
+                codegen_gen(sBMI, ProgramCounterRelative, ORG_pc + 2 + 6, 0);  // BMI: if no overflow & negative, jump to TO_TARGET (less than)
+                codegen_gen(sBRA, ProgramCounterRelative, ORG_pc + 2 + 7, 0);  // BRA: skip to SKIP (greater or equal)
                 // INVERT section: overflow inverts meaning  
-                codegen_gen(sBMI, ProgramCounterRelative, ORG_pc + 2 + 2, 0);  // BMI: if overflow & negative, jump to TO_TARGET (not less than)
-                codegen_gen(sBRA, ProgramCounterRelative, ORG_pc + 2 + 2, 0);  // BRA: skip to SKIP (less than)
+                codegen_gen(sBPL, ProgramCounterRelative, ORG_pc + 2 + 2, 0);  // BMI: if overflow & negative, jump to TO_TARGET (not less than)
+                codegen_gen(sBRA, ProgramCounterRelative, ORG_pc + 2 + 3, 0);  // BRA: skip to SKIP (less than)
                 // TO_TARGET: single fixup point
-                codegen_gen(sBRA, mode, target, 0);                            // BRA target (single fixup)
+                codegen_gen(sBRL, mode, target, 0);                            // BRL target (single fixup)
                 // SKIP: fall through when condition is TRUE (greater or equal)
             } else {
                 // Unsigned comparison - use BCS
                 codegen_gen(sBCS, mode, target, 0);
             }
             break;
-        case LE:  // Branch if Less or Equal
+        case GE:  // Branch if Greater or Equal  
             if (type->size == 2 && type->form == ORB_Int) {
                 // Signed 16-bit comparison with single fixup point - INVERTED LOGIC
-                // Branch to target when NOT less or equal (condition is FALSE, i.e., greater than)
-                // First check for equality (if equal, fall through - don't branch to target)
-                codegen_gen(sBEQ, ProgramCounterRelative, ORG_pc + 2 + 14, 0);  // BEQ: skip all GT logic (fall through)
-                // Then check for greater than using inverted signed logic
+                // Branch to target when NOT less than (condition is FALSE)
+                // Pattern: BVS INVERT; BPL TO_TARGET; BRA SKIP; INVERT: BMI TO_TARGET; BRA SKIP; TO_TARGET: BRA target; SKIP: ...
+                
                 codegen_gen(sBVS, ProgramCounterRelative, ORG_pc + 2 + 4, 0);  // BVS: if overflow, jump to INVERT
-                codegen_gen(sBPL, ProgramCounterRelative, ORG_pc + 2 + 4, 0);  // BPL: if no overflow & positive, jump to TO_TARGET (greater)
-                codegen_gen(sBRA, ProgramCounterRelative, ORG_pc + 2 + 4, 0);  // BRA: skip to SKIP (less or equal)
+                codegen_gen(sBPL, ProgramCounterRelative, ORG_pc + 2 + 6, 0);  // BPL: if no overflow & positive, jump to TO_TARGET (NOT less)
+                codegen_gen(sBRA, ProgramCounterRelative, ORG_pc + 2 + 7, 0);  // BRA: skip to SKIP (is less than)
                 // INVERT section: overflow inverts meaning  
-                codegen_gen(sBPL, ProgramCounterRelative, ORG_pc + 2 + 2, 0);  // BPL: if overflow & positive result, jump to TO_TARGET (actual less, so GT is false)
-                codegen_gen(sBRA, ProgramCounterRelative, ORG_pc + 2 + 2, 0);  // BRA: skip to SKIP (actual greater with overflow, so LE is false)
+                codegen_gen(sBMI, ProgramCounterRelative, ORG_pc + 2 + 2, 0);  // BMI: if overflow & negative, jump to TO_TARGET (NOT less)
+                codegen_gen(sBRA, ProgramCounterRelative, ORG_pc + 2 + 3, 0);  // BRA: skip to SKIP (is less than)
                 // TO_TARGET: single fixup point
-                codegen_gen(sBRA, mode, target, 0);                            // BRA target (single fixup)
-                // SKIP: fall through when condition is TRUE (less or equal)
+                codegen_gen(sBRL, mode, target, 0);                            // BRL target (single fixup)
+                // SKIP: fall through when condition is TRUE (less than)
             } else {
-                // Unsigned comparison
-                // Check equality first, then use BCS for the < case
-                codegen_gen(sBEQ, ProgramCounterRelative, ORG_pc + 2 + 4, 0);
-                codegen_gen(sBCC, ProgramCounterRelative, ORG_pc + 2 + 2, 0);
-                codegen_gen(sBRA, ProgramCounterRelative, ORG_pc + 2 + 2, 0);  // over
-                codegen_gen(sBRA, mode, target, 0);
+                // Unsigned comparison - use BCC
+                codegen_gen(sBCC, mode, target, 0);
             }
             break;
-        case GT:  // Branch if Greater Than
+        case LE:  // Branch if Less or Equal
             if (type->size == 2 && type->form == ORB_Int) {
                 // Signed 16-bit comparison - GT means NOT(LE)
                 // First check for equality (if equal, don't branch)
-                codegen_gen(sBEQ, ProgramCounterRelative, ORG_pc + 2 + 12, 0);  // BEQ skip all GT logic (12 bytes ahead)
+                codegen_gen(sBEQ, ProgramCounterRelative, ORG_pc + 2 + 13, 0);  // BEQ skip all GT logic (12 bytes ahead)
                 // Then check for greater using signed logic (same as GE but excluding equality)
                 // For signed: if V=0: BPL=GT, BMI=LT; if V=1: BMI=GT, BPL=LT
                 codegen_gen(sBVS, ProgramCounterRelative, ORG_pc + 2 + 4, 0);  // BVS: if overflow, jump to INVERT
-                codegen_gen(sBMI, ProgramCounterRelative, ORG_pc + 2 + 4, 0);  // BMI: if no overflow & negative, jump to TO_TARGET (less than)
-                codegen_gen(sBRA, ProgramCounterRelative, ORG_pc + 2 + 4, 0);  // BRA: skip to SKIP (greater or equal)
+                codegen_gen(sBMI, ProgramCounterRelative, ORG_pc + 2 + 6, 0);  // BMI: if no overflow & negative, jump to TO_TARGET (less than)
+                codegen_gen(sBRA, ProgramCounterRelative, ORG_pc + 2 + 7, 0);  // BRA: skip to SKIP (greater or equal)
                 // INVERT section: overflow inverts meaning  
-                codegen_gen(sBMI, ProgramCounterRelative, ORG_pc + 2 + 2, 0);  // BMI: if overflow & negative, jump to TO_TARGET (not less than)
-                codegen_gen(sBRA, ProgramCounterRelative, ORG_pc + 2 + 2, 0);  // BRA: skip to SKIP (less than)
+                codegen_gen(sBPL, ProgramCounterRelative, ORG_pc + 2 + 2, 0);  // BMI: if overflow & negative, jump to TO_TARGET (not less than)
+                codegen_gen(sBRA, ProgramCounterRelative, ORG_pc + 2 + 3, 0);  // BRA: skip to SKIP (less than)
                 // TO_TARGET: single fixup point
-                codegen_gen(sBRA, mode, target, 0);                            // BRA target (single fixup)
+                codegen_gen(sBRL, mode, target, 0);                            // BRA target (single fixup)
             } else {
                 // Unsigned comparison
                 codegen_gen(sBEQ, ProgramCounterRelative, ORG_pc + 2 + 2, 0);
                 codegen_gen(sBCS, mode, target, 0);
             }
             break;
+        case GT:  // Branch if Greater Than
+            if (type->size == 2 && type->form == ORB_Int) {
+                // Signed 16-bit comparison with single fixup point - INVERTED LOGIC
+                // Branch to target when NOT less or equal (condition is FALSE, i.e., greater than)
+                // First check for equality (if equal, fall through - don't branch to target)
+                codegen_gen(sBEQ, ProgramCounterRelative, ORG_pc + 2 + 13, 0);  // BEQ: skip all GT logic (fall through)
+                // Then check for greater than using inverted signed logic
+                codegen_gen(sBVS, ProgramCounterRelative, ORG_pc + 2 + 4, 0);  // BVS: if overflow, jump to INVERT
+                codegen_gen(sBPL, ProgramCounterRelative, ORG_pc + 2 + 6, 0);  // BPL: if no overflow & positive, jump to TO_TARGET (greater)
+                codegen_gen(sBRA, ProgramCounterRelative, ORG_pc + 2 + 7, 0);  // BRA: skip to SKIP (less or equal)
+                // INVERT section: overflow inverts meaning  
+                codegen_gen(sBMI, ProgramCounterRelative, ORG_pc + 2 + 2, 0);  // BPL: if overflow & positive result, jump to TO_TARGET (actual less, so GT is false)
+                codegen_gen(sBRA, ProgramCounterRelative, ORG_pc + 2 + 3, 0);  // BRA: skip to SKIP (actual greater with overflow, so LE is false)
+                // TO_TARGET: single fixup point
+                codegen_gen(sBRL, mode, target, 0);                            // BRA target (single fixup)
+                // SKIP: fall through when condition is TRUE (less or equal)
+            } else {
+                // Unsigned comparison
+                // Check equality first, then use BCS for the < case
+                codegen_gen(sBEQ, ProgramCounterRelative, ORG_pc + 2 + 4, 0);
+                codegen_gen(sBCC, ProgramCounterRelative, ORG_pc + 2 + 2, 0);
+                codegen_gen(sBRA, ProgramCounterRelative, ORG_pc + 2 + 3, 0);  // over
+                codegen_gen(sBRL, mode, target, 0);
+            }
+            break;
         case AL:   // Always branch (unconditional)
-            codegen_gen(sBRA, mode, target, 0);
+            codegen_gen(sBRL, mode, target, 0);
             break;
         case NV:  // Never branch (nop - could optimize away)
             // Do nothing for "never" condition
@@ -343,14 +349,24 @@ static void emitBranch(LONGINT cond, ORB_Type *type, LONGINT target) {
 }
 
 static void fix(LONGINT at, LONGINT target) {
-    // For 65C816, patch the offset byte of branch instructions
-    // 'at' is the address of the offset byte (branch_addr + 1)  
+    // For 65C816: All fixup locations are BRL instructions (3 bytes: $82 + 2-byte offset)
+    // 'at' is the address of the low byte of the 2-byte offset field
     // 'target' is the target address
-    // For 65C816 branches: offset = target - (branch_addr + 2) = target - (at + 1)
+    // For BRL: offset = target - (branch_addr + 3) = target - (at + 2)
     LONGINT offset = target - (at + 1);
-    LONGINT code_index = at - CODE_ORG;  // Same indexing as o() function
+    LONGINT code_index = at - CODE_ORG;  // Index for low byte of offset
     
-    code[code_index] = offset & 0xFF;  // Store only the low byte for branch instructions
+    if ((offset >= -128) && (offset <= 127)) {
+        // Optimize to BRA (1-byte offset) + NOP
+        code[code_index-1] = 0x80;           // Change opcode from BRL to BRA
+        code[code_index] = offset & 0xFF;    // Store 1-byte offset
+        code[code_index+1] = 0xEA;           // NOP in the high byte position
+    } else {
+	  // Keep as BRL (2-byte offset)
+	  offset -= 1; // Adjust for extra byte for BRL
+	  code[code_index] = offset & 0xFF;    // Store low byte of offset
+	  code[code_index+1] = offset >> 8;    // Store high byte of offset
+    }
 }
 
 void ORG_FixOne(LONGINT at) {
@@ -367,23 +383,18 @@ void ORG_FixLink(LONGINT L) {
     // For 65C816: fix a chain of forward branches
     // L is the address of the offset byte of the most recent branch
     LONGINT L1;
+	LONGINT code_index;
+
     while (L != 0) {
-        // Read the chain link (relative offset to previous branch)
-        LONGINT chain_offset = (signed char)code[L];  // Sign-extend to handle negative offsets
-        if (chain_offset == 0) {
-            L1 = 0;  // End of chain
-        } else {
-            L1 = L + chain_offset;  // Calculate address of previous offset byte
-        }
-        
-        // Fix this branch: target is current ORG_pc
-        // Original Oberon: fix(L, pc-L-1)
-        // For 65C816 branches: offset = target - (branch_addr + 2) = target - (L + 1) 
-        // So we want offset = ORG_pc - (L + 1) = ORG_pc - L - 1
-        fix(L, ORG_pc);
-        
-        // Move to next branch in chain
-        L = L1;
+	  code_index = L - CODE_ORG;  // Index for low byte of offset
+	  // Read the 2-byte chain link BEFORE fixing (fix() will overwrite it)
+	  L1 = code[code_index] | (code[code_index + 1] << 8);
+      
+	  // Fix this branch: target is current ORG_pc
+	  fix(L, ORG_pc);
+      
+	  // Move to next branch in chain
+	  L = L1;
     }
 }
 
@@ -392,14 +403,12 @@ static void FixLinkWith(LONGINT L0, LONGINT dst) {
     // L0 is the address of the offset byte of the most recent branch
     // dst is the target address
     LONGINT L1;
+	LONGINT code_index;
     while (L0 != 0) {
-        // Read the chain link (relative offset to previous branch)
-        LONGINT chain_offset = (signed char)code[L0];  // Sign-extend to handle negative offsets
-        if (chain_offset == 0) {
-            L1 = 0;  // End of chain
-        } else {
-            L1 = L0 + chain_offset;  // Calculate address of previous offset byte
-        }
+	  	code_index = L0 - CODE_ORG;  // Index for low byte of offset
+
+        // Read the 2-byte chain link BEFORE fixing (fix() will overwrite it)
+        L1 = code[code_index] | (code[code_index + 1] << 8);
         
         // Fix this branch to the specified destination
         fix(L0, dst);
@@ -411,15 +420,20 @@ static void FixLinkWith(LONGINT L0, LONGINT dst) {
 
 static LONGINT merged(LONGINT L0, LONGINT L1) {
     LONGINT L2, L3;
+	LONGINT code_index;
     if (L0 != 0) {
         L3 = L0;
         do {
             L2 = L3;
-            L3 = code[L2] % 0x40000;
+			code_index = L2 - CODE_ORG;  // Index for low byte of offset
+
+            // For BRL instructions, read 2-byte chain link in little-endian format
+            L3 = code[code_index] | (code[code_index + 1] << 8);
         } while (L3 != 0);
         
-        
-        code[L2] = code[L2] + L1;
+        // Update the 2-byte offset field with L1 in little-endian format
+        code[code_index] = L1 & 0xFF;
+        code[code_index + 1] = (L1 >> 8) & 0xFF;
         L1 = L0;
     }
     return L1;
@@ -462,6 +476,7 @@ static int load(ORG_Item *x) {
 				Set8(1, 0);
 				codegen_gen(sLDA, Immediate, x->a & 0xFF, 0);  // LDA #constant
 				codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);  // STA $reg
+				Set16(1, 0);
 			  } else {
 				Set16(1, 1);
 				codegen_gen(sLDA, Immediate, x->a & 0xFFFF, 0);  // LDA #constant
@@ -484,6 +499,7 @@ static int load(ORG_Item *x) {
 				Set8(1, 0);
 				codegen_gen(sLDA, StackRelative, x->a, 0);                // LDA x->a,S (8-bit)
 				codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);           // STA $reg
+				Set16(1, 0);
 			  } else {
 				// Word load from stack (handles INTEGER and other multi-byte types)
 				Set16(1, 1);
@@ -498,6 +514,7 @@ static int load(ORG_Item *x) {
 				Set8(1, 0);
 				codegen_gen(sLDA, Absolute, MODULE_VAR_BASE + x->a, 0);   // LDA $1000+offset (8-bit)
 				codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);           // STA $reg
+				Set16(1, 0);
 			  } else {
 				// Word load from global (handles INTEGER and other multi-byte types)
 				Set16(1, 1);
@@ -522,11 +539,12 @@ static int load(ORG_Item *x) {
 		  codegen_gen(sSTA, DirectPage, reg_addr(RH + 1), 0); // STA $reg1 (store data bank)
 		  
 		  // Now dereference through the pointer using DirectPageIndirectLong
-		  if (x->type->size == 1) {
+		  if (x->type->base->size == 1) {
 			// Byte load through pointer
 			Set8(1, 0);  // 8-bit accumulator
 			codegen_gen(sLDA, DirectPageIndirectLong, reg_addr(RH), 0); // LDA [$reg0] (dereference)
 			codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);         // STA $reg2 (store result)
+			Set16(1, 0);  // 8-bit accumulator
 		  } else {
 			// Word load through pointer  
 			Set16(1, 1); // 16-bit accumulator
@@ -695,6 +713,9 @@ void ORG_MakeItem(ORG_Item *x, ORB_Object *y, LONGINT curlev) {
         x->b = 0;
     } else if ((y->class == ORB_Const) && (y->type->form == ORB_String)) {
         x->b = y->lev;
+    } else if ((y->class == ORB_Const) && (y->type->form == ORB_Proc)) {
+        x->r = y->lev;
+        // x->b = y->expo ? 1 : 0;  // Store export flag for procedure calls
     } else {
         x->r = y->lev;
     }
@@ -723,6 +744,7 @@ void ORG_Field(ORG_Item *x, ORB_Object *y) {
 
 void ORG_Index(ORG_Item *x, ORG_Item *y) {
     LONGINT s, lim;
+    // BOOLEAN original_rdo = x->rdo;  // Preserve the read-only flag
     s = x->type->base->size;
     lim = x->type->len;
     
@@ -787,7 +809,8 @@ void ORG_Index(ORG_Item *x, ORG_Item *y) {
             x->r = y->r;
             x->mode = RegI;
         } else if (x->mode == ORB_Par) {
-            // 65C816: Open array parameter - use DirectPageIndirectLongIndexedY addressing
+            // 65C816: Open array parameter - set up for both reading and writing
+            // Keep the original 24-bit address handling but set correct mode
             // Load array base address into RH, RH+1
             Set16(1, 1);
             codegen_gen(sLDA, StackRelative, x->a + frame, 0);      // LDA base_addr_low,S
@@ -796,23 +819,21 @@ void ORG_Index(ORG_Item *x, ORG_Item *y) {
             codegen_gen(sLDA, StackRelative, x->a + 2 + frame, 0);  // LDA base_addr_high,S  
             codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);         // STA RH
             incR();
-			
-            // Load index into Y register
-            Set16(0, 1);  // Set 16-bit index mode
-            codegen_gen(sLDY, DirectPage, reg_addr(y->r), 0);       // LDY index
             
-            // Load array element using DirectPageIndirectLongIndexedY
-            Set16(1, 1);  // Set appropriate mode for element size
-            codegen_gen(sLDA, DirectPageIndirectLongIndexedY, reg_addr(RH - 2), 0); // LDA [RH-2],Y (base address low word)
+            // Add scaled index to base address (low word)
+            Set16(1, 1);
+            codegen_gen(sLDA, DirectPage, reg_addr(RH - 2), 0);     // LDA base_addr_low
+            codegen_gen(sCLC, Implied, 0, 0);                       // CLC
+            codegen_gen(sADC, DirectPage, reg_addr(y->r), 0);       // ADC scaled_index
+            codegen_gen(sSTA, DirectPage, reg_addr(y->r), 0);       // STA final_addr_low
             
-            // Deallocate index register and reuse it for result
+            // Deallocate base address registers
             RH--;  // Deallocate the second address register (RH)
             RH--;  // Deallocate the first address register (RH-1)
-            codegen_gen(sSTA, DirectPage, reg_addr(y->r), 0);       // Store result in y->r
             
-            x->mode = Reg;
-            x->r = y->r;  // Point to register with result
-            x->a = 0;
+            x->mode = RegI;    // Register indirect mode for both read/write
+            x->r = y->r;       // Register containing element address
+            x->a = x->b;       // Preserve original offset
         } else if (x->mode == RegI) {
             // 65C816: Add index offset to existing address
             Set16(1, 1);
@@ -823,6 +844,9 @@ void ORG_Index(ORG_Item *x, ORG_Item *y) {
             RH--;  // Deallocate y->r register
         }
     }
+    
+    // Restore the read-only flag - indexed elements inherit the read-only status of the array
+    //x->rdo = original_rdo;
 }
 
 void ORG_DeRef(ORG_Item *x) {
@@ -976,14 +1000,6 @@ void ORG_TypeTest(ORG_Item *x, ORB_Type *T, BOOLEAN varpar, BOOLEAN isguard) {
 }
 
 // Boolean operators
-/*
-  PROCEDURE Not*(VAR x: Item);   (* x := ~x *)
-    VAR t: LONGINT;
-  BEGIN
-    IF x.mode # Cond THEN loadCond(x) END ;
-    x.r := negated(x.r); t := x.a; x.a := x.b; x.b := t
-  END Not;
-*/
 void ORG_Not(ORG_Item *x) {
     LONGINT t;
     
@@ -1014,8 +1030,8 @@ void ORG_And1(ORG_Item *x) {
     }
     // Generate branch with negated condition to FALSE chain
     // If x is FALSE, jump to FALSE result (short-circuit)
-    emitBranch(negated(x->r), x->orig_type, x->a);
-    x->a = ORG_pc - 1;  // Save current branch location for FALSE chain
+    emitBranch(negated(x->r), x->orig_type, Fixup, x->a);
+    x->a = ORG_pc - 2;  // Save current branch location for FALSE chain (BRL offset field)
     ORG_FixLink(x->b);  // Fix up previous TRUE branches
     x->b = 0;           // Reset TRUE chain
 }
@@ -1051,8 +1067,8 @@ void ORG_Or1(ORG_Item *x) {
     }
     // Generate branch with condition (NOT negated) to TRUE chain
     // If x is TRUE, jump to TRUE result (short-circuit)
-    emitBranch(x->r, x->orig_type, x->b);
-    x->b = ORG_pc - 1;  // Save current branch location for TRUE chain
+    emitBranch(x->r, x->orig_type, Fixup, x->b);
+    x->b = ORG_pc - 2;  // Save current branch location for TRUE chain (BRL offset field)
     ORG_FixLink(x->a);  // Fix up previous FALSE branches
     x->a = 0;           // Reset FALSE chain
 }
@@ -1078,28 +1094,34 @@ void ORG_Or2(ORG_Item *x, ORG_Item *y) {
 
 // Arithmetic operators
 void ORG_Neg(ORG_Item *x) {
-    if (x->type->form == ORB_Int) {
-        if (x->mode == ORB_Const) {
-            x->a = -x->a;
-        } else {
-            load(x);
-        }
-    } else if (x->type->form == ORB_Real) {
-        if (x->mode == ORB_Const) {
-            x->a = x->a + 0x7FFFFFFF + 1;
-        } else {
-            load(x);
-        }
-    } else { // Set
-        if (x->mode == ORB_Const) {
-            x->a = -x->a - 1;
-        } else {
-            load(x);
-			codegen_gen(sLDA, DirectPage, reg_addr(x->r), 0);
-			codegen_gen(sEOR, Immediate, 0xffff, 0);
-			codegen_gen(sSTA, DirectPage, reg_addr(x->r), 0);
-        }
-    }
+  if (x->type->form == ORB_Int) {
+	Set16(1, 1);
+	if (x->mode == ORB_Const) {
+	  x->a = -x->a;
+	} else {
+	  load(x);
+	  codegen_gen(sLDA, DirectPage, reg_addr(x->r), 0);
+	  codegen_gen(sEOR, Immediate, 0xffff, 0);
+	  codegen_gen(sCLC, Implied, 0, 0);
+	  codegen_gen(sADC, Immediate, 1, 0);
+	  codegen_gen(sSTA, DirectPage, reg_addr(x->r), 0);
+	}
+  } else if (x->type->form == ORB_Real) {
+	if (x->mode == ORB_Const) {
+	  x->a = x->a + 0x7FFFFFFF + 1;
+	} else {
+	  load(x);
+	}
+  } else { // Set
+	if (x->mode == ORB_Const) {
+	  x->a = -x->a - 1;
+	} else {
+	  load(x);
+	  codegen_gen(sLDA, DirectPage, reg_addr(x->r), 0);
+	  codegen_gen(sEOR, Immediate, 0xffff, 0);
+	  codegen_gen(sSTA, DirectPage, reg_addr(x->r), 0);
+	}
+  }
 }
 
 void ORG_AddOp(LONGINT op, ORG_Item *x, ORG_Item *y) {
@@ -1615,21 +1637,25 @@ void ORG_Store(ORG_Item *x, ORG_Item *y) {
                     Set8(1, 0);
                     codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);     // LDA $reg
                     codegen_gen(sSTA, StackRelative, x->a, 0);            // STA x->a,S (8-bit)
+                    Set16(1, 0);
                 } else if (x->type->size == 1 && y->type->size > 1) {
                     // INTEGER to BYTE store (truncate to low byte)
                     Set8(1, 0);
                     codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);     // LDA $reg
                     codegen_gen(sSTA, StackRelative, x->a, 0);            // STA x->a,S (8-bit)
+                    Set16(1, 0);
                 } else if (x->type->size > 1 && y->type->size == 1) {
                     // BYTE to INTEGER store (zero-extend)
                     Set16(1, 0);
                     codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);     // LDA $reg (already zero-extended from load)
                     codegen_gen(sSTA, StackRelative, x->a, 0);            // STA x->a,S (16-bit)
+                    Set16(1, 0);
                 } else {
                     // INTEGER to INTEGER store (no conversion needed)
 				  Set16(1, 0);
 				  codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);     // LDA $reg
 				  codegen_gen(sSTA, StackRelative, x->a, 0);            // STA x->a,S (16-bit)
+				  Set16(1, 0);
                 }
             }
         } else {
@@ -1644,21 +1670,25 @@ void ORG_Store(ORG_Item *x, ORG_Item *y) {
                     Set8(1, 0);
                     codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);        // LDA $reg
                     codegen_gen(sSTA, Absolute, MODULE_VAR_BASE + x->a, 0);  // STA $1000+offset (8-bit)
+                    Set16(1, 0);
                 } else if (x->type->size == 1 && y->type->size > 1) {
                     // INTEGER to BYTE store (truncate to low byte)
                     Set8(1, 0);
                     codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);        // LDA $reg
                     codegen_gen(sSTA, Absolute, MODULE_VAR_BASE + x->a, 0);  // STA $1000+offset (8-bit)
+                    Set16(1, 0);
                 } else if (x->type->size > 1 && y->type->size == 1) {
                     // BYTE to INTEGER store (zero-extend)
                     Set8(1, 0);
                     codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);        // LDA $reg (already zero-extended from load)
                     codegen_gen(sSTA, Absolute, MODULE_VAR_BASE + x->a, 0);  // STA $1000+offset (16-bit)
+                    Set16(1, 0);
                 } else {
                     // INTEGER to INTEGER store (no conversion needed)
 				  Set16(1, 1);
 				  codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);        // LDA $reg
 				  codegen_gen(sSTA, Absolute, MODULE_VAR_BASE + x->a, 0);  // STA $1000+offset (16-bit)
+				  Set16(1, 0);
                 }
             }
         }
@@ -1720,24 +1750,28 @@ void ORG_Store(ORG_Item *x, ORG_Item *y) {
                 codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);  // LDA $reg
                 codegen_gen(sLDX, DirectPage, reg_addr(x->r), 0);  // LDX $x->r (address)
                 codegen_gen(sSTA, AbsoluteIndexedX, x->a, 0);      // STA x->a,X (8-bit)
+				Set16(1, 0);
             } else if (x->type->size == 1 && y->type->size > 1) {
                 // INTEGER to BYTE store (truncate to low byte)
                 Set8(1, 0);
                 codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);  // LDA $reg
                 codegen_gen(sLDX, DirectPage, reg_addr(x->r), 0);  // LDX $x->r (address)
                 codegen_gen(sSTA, AbsoluteIndexedX, x->a, 0);      // STA x->a,X (8-bit)
+				Set16(1, 0);
             } else if (x->type->size > 1 && y->type->size == 1) {
                 // BYTE to INTEGER store (zero-extend)
                 Set16(1, 1);
                 codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);  // LDA $reg (already zero-extended from load)
                 codegen_gen(sLDX, DirectPage, reg_addr(x->r), 0);  // LDX $x->r (address)
                 codegen_gen(sSTA, AbsoluteIndexedX, x->a, 0);      // STA x->a,X (16-bit)
+				Set16(1, 0);
             } else {
                 // INTEGER to INTEGER store (no conversion needed)
                 Set16(1, 1);
                 codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);  // LDA $reg
                 codegen_gen(sLDX, DirectPage, reg_addr(x->r), 0);  // LDX $x->r (address)
                 codegen_gen(sSTA, AbsoluteIndexedX, x->a, 0);      // STA x->a,X (16-bit)
+				Set16(1, 0);
             }
         }
         RH--;
@@ -1930,9 +1964,9 @@ void ORG_VarParam(ORG_Item *x, ORB_Type *ftype) {
             codegen_gen(sSTA, DirectPage, reg_addr(x->r + 2), 0); // STA $reg+2 (same as ORG_OpenArrayParam)
         } else {
             // 65C816: Load array length for open arrays passed to VAR open array parameters
-            // Load the length from the stack frame (x->a + 2 + frame)
+            // Load the length from the stack frame at offset +4 (length is at $05,S in the parameter layout)
             Set16(1, 1);
-            codegen_gen(sLDA, StackRelative, x->a + 2 + frame, 0);  // LDA x->a + 2 + frame,S
+            codegen_gen(sLDA, StackRelative, x->a + 4 + frame, 0);  // LDA x->a + 4 + frame,S
             codegen_gen(sSTA, DirectPage, reg_addr(x->r + 2), 0);   // STA $reg+2 (same as ORG_OpenArrayParam)
         }
         incR(); // Allocate the length register
@@ -2003,20 +2037,21 @@ void ORG_For1(ORG_Item *x, ORG_Item *y, ORG_Item *z, ORG_Item *w, LONGINT *L) {
         codegen_gen(sCMP, DirectPage, reg_addr(y->r), 0);
         RH--;
     }
-    
+	Set16(1, 0);
+
     // Generate conditional branch based on increment direction
     if (w->a > 0) {
         // Positive increment: branch if greater than limit (exit loop)
-        emitBranch(GT, y->type, 0);  // Forward branch, will be fixed up later
+        emitBranch(GT, y->type, Fixup, 0);  // Forward branch, will be fixed up later
     } else if (w->a < 0) {
         // Negative increment: branch if less than limit (exit loop)
-        emitBranch(LT, y->type, 0);  // Forward branch, will be fixed up later
+        emitBranch(LT, y->type, Fixup, 0);  // Forward branch, will be fixed up later
     } else {
         ORS_Mark("zero increment");
-        emitBranch(MI, y->type, 0);  // This shouldn't happen, but handle error case
+        emitBranch(MI, y->type, Fixup, 0);  // This shouldn't happen, but handle error case
     }
     
-    *L = ORG_pc - 1;  // Save location of branch for later fixup
+    *L = ORG_pc - 2;  // Save location of branch for later fixup (BRL offset field)
     
     // Store initial value in loop variable
     ORG_Store(x, y);
@@ -2064,8 +2099,8 @@ LONGINT ORG_Here(void) {
 */
 void ORG_FJump(LONGINT *L) {
     // Generate unconditional forward jump
-    emitBranch(AL, intType, *L);  // Unconditional branch (condition 7 = always)
-    *L = ORG_pc - 1;    // Save location for later fixup
+    emitBranch(AL, intType, Fixup, *L);  // Unconditional forward branch (condition 7 = always)
+    *L = ORG_pc - 2;    // Save location for later fixup (BRL offset field)
 }
 
 /*
@@ -2080,42 +2115,21 @@ void ORG_CFJump(ORG_Item *x) {
         loadCond(x);
     }
     
-    // Special case: Handle AL (always) condition - should never branch on FALSE  
-    if (x->r == AL) {
-        // For "always true" conditions like IF TRUE THEN, we never need to skip the THEN block
-        // Just fix up any existing TRUE branches and set up empty FALSE chain
-        ORG_FixLink(x->b);  // Fix up TRUE branches  
-        x->a = 0;           // No FALSE branch needed - we always execute THEN block
-    } else {
-        // Normal case: Generate branch with negated condition (for forward jump on FALSE)
-        emitBranch(negated(x->r), x->orig_type, x->a);
-        ORG_FixLink(x->b);  // Fix up TRUE branches
-        x->a = ORG_pc - 1;  // Save location for FALSE branch fixup
-    }
+	emitBranch(negated(x->r), x->orig_type, Fixup, x->a);
+	ORG_FixLink(x->b);  // Fix up TRUE branches
+	x->a = ORG_pc - 2;  // Save location for FALSE branch fixup (BRL offset field)
 }
 
-/*
-  PROCEDURE BJump*(L: LONGINT);
-  BEGIN Put3(BC, 7, L-pc-1)
-  END BJump;
-*/
 void ORG_BJump(LONGINT L) {
   codegen_gen(sBRA, ProgramCounterRelative, L, 0);
 }
 
-/*
-  PROCEDURE CBJump*(VAR x: Item; L: LONGINT);
-  BEGIN
-    IF x.mode # Cond THEN loadCond(x) END ;
-    Put3(BC, negated(x.r), L-pc-1); FixLink(x.b); FixLinkWith(x.a, L)
-  END CBJump;
-*/
 void ORG_CBJump(ORG_Item *x, LONGINT L) {
     if (x->mode != Cond) {
         loadCond(x);
     }
     // Generate branch with negated condition (for backward jump on FALSE)
-    emitBranch(negated(x->r), x->orig_type, L);
+    emitBranch(negated(x->r), x->orig_type, ProgramCounterRelative, L);
     ORG_FixLink(x->b);     // Fix up TRUE branches
     FixLinkWith(x->a, L);  // Fix up FALSE branches to target L
 }
@@ -2165,10 +2179,11 @@ void ORG_PrepCall(ORG_Item *x, LONGINT *r) {
 void ORG_Call(ORG_Item *x, LONGINT r) {
   Set16(1, 1); // Always in long mode when entering a procedure
   if (x->mode == ORB_Const) {
-	if (x->r >= 0) {
-	  // 65C816: JSR to procedure address
+	if ((x->r >= 0) && (x->b == 0)) {
+	  // 65C816: Local procedure - JSR to procedure address
 	  codegen_gen(sJSR, Absolute, x->a, 0);  // JSR procedure_address
-	} else { // Imported
+	} else {
+	  // 65C816: Imported procedure (x->r < 0) or exported procedure (x->b == 1) - JSL
 	  codegen_gen(sJSL, Absolute, x->a, 0);  // JSL procedure_address
 	}
     } else {
@@ -2200,30 +2215,21 @@ void ORG_Call(ORG_Item *x, LONGINT r) {
     }
 }
 
-void ORG_Enter(ORB_Object *params, LONGINT locblksize, BOOLEAN int_proc) {
+void ORG_Enter(ORB_Object *params, LONGINT frame_size, BOOLEAN int_proc) {
   LONGINT a, r;
   ORB_Object *param;
   
   if (!int_proc) {
-	if (locblksize >= 0x10000) {
+	if (frame_size >= 0x4000) {
 	  ORS_Mark("too many locals");
 	}
 	
-	// 65C816: Calculate total stack frame size (parameters + locals)
-	LONGINT parblksize = 0;
-	param = params;
-	while (param != NULL && (param->class == ORB_Var || param->class == ORB_Par)) {
-	  parblksize += param->type->size;
-	  param = param->next;
-	}
-	
-	LONGINT total_frame_size = parblksize + locblksize;
-	if (total_frame_size > 0) {
+	if (frame_size > 0) {
 	  // Allocate stack space for parameters and locals
 	  Set16(1, 1);
 	  codegen_gen(sTSC, Implied, 0, 0);                        // TSC (Transfer Stack to A)
 	  codegen_gen(sSEC, Implied, 0, 0);                        // SEC
-	  codegen_gen(sSBC, Immediate, total_frame_size, 0);       // SBC #total_frame_size
+	  codegen_gen(sSBC, Immediate, frame_size, 0);       // SBC #total_frame_size
 	  codegen_gen(sTCS, Implied, 0, 0);                        // TCS (Transfer A to Stack)
 	}
 	
@@ -2238,34 +2244,34 @@ void ORG_Enter(ORB_Object *params, LONGINT locblksize, BOOLEAN int_proc) {
 	while (param != NULL && (param->class == ORB_Var || param->class == ORB_Par)) {
 	  // For VAR parameters (ORB_Par with rdo=FALSE), we need to store the pointer value itself 
 	  // to the stack frame, not store through the pointer
-	  if (param->class == ORB_Par && !param->rdo) {
+	  if (param->class == ORB_Par && !param->rdo && param->type->form == ORB_Array && param->type->len < 0) {
+	    // Open array parameter: Store both array address and length
+	    // First register contains array address, second register contains array length
+	    
+	    // Store the array address from first two registers  
+	    codegen_gen(sLDA, DirectPage, reg_addr(r + 0), 0);     // LDA $reg (load address low)
+	    codegen_gen(sSTA, StackRelative, param->val, 0);       // STA param->val,S (store address low)
+	    codegen_gen(sLDA, DirectPage, reg_addr(r + 1), 0);     // LDA $reg+1 (load address high)  
+	    codegen_gen(sSTA, StackRelative, param->val + 2, 0);   // STA param->val+1,S (store address high)
+	    
+	    // Store the array length from third register  
+	    codegen_gen(sLDA, DirectPage, reg_addr(r + 2), 0);     // LDA $reg+2 (load array length)
+	    codegen_gen(sSTA, StackRelative, param->val + 4, 0);   // STA param->val+4,S (store length)
+	    
+	    // Result on stack: [addr_low] [addr_high] [data_bank] [padding] [len_low] [len_high] = 6-byte VAR open array
+	  } else if (param->class == ORB_Par && !param->rdo) {
 	    // VAR parameter: Store 4-byte pointer value to stack using two registers
 	    // First register contains 16-bit address, second register contains data bank (0)
 	    
 	    // Store the 16-bit address from first register
-	    codegen_gen(sLDA, DirectPage, reg_addr(r), 0);     // LDA $reg (load 16-bit address)
-	    codegen_gen(sSTA, StackRelative, param->val, 0);   // STA param->val,S (store address)
+	    codegen_gen(sLDA, DirectPage, reg_addr(r + 0), 0);     // LDA $reg (load 16-bit address)
+	    codegen_gen(sSTA, StackRelative, param->val, 0);       // STA param->val,S (store address)
 	    
 	    // Store the data bank and high byte from second register
-	    codegen_gen(sLDA, DirectPage, reg_addr(r + 1), 0); // LDA $reg+1 (load data bank)
-	    codegen_gen(sSTA, StackRelative, param->val + 2, 0); // STA param->val+2,S (store data bank)
+	    codegen_gen(sLDA, DirectPage, reg_addr(r + 1), 0);     // LDA $reg+1 (load data bank)
+	    codegen_gen(sSTA, StackRelative, param->val + 2, 0);   // STA param->val+2,S (store data bank)
 	    
-	    // Result on stack: [addr_low] [addr_high] [00] [00] = 4-byte pointer
-	  } else if (param->class == ORB_Var && param->type->form == ORB_Array && param->type->len < 0) {
-	    // Open array parameter: Store both array address and length
-	    // First register contains array address, second register contains array length
-	    
-	    // Store the array address from first two registers
-	    codegen_gen(sLDA, DirectPage, reg_addr(r), 0);         // LDA $reg (load array address)
-	    codegen_gen(sSTA, StackRelative, param->val, 0);       // STA param->val,S (store address)
-	    codegen_gen(sLDA, DirectPage, reg_addr(r + 1), 0);     // LDA $reg+1 (load array address)
-	    codegen_gen(sSTA, StackRelative, param->val + 2, 0);   // STA param->val+2,S (store address)
-	    
-	    // Store the array length from second register  
-	    codegen_gen(sLDA, DirectPage, reg_addr(r + 2), 0);     // LDA $reg+1 (load array length)
-	    codegen_gen(sSTA, StackRelative, param->val + 4, 0);   // STA param->val+4,S (store length)
-	    
-	    // Result on stack: [addr_low] [addr_high] [len_low] [len_high] = address + length
+	    // Result on stack: [addr_low] [addr_high] [data_bank] [padding] = 4-byte pointer
 	  } else {
 	    // Regular parameter or complex type parameter: Use normal ORG_Store
 	    ORG_Item param_item, reg_item;
@@ -2286,7 +2292,7 @@ void ORG_Enter(ORB_Object *params, LONGINT locblksize, BOOLEAN int_proc) {
 	  // Advance register pointer based on parameter type
 	  if (param->class == ORB_Par && !param->rdo) {
 	    r += 2;  // VAR parameter uses two registers (address + data bank)
-	  } else if (param->class == ORB_Var && param->type->form == ORB_Array && param->type->len < 0) {
+	  } else if (param->class == ORB_Par && !param->rdo && param->type->form == ORB_Array && param->type->len < 0) {
 	    r += 3;  // Open array parameter uses three registers (addr_low + addr_high + length)
 	  } else {
 	    r++;     // Regular parameter uses one register
@@ -2298,15 +2304,15 @@ void ORG_Enter(ORB_Object *params, LONGINT locblksize, BOOLEAN int_proc) {
 	RH = 0;
   } else {
 	// Interrupt procedure - allocate full stack frame
-	if (locblksize > 0) {
+	if (frame_size > 0) {
 	  codegen_gen(sSEC, Implied, 0, 0);           // SEC
-	  codegen_gen(sSBC, Immediate, locblksize, 0); // SBC #locblksize
+	  codegen_gen(sSBC, Immediate, frame_size, 0); // SBC #locblksize
 	  codegen_gen(sTCS, Implied, 0, 0);           // TCS (Transfer A to Stack)
 	}
   }
 }
 
-void ORG_Return(INTEGER form, ORG_Item *x, LONGINT size, BOOLEAN int_proc) {
+void ORG_Return(INTEGER form, ORG_Item *x, LONGINT size, BOOLEAN expo, BOOLEAN int_proc) {
   if (form != ORB_NoTyp) {
 	load(x);
   }
@@ -2321,7 +2327,11 @@ void ORG_Return(INTEGER form, ORG_Item *x, LONGINT size, BOOLEAN int_proc) {
 	  codegen_gen(sTCS, Implied, 0, 0);           // TCS (Transfer A to Stack)
 	}
 	// 65C816: RTS to return from subroutine
-	codegen_gen(sRTS, Implied, 0, 0);  // RTS
+	if (expo) {
+	  codegen_gen(sRTL, Implied, 0, 0);  // RTL
+	} else {
+	  codegen_gen(sRTS, Implied, 0, 0);  // RTS
+	}
   } else {
 	// Interrupt procedure - deallocate full stack frame
 	if (size > 0) {
@@ -2584,6 +2594,7 @@ void ORG_Put(ORG_Item *x, ORG_Item *y) {
   codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0); 
   Set8(1, 0);
   codegen_gen(sSTA, DirectPageIndirect, reg_addr(x->r), 0);
+  Set16(1, 0);
   RH = 0;
 }
 

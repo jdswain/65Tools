@@ -198,6 +198,7 @@ OpCode byte_to_opcode(unsigned char byte) {
         
         // Other common instructions
         case 0x20: return sJSR;    // JSR Absolute
+        case 0x22: return sJSL;    // JSL Absolute Long
         case 0xEA: return sNOP;    // NOP
         case 0x00: return sBRK;    // BRK
         case 0x40: return sRTI;    // RTI

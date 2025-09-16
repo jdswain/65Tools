@@ -855,40 +855,40 @@ static void StandProc(LONGINT pno) {
     }
 }
 
+// TypeCase procedure
+void TypeCase(ORB_Object *obj, ORG_Item *x) {
+  ORB_Object *typobj;
+  if (sym == ORS_ident) {
+	qualident(&typobj);
+	ORG_MakeItem(x, obj, level);
+	if (typobj->class !=ORB_Typ) {
+	  ORS_Mark("not a type");
+	}
+	TypeTest(x, typobj->type, FALSE);
+	obj->type = typobj->type;
+	ORG_CFJump(x);
+	Check(ORS_colon, ": expected");
+	StatSequence();
+  } else {
+	ORG_CFJump(x);
+	ORS_Mark("type id expected");
+  }
+}
+    
+// SkipCase procedure
+void SkipCase(void) {
+  while (sym != ORS_colon) {
+	ORS_Get(&sym);
+  }
+  ORS_Get(&sym);
+  StatSequence();
+}
+    
 static void StatSequence(void) {
     ORB_Object *obj;
     ORB_Type *orgtype;
     ORG_Item x, y, z, w;
     LONGINT L0, L1, rx;
-    
-    // TypeCase procedure
-    void TypeCase(ORB_Object *obj, ORG_Item *x) {
-        ORB_Object *typobj;
-        if (sym == ORS_ident) {
-            qualident(&typobj);
-            ORG_MakeItem(x, obj, level);
-            if (typobj->class !=ORB_Typ) {
-                ORS_Mark("not a type");
-            }
-            TypeTest(x, typobj->type, FALSE);
-            obj->type = typobj->type;
-            ORG_CFJump(x);
-            Check(ORS_colon, ": expected");
-            StatSequence();
-        } else {
-            ORG_CFJump(x);
-            ORS_Mark("type id expected");
-        }
-    }
-    
-    // SkipCase procedure
-    void SkipCase(void) {
-        while (sym != ORS_colon) {
-            ORS_Get(&sym);
-        }
-        ORS_Get(&sym);
-        StatSequence();
-    }
     
     do {
         obj = NULL;
@@ -994,13 +994,13 @@ static void StatSequence(void) {
         } else if (sym == ORS_while) {
             ORS_Get(&sym);
             L0 = ORG_Here();
-            printf("DEBUG: WHILE loop start - Label L0 = %d, ORG_pc = %d\n", L0, ORG_pc);
+            // printf("DEBUG: WHILE loop start - Label L0 = %d, ORG_pc = %d\n", L0, ORG_pc);
             expression(&x);
             CheckBool(&x);
             ORG_CFJump(&x);
             Check(ORS_do, "no DO");
             StatSequence();
-            printf("DEBUG: WHILE backward jump - Label L0 = %d, ORG_pc = %d\n", L0, ORG_pc);
+            // printf("DEBUG: WHILE backward jump - Label L0 = %d, ORG_pc = %d\n", L0, ORG_pc);
             ORG_BJump(L0);
             while (sym == ORS_elsif) {
                 ORS_Get(&sym);
@@ -1010,7 +1010,7 @@ static void StatSequence(void) {
                 ORG_CFJump(&x);
                 Check(ORS_do, "no DO");
                 StatSequence();
-                printf("DEBUG: WHILE ELSIF backward jump - Label L0 = %d, ORG_pc = %d\n", L0, ORG_pc);
+                // printf("DEBUG: WHILE ELSIF backward jump - Label L0 = %d, ORG_pc = %d\n", L0, ORG_pc);
                 ORG_BJump(L0);
             }
             ORG_Fixup(&x);
@@ -1285,18 +1285,20 @@ static void FPSection(LONGINT *adr, INTEGER *nofpar) {
     
     IdentList(cl, &first);
     FormalType(&tp, 0);
-    rdo = FALSE;
     
     if ((cl == ORB_Var) && (tp->form >= ORB_Array)) {
         cl = ORB_Par;
-        rdo = TRUE;
+        rdo = TRUE;  // VAR array parameters are read-only (passed by reference)
+    } else if (cl == ORB_Var) {
+        rdo = TRUE;   // Value parameters are read-only (passed by value)
+    } else {
+        rdo = FALSE;  // VAR parameters are writable
     }
     
     if (((tp->form == ORB_Array) && (tp->len < 0)) || (tp->form == ORB_Record)) {
-        parsize = 2 * 4;  // Complex types still use 4-byte addressing
-		// ToDo: Not sure this is correct
+        parsize = 6;  // VAR open array: 2-byte addr + 2-byte bank + 1 padding + 2-byte length = 6 bytes
     } else if ((cl == ORB_Par) && !rdo) {
-        parsize = 4;  // VAR parameters use 4-byte pointers
+        parsize = 2 * WordSize;  // VAR parameters use 4-byte pointers (2-byte addr + 2-byte bank)
     } else {
         parsize = tp->size;  // 65C816: Use actual type size (INTEGER = 2 bytes)
     }
@@ -1382,7 +1384,7 @@ static void FormalType0(ORB_Type **typ, INTEGER dim) {
         *typ = (ORB_Type*)malloc(sizeof(ORB_Type));
         (*typ)->form = ORB_Array;
         (*typ)->len = -1;
-        (*typ)->size = 2 * 4;
+        (*typ)->size = 2 * WordSize + 2;  // 4-byte pointer (2-byte addr + 2-byte bank) + 2-byte length
         FormalType(&(*typ)->base, dim + 1);
     } else if (sym == ORS_procedure) {
         ORS_Get(&sym);
@@ -1670,7 +1672,7 @@ static void ProcedureDecl(void) {
         }
         // Store frame size in procedure type for caller access  
         type->size = locblksize;
-        ORG_Enter(topScope->next, locblksize, int_proc);
+        ORG_Enter(topScope->next, parblksize + locblksize, int_proc);
         if (sym == ORS_begin) {
             ORS_Get(&sym);
             StatSequence();
@@ -1691,7 +1693,7 @@ static void ProcedureDecl(void) {
             ORS_Mark("function without result");
             type->base = noType;
         }
-        ORG_Return(type->base->form, &x, parblksize + locblksize, int_proc);
+        ORG_Return(type->base->form, &x, parblksize + locblksize, proc->expo, int_proc);
         CloseScope();
         level--;
         Check(ORS_end, "no END");

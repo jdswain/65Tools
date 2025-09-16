@@ -1,4 +1,4 @@
-MODULE StringTest;
+MODULE TestTool;
    IMPORT SYSTEM;
 	  
    CONST
@@ -9,8 +9,6 @@ MODULE StringTest;
 	  
    VAR
 	  str: String;
-	  x: INTEGER;
-	  y: ARRAY 10 OF CHAR;
 	  
    PROCEDURE NewLine*;
    BEGIN
@@ -27,27 +25,12 @@ MODULE StringTest;
 		 i: INTEGER;
    BEGIN
 	  i := 0;
-	  x := LEN(str);
-	  IF x = 250 THEN
-		 PutChar('T');
-	  ELSE
-		 PutChar('F');
-	  END;
-
-	  str[1] := 'T';
-	  
-	  (* Output string character by character *)
 	  WHILE (str[i] # 0X) DO
 		 PutChar(str[i]); i := i + 1
 	  END;
    END Println;
    
 BEGIN
-   y[0] := 'A';
-   y[1] := 'B';
-   y[2] := 'C';
-   y[3] := 00X;
-   Println(y);
-   str := "String Test";
+   str := "Test Tool Begin";
    Println(str); NewLine();
-END StringTest.
+END TestTool.

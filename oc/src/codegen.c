@@ -11,6 +11,7 @@ int pbreg = 0;
 
 void o(uint8_t byte)
 {
+  //  printf("%04x: %02x\n", ORG_pc, byte);
   code[ORG_pc - CODE_ORG] = byte;
   ORG_pc++;
 }
@@ -57,17 +58,22 @@ void or(uint8_t op, int v) {
 
 void of(uint8_t op, int v) {
   // Fixup branch: store opcode and fixup chain link
-  o(op);
   if (v == 0) {
     // First forward branch in chain
-    o(0);
+    ow(op, 0);
   } else {
     // Forward branch - store relative offset to previous branch in chain
     // v is the address of the previous offset byte
     // ORG_pc now points to current offset byte location (after emitting opcode)
     int chain_offset = v - ORG_pc;
-    o(chain_offset & 0xff);
+    ow(op, chain_offset & 0xff);
   }
+}
+
+void ofl(uint8_t op, int v) {
+  // Fixup branch: store opcode and fixup chain link (absolute address)
+  // For BRL fixup chains, we store the absolute address of the next chain link
+  ow(op, v & 0xffff);
 }
 
 /* 65C816 formats */

@@ -9,6 +9,7 @@
 #include "Oberon.h"
 
 #define maxCode 32000  // Increased for 65C816 byte-per-element usage
+#define WordSize 2     // 65C816 word size in bytes
 extern LONGINT ORG_pc;
 extern LONGINT ORG_varsize; // Size of module variables
 extern uint8_t code[maxCode];
@@ -95,8 +96,8 @@ void ORG_FixLink(LONGINT L);
 // Procedure call operations
 void ORG_PrepCall(ORG_Item *x, LONGINT *r);
 void ORG_Call(ORG_Item *x, LONGINT r);
-void ORG_Enter(ORB_Object *params, LONGINT locblksize, BOOLEAN int_proc);
-void ORG_Return(INTEGER form, ORG_Item *x, LONGINT size, BOOLEAN int_proc);
+void ORG_Enter(ORB_Object *params, LONGINT frame_size, BOOLEAN int_proc);
+void ORG_Return(INTEGER form, ORG_Item *x, LONGINT size, BOOLEAN expo, BOOLEAN int_proc);
 
 // Inline procedures
 void ORG_Increment(LONGINT upordown, ORG_Item *x, ORG_Item *y);
