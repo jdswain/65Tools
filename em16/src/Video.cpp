@@ -5,11 +5,46 @@
 #include <string.h>
 #include <iostream>
 
+#ifdef NO_SDL
+
 Video::Video()
 {
   _w = 320;
   _h = 240;
-  
+}
+
+Video::~Video()
+{
+}
+
+void Video::reset()
+{
+}
+
+wdc816::Byte Video::getByte(wdc816::Addr ea)
+{
+  return mem[ea & 0xFFFF];
+}
+
+void Video::setByte(wdc816::Addr ea, wdc816::Byte data)
+{
+  mem[ea & 0xFFFF] = data;
+}
+
+void Video::run()
+{
+  while (!emu816::isStopped()) {
+    emu816::step();
+  }
+}
+
+#else // SDL enabled
+
+Video::Video()
+{
+  _w = 320;
+  _h = 240;
+
   if (SDL_Init(SDL_INIT_VIDEO) != 0) {
 	std::cout << "SDL_Init Error: " << SDL_GetError() << std::endl;
 	return;
@@ -54,7 +89,7 @@ void Video::setByte(wdc816::Addr ea, wdc816::Byte data)
   int banka = ea & 0xFFFF;
   int x = banka % (_w / 8);
   int y = x; //banka / BytesPerRow;
-  
+
   mem[banka] = data;
 
   for (int iy = 0; iy < _h; iy++) {
@@ -74,17 +109,6 @@ void Video::setByte(wdc816::Addr ea, wdc816::Byte data)
   SDL_RenderPresent(renderer);
 
   std::cout << "Set byte at [" << std::hex << ea << "]" << std::dec << x << ", " << y << " to " << data << std::endl;
-  /*
-  // Update display memory
-  for (int i = 0; i < 8; i++) {
-	if (data & (1 << i)) 
-	  SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
-	else
-	  SDL_SetRenderDrawColor(renderer, 0, 0, 255, 255);
-	SDL_RenderDrawPoint(renderer, x + (7 - i), y);
-	SDL_RenderPresent(renderer);
-  }
-  */
 }
 
 void Video::run()
@@ -93,7 +117,6 @@ void Video::run()
 
   while (true) {
 	while (SDL_PollEvent(&Event)) {
-	  // std::cout << "Event" << std::endl;
 	  if (Event.type == SDL_QUIT) [[unlikely]] {
 		std::cout << "Quitting" << std::endl;
 		SDL_Quit();
@@ -101,10 +124,10 @@ void Video::run()
 	  }
 	}
 	if (emu816::isStopped ()) {
-	  // std::cout << "Stopped" << std::endl;
-	  // SDL_Quit();
 	  return;
 	}
 	emu816::step();
   }
 }
+
+#endif

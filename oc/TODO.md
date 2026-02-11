@@ -46,6 +46,8 @@ x Import
 x Copy (string?)
 x CopyString test
 x Exported procedures and JSL
+x Scan through all code, fix JSR and JSL's by adding base address. Maybe can't scan, need list.
+x What is static base for, can we remove it?
 
 **Bugs**
 In StringTest the last PutChar doesn't SEP when loading the value
@@ -67,13 +69,16 @@ In StringTest the last PutChar doesn't SEP when loading the value
 14. Interrupt Procedures
 
 **Memory and Environment**
-Relocate module code fixorgP
+Remove fixorgP?
+
+- If JSL has first byte > 0 then fix import, byte 1 is mno, bytes 2,3 are PROCEDURE
 Relocate module data fixorgD
+- Can we detect this, or do we need fixup chain? LDA, STA, any other instructions?
+- For imports use long addressing, can store mno and address or index
 Fixups for type descriptors fixorgT
 Load time module linking
 - Module PROCEDURES
 - Module Data
-What is static base for, do we need it?
 
 
 **Later**
@@ -86,6 +91,7 @@ Change Trap to end in OsExit() call.
 Enums
 Consider adding newline as a command seperator so ; are not needed.
 Return of exit code
+Preemptive context switch
 
 **Optimisation**
 Maybe optimise out reads to registers, do reads directly from globals or locals?

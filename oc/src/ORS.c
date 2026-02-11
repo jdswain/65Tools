@@ -1,3 +1,21 @@
+/*
+ * OC - Oberon Compiler for 65C816
+ * Copyright (C) 2024-2026 Jason Swain
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 // ORS.c - Oberon Scanner (Lexical Analyzer) Implementation
 // Uses new conventions with ORS_ prefix, Texts, and proper types
 
@@ -28,6 +46,8 @@ static Texts_Text *source_text;
 static LONGINT source_pos;
 static char ch;                      // Current character
 static INTEGER errpos;               // Error position
+static INTEGER line;                 // Current line number
+static INTEGER col;                  // Current column number
 
 // Keyword table
 typedef struct {
@@ -84,10 +104,10 @@ static void Comment(void);
 // Error reporting
 void ORS_Mark(char *msg) {
     INTEGER p;
-    
+
     p = source_pos - 1;  // Position of error
     if (p > errpos && ORS_errcnt < 25) {
-        printf("  pos %d  %s\n", p, msg);
+        printf("  pos %d [%d:%d]  %s\n", p, line, col, msg);
         ORS_errcnt++;
     }
     errpos = p + 4;  // Avoid duplicate error messages
@@ -103,10 +123,10 @@ static void ReadChar(void) {
     if (source_text && source_pos < source_text->len) {
         ch = source_text->data[source_pos];
         source_pos++;
+        if (ch == LF) { line++; col = 0; } else { col++; }
     } else {
         ch = 0;  // EOF
     }
-    // printf("DEBUG: ReadChar: ch=%d, pos=%ld\n", ch, source_pos);
 }
 
 // Read string literal
@@ -134,35 +154,37 @@ static void ReadString(void) {
 
 // Read scale factor for real numbers (E notation)
 static void ReadScaleFactor(void) {
-    REAL s, e;
-    
-    s = 1.0;
+    INTEGER sign;
+    REAL e;
+    INTEGER exp;
+
+    sign = 1;
     ReadChar();  // Skip 'E' or 'D'
-    
+
     if (ch == '+') {
         ReadChar();
     } else if (ch == '-') {
-        s = -1.0;
+        sign = -1;
         ReadChar();
     }
-    
-    e = 0.0;
+
+    exp = 0;
     while (isdigit(ch)) {
-        e = e * 10.0 + (ch - '0');
+        exp = exp * 10 + (ch - '0');
         ReadChar();
     }
-    
-    if (e <= 38) {
+
+    if (exp <= 38) {
         e = 1.0;
-        while (s > 0) {
+        while (exp > 0) {
             e = e * 10.0;
-            s = s - 1.0;
+            exp--;
         }
-        while (s < 0) {
-            e = e / 10.0;
-            s = s + 1.0;
+        if (sign > 0) {
+            ORS_rval = ORS_rval * e;
+        } else {
+            ORS_rval = ORS_rval / e;
         }
-        ORS_rval = ORS_rval * e;
     } else {
         ORS_Mark("too large");
         ORS_rval = 0.0;
@@ -203,12 +225,13 @@ static void ReadNumber(INTEGER *sym) {
     } while ((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'F'));
     
     if (ch == '.') {
-	  *sym = ORS_real;
         ReadChar();
         if (ch == '.') {
             // This is ".." (range operator), back up
+            *sym = ORS_int;
             ch = 0x7F;  // Special marker for ".."
         } else {
+	  *sym = ORS_real;
             // Real number
             x = (REAL)ORS_ival;
             ORS_rval = x;
@@ -263,7 +286,7 @@ static void ReadNumber(INTEGER *sym) {
 
 // Read identifier
 static void ReadIdent(void) {
-    INTEGER i, k;
+    INTEGER i;
     
     i = 0;
     do {
@@ -473,8 +496,8 @@ void ORS_Get(INTEGER *sym) {
                 *sym = ORS_not;
                 break;
             case 0x7F:  // Special marker for ".."
-                ch = '.';  // Restore for next call
-                *sym = ORS_period;
+                ReadChar();
+                *sym = ORS_upto;
                 break;
             default:
                 ReadChar();
@@ -483,7 +506,6 @@ void ORS_Get(INTEGER *sym) {
                 break;
         }
     }
-    // printf("DEBUG: Got symbol %d\n", *sym);
 }
 
 // Copy current identifier
@@ -497,7 +519,9 @@ void ORS_Init(Texts_Text *T, LONGINT pos) {
     source_pos = pos;
     ORS_errcnt = 0;
     errpos = 0;
-    
+    line = 1;
+    col = 0;
+
     // Initialize scanner state
     ORS_id[0] = 0;
     ORS_ival = 0;

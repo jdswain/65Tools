@@ -10,7 +10,11 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <cstdio>
+#ifdef __APPLE__
+#include <util.h>
+#else
 #include <pty.h>
+#endif
 #include <cerrno>
 #include <string.h>
 #include <iostream>

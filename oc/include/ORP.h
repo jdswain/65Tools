@@ -1,3 +1,21 @@
+/*
+ * OC - Oberon Compiler for 65C816
+ * Copyright (C) 2024-2026 Jason Swain
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 /* ORP.h - Parser Header */
 /* Original: N. Wirth 1.7.97 / 8.3.2020 Oberon compiler for RISC in Oberon-07 */
 /* Parser of Oberon-RISC compiler. Uses Scanner ORS to obtain symbols (tokens),
@@ -13,6 +31,9 @@
 #include <stdbool.h>
 #include "ORS.h"
 #include "ORB.h"
+
+/* Oberon 65C816 Compiler Version 1 */
+#define VERSION 1
 
 /* ORG Item structure - placeholder for code generator interface */
 typedef struct {

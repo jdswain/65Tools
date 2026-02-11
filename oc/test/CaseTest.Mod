@@ -24,7 +24,7 @@ BEGIN
   FOR i := 1 TO 4 DO
     CASE i OF
       1: PutChar("A");
-     < /dev/null |  2: PutChar("B");  
+    | 2: PutChar("B");
     | 3: PutChar("C");
     ELSE
       PutChar("?");

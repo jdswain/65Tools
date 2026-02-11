@@ -1,17 +1,37 @@
+/*
+ * OC - Oberon Compiler for 65C816
+ * Copyright (C) 2024-2026 Jason Swain
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include "codegen.h"
 
 #include "ORG.h"
 
-#define CODE_ORG 0x2000  // Code starts at $2000
+#define CODE_ORG 0x0000  // Code starts at $0000
 
 bool longa = true;
 bool longi = true;
 int dpage = 0;
 int pbreg = 0;
 
+short int relocC;
+short int reloc[maxReloc];
+
 void o(uint8_t byte)
 {
-  //  printf("%04x: %02x\n", ORG_pc, byte);
   code[ORG_pc - CODE_ORG] = byte;
   ORG_pc++;
 }
@@ -119,6 +139,7 @@ int codegen_params(AddrMode mode)
   case Immediate: return 1;
   case StackRelative: return 1;
   case StackRelativeIndirectIndexedY: return 1;
+  case Fixup: return 1;
   }
   return 0;
 }
@@ -162,10 +183,11 @@ void codegen_gen(OpCode opcode, AddrMode mode, int value1, int value2)
   gen_816(opcode, mode, value1, value2);
 }
 
+char buffer[24];
+
 char *codegen_format_mode(AddrMode mode, int value1, int value2)
 {
   /* ToDo: modifer for value length is not implemented here, assuming 65C816 native mode */
-  char buffer[24];
   switch (mode) {
   case Absolute: sprintf(buffer, "$%04x", value1); break;
   case Accumulator: sprintf(buffer, "A"); break;
@@ -202,7 +224,6 @@ char *codegen_format_mode(AddrMode mode, int value1, int value2)
 char *codegen_format_mode_str(AddrMode mode, char *value1, int value2)
 {
   /* ToDo: modifer for value length is not implemented here, assuming 65C816 native mode */
-  char buffer[24];
   switch (mode) {
   case Absolute: sprintf(buffer, "%s", value1); break;
   case Accumulator: sprintf(buffer, "A"); break;

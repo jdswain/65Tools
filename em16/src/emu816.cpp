@@ -52,6 +52,8 @@ struct Symbol*          emu816::symtab;
 int                     emu816::symcount;
 char *                  emu816::strtab;
 
+emu816::TrapHandler     emu816::trap_handler = NULL;
+
 //==============================================================================
 
 // Not used.
@@ -92,7 +94,7 @@ void emu816::step_wdc()
 {
   // Check for NMI/IRQ
 
-  if (pc == 0x000000) {
+  if ((pbr == 00) && (pc == 0x0000)) {
 	stopped = true;
 	return;
   }

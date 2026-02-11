@@ -1,3 +1,21 @@
+/*
+ * OC - Oberon Compiler for 65C816
+ * Copyright (C) 2024-2026 Jason Swain
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 // ORG.h - Header file for Oberon RISC Code Generator
 
 #ifndef ORG_H
@@ -83,6 +101,10 @@ void ORG_For0(ORG_Item *x, ORG_Item *y);
 void ORG_For1(ORG_Item *x, ORG_Item *y, ORG_Item *z, ORG_Item *w, LONGINT *L);
 void ORG_For2(ORG_Item *x, ORG_Item *y, ORG_Item *w);
 
+// Case statement operations
+void ORG_CaseLabel(ORG_Item *x, LONGINT val, LONGINT *chain);
+void ORG_CaseRange(ORG_Item *x, LONGINT lo, LONGINT hi, LONGINT *chain);
+
 // Branch and jump operations
 LONGINT ORG_Here(void);
 void ORG_FJump(LONGINT *L);
@@ -96,7 +118,7 @@ void ORG_FixLink(LONGINT L);
 // Procedure call operations
 void ORG_PrepCall(ORG_Item *x, LONGINT *r);
 void ORG_Call(ORG_Item *x, LONGINT r);
-void ORG_Enter(ORB_Object *params, LONGINT frame_size, BOOLEAN int_proc);
+void ORG_Enter(ORB_Object *params, LONGINT frame_size, BOOLEAN expo, BOOLEAN int_proc);
 void ORG_Return(INTEGER form, ORG_Item *x, LONGINT size, BOOLEAN expo, BOOLEAN int_proc);
 
 // Inline procedures

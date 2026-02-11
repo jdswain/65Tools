@@ -1,3 +1,21 @@
+/*
+ * OC - Oberon Compiler for 65C816
+ * Copyright (C) 2024-2026 Jason Swain
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 // disasm.c - 65C816 Disassembler for .816 files
 // Disassembles compiled Oberon modules to help with debugging
 
@@ -11,7 +29,12 @@
 #include "Oberon.h"
 
 // Code base address - must match ORG.c
-#define CODE_ORG 0x2000
+#define CODE_ORG 0x0000
+
+// Global relocation tracking
+static int relocation_count = 0;
+static int relocation_addresses[1024]; // Max relocations
+static int current_relocation_index = 0; // Current position in relocation array
 
 // Structure to represent a disassembled instruction
 typedef struct {
@@ -440,6 +463,13 @@ static void print_instruction(DisasmInstr *instr) {
         printf("  ; Register $%02X", instr->value);
     }
     
+    // Check for relocations at this address
+    if (current_relocation_index < relocation_count && 
+        relocation_addresses[current_relocation_index] <= (int)instr->address) {
+        printf("  ; Relocation %d", current_relocation_index);
+        current_relocation_index++;
+    }
+    
     printf("\n");
 }
 
@@ -599,11 +629,68 @@ static int parse_816_file(const char *filename, uint8_t **code_data, int *code_s
     
     printf("Code length: %d bytes\n", *code_size);
     
-    if (fread(*code_data, 1, *code_size, file) != *code_size) {
+    if ((int)(fread(*code_data, 1, *code_size, file)) != *code_size) {
         printf("Error: Cannot read code section\n");
         free(*code_data);
         fclose(file);
         return 0;
+    }
+    
+    // Parse the rest of the file sequentially after the code section
+    // Format: export_procs + export_values + pointer_table + fixups + relocations + entry + 'O'
+    
+    // Skip export procedures section (null-terminated strings with values)
+    while (1) {
+        char ch;
+        if (fread(&ch, 1, 1, file) != 1) break;
+        if (ch == 0) break; // End of export procedures
+        // Skip procedure name
+        while (ch != 0) {
+            if (fread(&ch, 1, 1, file) != 1) break;
+        }
+        // Skip procedure value (4 bytes)
+        fseek(file, 4, SEEK_CUR);
+    }
+    
+    // Skip nofent and entry values (2 * 4 bytes)
+    fseek(file, 8, SEEK_CUR);
+    
+    // Skip export values section - need to find how many exports there are
+    // This is complex, so let's scan for the fixup marker (-1)
+    uint32_t word;
+    while (fread(&word, 4, 1, file) == 1) {
+        if (word == 0xFFFFFFFF) { // Found -1 fixup marker
+            break;
+        }
+    }
+    
+    // Read fixup information (fixorgP, fixorgD, fixorgT)
+    int32_t fixorgP, fixorgD, fixorgT;
+    if (fread(&fixorgP, 4, 1, file) != 1 ||
+        fread(&fixorgD, 4, 1, file) != 1 ||
+        fread(&fixorgT, 4, 1, file) != 1) {
+        printf("Error reading fixup information\n");
+        fclose(file);
+        return 0;
+    }
+    
+    // Read relocation table
+    int32_t reloc_count;
+    if (fread(&reloc_count, 4, 1, file) == 1) {
+        if (reloc_count >= 0 && reloc_count < 1024) {
+            printf("Relocation table: %d entries\n", reloc_count);
+            
+            // Store relocations in global array
+            relocation_count = reloc_count;
+            for (int i = 0; i < reloc_count; i++) {
+                int32_t reloc_addr;
+                if (fread(&reloc_addr, 4, 1, file) == 1) {
+                    relocation_addresses[i] = reloc_addr;
+                    printf("  $%04X\n", reloc_addr);
+                }
+            }
+            if (reloc_count > 0) printf("\n");
+        }
     }
     
     fclose(file);
@@ -615,6 +702,9 @@ static int parse_816_file(const char *filename, uint8_t **code_data, int *code_s
 static void disassemble_code(uint8_t *code, int code_size) {
     int pc = 0;
     DisasmInstr instr;
+    
+    // Reset relocation index for new disassembly
+    current_relocation_index = 0;
     
     printf("Disassembly:\n");
     printf("Addr: Bytes        Instruction\n");

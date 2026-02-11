@@ -31,6 +31,6 @@ MODULE TestTool;
    END Println;
    
 BEGIN
-   str := "Test Tool Begin";
-   Println(str); NewLine();
+   PutChar("T"); PutChar("T"); PutChar("B");
+   NewLine()
 END TestTool.

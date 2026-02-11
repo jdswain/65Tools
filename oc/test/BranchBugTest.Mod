@@ -1,16 +1,17 @@
 MODULE BranchBugTest;
 
+VAR result: INTEGER;
+
 PROCEDURE TestProc(condition: BOOLEAN): INTEGER;
+VAR r: INTEGER;
 BEGIN
     IF condition THEN
-        RETURN 100
+        r := 100
     ELSE
-        RETURN 200
+        r := 200
     END;
-    RETURN 0  (* unreachable *)
+    RETURN r
 END TestProc;
-
-VAR result: INTEGER;
 
 BEGIN
     result := TestProc(TRUE);

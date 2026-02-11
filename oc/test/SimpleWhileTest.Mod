@@ -1,4 +1,5 @@
 MODULE SimpleWhileTest;
+IMPORT SYSTEM;
 
 VAR i: INTEGER;
 

@@ -1,4 +1,22 @@
 /*
+ * OC - Oberon Compiler for 65C816
+ * Copyright (C) 2024-2026 Jason Swain
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/*
 
 WDC 65C816 code generation
 
@@ -340,16 +358,16 @@ void gen_816(OpCode opcode, AddrMode mode, int value1, int value2)
     switch( mode ) {
     case DirectPage:
     case Absolute:
-    case AbsoluteLong:                   ol(0x22, value1); return;
+    case AbsoluteLong:                   reloc[relocC++] = ORG_pc; ol(0x22, value1); return;
     default:                             break;
     }
     break;
   case sJSR:
     switch( mode ) {
     case DirectPage:
-    case Absolute:                       ow(0x20, value1); return;
+    case Absolute:                       reloc[relocC++] = ORG_pc; ow(0x20, value1); return;
     case AbsoluteIndexedIndirect:        ow(0xfc, value1); return;
-    case AbsoluteLong:                   ol(0x22, value1); return;
+    case AbsoluteLong:                   reloc[relocC++] = ORG_pc; ol(0x22, value1); return;
     default:                             break;
     }
     break;

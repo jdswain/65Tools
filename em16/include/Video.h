@@ -6,7 +6,9 @@
 #include <string.h>
 #include <iostream>
 
+#ifndef NO_SDL
 #include <SDL.h>
+#endif
 
 /*
 
@@ -27,9 +29,11 @@ class Video {
 
   int _w;
   int _h;
-  
+
+#ifndef NO_SDL
   SDL_Window* window;
   SDL_Renderer* renderer;
+#endif
 };
 
 #endif

@@ -87,13 +87,33 @@ public:
     return (stopped);
   }
 
+  INLINE static void stop()
+  {
+    stopped = true;
+  }
+
   INLINE static void setSymbols(struct Symbol * aSymtab, int aSymcount, char *aStrtab)
   {
 	symtab = aSymtab;
 	symcount =  aSymcount;
 	strtab = aStrtab;
   }
-  
+
+  // Trap handler callback: called for BRK traps 1-10 (compiler runtime traps)
+  // Signature: void handler(int trap_num)
+  // For trap 10 (NEW): A = size; handler sets A = addr, X = bank
+  typedef void (*TrapHandler)(int trap_num);
+  static TrapHandler trap_handler;
+
+  static void setTrapHandler(TrapHandler h) { trap_handler = h; }
+
+  // Expose register access for trap handlers
+  static Word getRegA() { return a.w; }
+  static void setRegA(Word v) { a.w = v; }
+  static Word getRegX() { return x.w; }
+  static void setRegX(Word v) { x.w = v; }
+  static Word getPBR() { return pbr; }
+  static Word getPC() { return pc; }
 
 private:
 
@@ -595,16 +615,15 @@ private:
   INLINE static void op_asla(Addr ea)
   {
     TRACE("ASL");
+    (void)ea;
 
     if (e || p.f_m) {
       setc(a.b & 0x80);
       setnz_b(a.b <<= 1);
-      setByte(ea, a.b);
     }
     else {
       setc(a.w & 0x8000);
       setnz_w(a.w <<= 1);
-      setWord(ea, a.w);
     }
     cycles += 2;
   }
@@ -612,20 +631,19 @@ private:
   INLINE static void op_asra(Addr ea)
   {
     TRACE("ASR");
+    (void)ea;
 
     if (e || p.f_m) {
       setc(a.b & 0x01);
-	  int temp = a.b >>= 1;
-	  temp |= a.b & 0x80;
+      int temp = a.b >>= 1;
+      temp |= a.b & 0x80;
       setnz_b(temp);
-      setByte(ea, a.b);
     }
     else {
       setc(a.b & 0x01);
-	  int temp = a.b >>= 1;
-	  temp |= a.b & 0x8000;
+      int temp = a.b >>= 1;
+      temp |= a.b & 0x8000;
       setnz_b(temp);
-      setWord(ea, a.b);
     }
     cycles += 2;
   }
@@ -761,7 +779,15 @@ private:
   {
     TRACE("BRK");
 
-    if (e) {
+    // Read the trap number from the immediate byte
+    Byte trap_num = getByte(ea);
+
+    if (trap_num >= 1 && trap_num <= 10 && trap_handler != NULL) {
+      // Compiler runtime trap — dispatch to handler
+      trap_handler(trap_num);
+      cycles += 2;
+    }
+    else if (e) {
       pushWord(pc);
       pushByte(p.b | 0x10);
 
@@ -1170,16 +1196,15 @@ private:
   INLINE static void op_lsra(Addr ea)
   {
     TRACE("LSR");
+    (void)ea;
 
     if (e || p.f_m) {
       setc(a.b & 0x01);
       setnz_b(a.b >>= 1);
-      setByte(ea, a.b);
     }
     else {
       setc(a.w & 0x0001);
       setnz_w(a.w >>= 1);
-      setWord(ea, a.w);
     }
     cycles += 2;
   }

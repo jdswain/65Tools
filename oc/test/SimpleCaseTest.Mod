@@ -15,6 +15,6 @@ BEGIN
   i := 2;
   CASE i OF
     1: PutByte(41H);  (* A *)
-   < /dev/null |  2: PutByte(42H);  (* B *)
+  | 2: PutByte(42H);  (* B *)
   END;
 END SimpleCaseTest.

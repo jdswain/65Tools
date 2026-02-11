@@ -8,7 +8,7 @@ attic
 bin/*
 as-old
 as-old/*
-listing.lst
+*.lst
 *.o
 *.hex
 *.rsc

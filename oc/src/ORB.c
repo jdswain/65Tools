@@ -1,3 +1,21 @@
+/*
+ * OC - Oberon Compiler for 65C816
+ * Copyright (C) 2024-2026 Jason Swain
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 /* ORB.c - Symbol Table Management */
 /* Original: NW 25.6.2014 / AP 4.3.2020 / 8.3.2019 in Oberon-07 */
 /* Definition of data types Object and Type, which together form the data structure
@@ -140,29 +158,30 @@ void SetSourceDirectory(const char *source_filename) {
 
 void MakeFileName(char *FName, const char *name, const char *ext) {
     int i = 0, j = 0;
-    
+    int maxlen = 255;  /* FName assumed to be at least 256 chars */
+
     // Start with the source directory
-    while (source_dir[i] != '\0' && i < ORS_IDENT_LEN - 20) {
+    while (source_dir[i] != '\0' && i < maxlen - 40) {
         FName[i] = source_dir[i];
         i++;
     }
-    
+
     // Add the module name
     j = 0;
-    while ((i < ORS_IDENT_LEN-5) && (name[j] != '\0')) {
+    while (name[j] != '\0' && i < maxlen - 5) {
         FName[i] = name[j];
         i++;
         j++;
     }
-    
+
     // Add the extension
     j = 0;
-    while (ext[j] != '\0' && i < ORS_IDENT_LEN - 1) {
+    while (ext[j] != '\0' && i < maxlen) {
         FName[i] = ext[j];
         i++;
         j++;
     }
-    
+
     FName[i] = '\0';
 }
 
@@ -336,6 +355,17 @@ static void InType(Files_Rider *R, ObjectPtr thismod, TypePtr *T) {
             t->size = 4;
         }
         
+        /* Unify basic types with global type objects so that pointer
+           equality in CompTypes works across module boundaries */
+        if (form == ORB_Byte)        { free(t); t = byteType; *T = t; typtab[ref] = t; }
+        else if (form == ORB_Bool)   { free(t); t = boolType; *T = t; typtab[ref] = t; }
+        else if (form == ORB_Char)   { free(t); t = charType; *T = t; typtab[ref] = t; }
+        else if (form == ORB_Int)    { free(t); t = intType;  *T = t; typtab[ref] = t; }
+        else if (form == ORB_Real)   { free(t); t = realType; *T = t; typtab[ref] = t; }
+        else if (form == ORB_Set)    { free(t); t = setType;  *T = t; typtab[ref] = t; }
+        else if (form == ORB_NilTyp) { free(t); t = nilType;  *T = t; typtab[ref] = t; }
+        else if (form == ORB_NoTyp)  { free(t); t = noType;   *T = t; typtab[ref] = t; }
+
         Files_ReadString(R, modname);
         if (modname[0] != '\0') {  /* Re-import */
             Files_ReadInt(R, &key);
@@ -373,7 +403,7 @@ void Import(char *modid, char *modid1) {
     ObjectPtr obj;
     TypePtr t;
     ObjectPtr thismod;
-    char modname[ORS_IDENT_LEN], fname[ORS_IDENT_LEN];
+    char modname[ORS_IDENT_LEN], fname[256];
     Files_File *F;
     Files_Rider R;
     
@@ -571,7 +601,7 @@ static void OutType(Files_Rider *R, TypePtr t) {
 void Export(const char *modid, BOOLEAN *newSF, int32_t *key) {
     int32_t x, sum, oldkey;
     ObjectPtr obj, obj0;
-    char filename[ORS_IDENT_LEN];
+    char filename[256];
     Files_File *F, *F1;
     Files_Rider R, R1;
     
@@ -626,7 +656,7 @@ void Export(const char *modid, BOOLEAN *newSF, int32_t *key) {
                     Files_WriteNum(&R, obj->val);
                 }
             } else if (obj->class == ORB_Var) {
-                Files_WriteNum(&R, obj->exno);
+                Files_WriteNum(&R, obj->val);
             }
         }
         obj = obj->next;
@@ -722,9 +752,14 @@ void ORB_Initialize(void) {
     boolType = type(ORB_Bool, ORB_Bool, 1);
     charType = type(ORB_Char, ORB_Char, 1);
     intType = type(ORB_Int, ORB_Int, 2);
-    longType = type(ORB_Int, ORB_Int, 4);
+    /* longType shares form ORB_Int but must NOT overwrite typtab[ORB_Int] */
+    longType = (TypePtr)calloc(1, sizeof(ORB_Type));
+    longType->form = ORB_Int;
+    longType->size = 4;
+    longType->ref = 0;
+    longType->base = NULL;
     realType = type(ORB_Real, ORB_Real, 4);
-    setType = type(ORB_Set, ORB_Set, 4);
+    setType = type(ORB_Set, ORB_Set, 2);
     nilType = type(ORB_NilTyp, ORB_NilTyp, 2);
     noType = type(ORB_NoTyp, ORB_NoTyp, 2);
     strType = type(ORB_String, ORB_String, 8);

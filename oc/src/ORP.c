@@ -1,3 +1,21 @@
+/*
+ * OC - Oberon Compiler for 65C816
+ * Copyright (C) 2024-2026 Jason Swain
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 // ORP.c - Stage 1: Headers and Basic Utility Functions
 // Translated from ORP.Mod by N.Wirth
 
@@ -14,7 +32,7 @@
 // Global variables
 static INTEGER sym;
 static LONGINT dc;
-static INTEGER level, exno, version;
+static INTEGER level, exno;
 static BOOLEAN newSF;
 static void (*expression)(ORG_Item *x);
 static void (*Type)(ORB_Type **type);
@@ -98,7 +116,7 @@ static void CheckSetVal(ORG_Item *x) {
         ORS_Mark("not Int");
         x->type = setType;
     } else if (x->mode == ORB_Const) {
-        if ((x->a < 0) || (x->a >= 32)) {
+        if ((x->a < 0) || (x->a >= 16)) {
             ORS_Mark("invalid set");
         }
     }
@@ -883,7 +901,66 @@ void SkipCase(void) {
   ORS_Get(&sym);
   StatSequence();
 }
-    
+
+// Numeric CASE helpers
+
+static LONGINT parseCaseLabel(void) {
+  ORB_Object *obj;
+  LONGINT val = 0;
+  if (sym == ORS_int) {
+    val = ORS_ival;
+    ORS_Get(&sym);
+  } else if (sym == ORS_string && ORS_slen == 2) {
+    val = ORS_str[0];
+    ORS_Get(&sym);
+  } else if (sym == ORS_ident) {
+    qualident(&obj);
+    if (obj->class == ORB_Const) {
+      val = obj->val;
+    } else {
+      ORS_Mark("not a constant");
+    }
+  } else {
+    ORS_Mark("case label expected");
+  }
+  return val;
+}
+
+static void CaseLabelRange(ORB_Object *caseObj, LONGINT *hitChain) {
+  ORG_Item cx;
+  LONGINT lo, hi;
+  lo = parseCaseLabel();
+  if (sym == ORS_upto) {
+    ORS_Get(&sym);
+    hi = parseCaseLabel();
+    ORG_MakeItem(&cx, caseObj, level);
+    ORG_CaseRange(&cx, lo, hi, hitChain);
+  } else {
+    ORG_MakeItem(&cx, caseObj, level);
+    ORG_CaseLabel(&cx, lo, hitChain);
+  }
+}
+
+static void CaseLabelList(ORB_Object *caseObj, LONGINT *hitChain) {
+  CaseLabelRange(caseObj, hitChain);
+  while (sym == ORS_comma) {
+    ORS_Get(&sym);
+    CaseLabelRange(caseObj, hitChain);
+  }
+}
+
+static void NumericCaseArm(ORB_Object *caseObj, LONGINT *endChain) {
+  LONGINT hitChain = 0;
+  LONGINT missLink = 0;
+  CaseLabelList(caseObj, &hitChain);
+  ORG_FJump(&missLink);      // skip body if no label matched
+  ORG_FixLink(hitChain);     // matched labels land here
+  Check(ORS_colon, ": expected");
+  StatSequence();
+  ORG_FJump(endChain);       // jump to end of CASE
+  ORG_FixOne(missLink);      // no-match continues to next arm
+}
+
 static void StatSequence(void) {
     ORB_Object *obj;
     ORB_Type *orgtype;
@@ -994,13 +1071,11 @@ static void StatSequence(void) {
         } else if (sym == ORS_while) {
             ORS_Get(&sym);
             L0 = ORG_Here();
-            // printf("DEBUG: WHILE loop start - Label L0 = %d, ORG_pc = %d\n", L0, ORG_pc);
             expression(&x);
             CheckBool(&x);
             ORG_CFJump(&x);
             Check(ORS_do, "no DO");
             StatSequence();
-            // printf("DEBUG: WHILE backward jump - Label L0 = %d, ORG_pc = %d\n", L0, ORG_pc);
             ORG_BJump(L0);
             while (sym == ORS_elsif) {
                 ORS_Get(&sym);
@@ -1010,7 +1085,6 @@ static void StatSequence(void) {
                 ORG_CFJump(&x);
                 Check(ORS_do, "no DO");
                 StatSequence();
-                // printf("DEBUG: WHILE ELSIF backward jump - Label L0 = %d, ORG_pc = %d\n", L0, ORG_pc);
                 ORG_BJump(L0);
             }
             ORG_Fixup(&x);
@@ -1086,8 +1160,21 @@ static void StatSequence(void) {
                     ORG_Fixup(&x);
                     ORG_FixLink(L0);
                     obj->type = orgtype;
+                } else if (orgtype->form == ORB_Int || orgtype->form == ORB_Char) {
+                    Check(ORS_of, "OF expected");
+                    L0 = 0;
+                    NumericCaseArm(obj, &L0);
+                    while (sym == ORS_bar) {
+                        ORS_Get(&sym);
+                        NumericCaseArm(obj, &L0);
+                    }
+                    if (sym == ORS_else) {
+                        ORS_Get(&sym);
+                        StatSequence();
+                    }
+                    ORG_FixLink(L0);
                 } else {
-                    ORS_Mark("numeric case not implemented");
+                    ORS_Mark("invalid case type");
                     Check(ORS_of, "OF expected");
                     SkipCase();
                     while (sym == ORS_bar) {
@@ -1243,7 +1330,7 @@ static void RecordType(ORB_Type **type) {
             ORS_Mark("dyn array not allowed");
         }
         if (tp->size > 1) {
-            offset = (offset + 3) / 4 * 4;
+            offset = (offset + 1) / 2 * 2;
         }
         offset = offset + n * tp->size;
         off = offset;
@@ -1265,7 +1352,7 @@ static void RecordType(ORB_Type **type) {
     
     typ->form = ORB_Record;
     typ->dsc = bot;
-    typ->size = offset + 3;
+    typ->size = offset;
     *type = typ;
 }
 
@@ -1286,19 +1373,16 @@ static void FPSection(LONGINT *adr, INTEGER *nofpar) {
     IdentList(cl, &first);
     FormalType(&tp, 0);
     
+    rdo = FALSE;
     if ((cl == ORB_Var) && (tp->form >= ORB_Array)) {
         cl = ORB_Par;
-        rdo = TRUE;  // VAR array parameters are read-only (passed by reference)
-    } else if (cl == ORB_Var) {
-        rdo = TRUE;   // Value parameters are read-only (passed by value)
-    } else {
-        rdo = FALSE;  // VAR parameters are writable
+        rdo = TRUE;  // Array/record value parameters promoted to ORB_Par, read-only
     }
     
-    if (((tp->form == ORB_Array) && (tp->len < 0)) || (tp->form == ORB_Record)) {
-        parsize = 6;  // VAR open array: 2-byte addr + 2-byte bank + 1 padding + 2-byte length = 6 bytes
-    } else if ((cl == ORB_Par) && !rdo) {
-        parsize = 2 * WordSize;  // VAR parameters use 4-byte pointers (2-byte addr + 2-byte bank)
+    if ((tp->form == ORB_Array) && (tp->len < 0)) {
+        parsize = 6;  // VAR open array: 2-byte addr + 2-byte bank + 2-byte length = 6 bytes
+    } else if (cl == ORB_Par) {
+        parsize = 2 * WordSize;  // VAR and promoted value params use 4-byte pointers (2-byte addr + 2-byte bank)
     } else {
         parsize = tp->size;  // 65C816: Use actual type size (INTEGER = 2 bytes)
     }
@@ -1672,7 +1756,7 @@ static void ProcedureDecl(void) {
         }
         // Store frame size in procedure type for caller access  
         type->size = locblksize;
-        ORG_Enter(topScope->next, parblksize + locblksize, int_proc);
+        ORG_Enter(topScope->next, parblksize + locblksize, proc->expo, int_proc);
         if (sym == ORS_begin) {
             ORS_Get(&sym);
             StatSequence();
@@ -1741,15 +1825,7 @@ static void ORP_Module(void) {
     ORS_Get(&sym);
     if (sym == ORS_module) {
         ORS_Get(&sym);
-        if (sym == ORS_times) {
-            version = 0;
-            dc = 8;
-            Texts_WriteChar(&W, '*');
-            ORS_Get(&sym);
-        } else {
-            dc = 0;
-            version = 1;
-        }
+		dc = 0;
         // ORS_Init should be called before this function
         OpenScope();
         if (sym == ORS_ident) {
@@ -1773,7 +1849,7 @@ static void ORP_Module(void) {
             }
             Check(ORS_semicolon, "; missing");
         }
-        ORG_Open(version);
+        ORG_Open(VERSION);
         Declarations(&dc, 0);  // Module level - no parameters
         ORG_SetDataSize(dc);
         while (sym == ORS_procedure) {
@@ -1802,7 +1878,7 @@ static void ORP_Module(void) {
                 ORS_Mark("garbage after module");
             }
         }
-        if ((ORS_errcnt == 0) && (version != 0)) {
+        if (ORS_errcnt == 0) {
             Export(modid, &newSF, &key);
             if (newSF) {
                 Texts_WriteString(&W, " new symbol file");
@@ -1900,7 +1976,8 @@ int main(int argc, char **argv) {
     
     // Initialize the compiler
     Texts_OpenWriter(&W);
-    Texts_WriteString(&W, "OR Compiler  8.3.2020");
+    Texts_WriteString(&W, "Oberon 65C816 Compiler  Version ");
+    Texts_WriteInt(&W, VERSION, 1);
     Texts_WriteLn(&W);
     Texts_Append(Oberon_Log, W.buf);
     Texts_ClearWriter(&W);

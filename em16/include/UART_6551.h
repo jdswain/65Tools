@@ -40,6 +40,7 @@ Hardware Reset: 0 --10000, Program Reset -----0--
 
 class UART {
  public:
+  UART();
   wdc816::Byte getByte(wdc816::Addr ea);
   void setByte(wdc816::Addr ea, wdc816::Byte data);
   void reset();
@@ -50,8 +51,9 @@ class UART {
   wdc816::Byte commandReg = 0x02;
   wdc816::Byte controlReg = 0x00;
   
-  int pty_fd;
-  
+  int pty_fd = -1;
+  bool use_stdout = false;
+
   void status();
   void send(wdc816::Byte data);
 

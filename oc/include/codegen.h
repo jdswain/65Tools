@@ -1,12 +1,36 @@
+/*
+ * OC - Oberon Compiler for 65C816
+ * Copyright (C) 2024-2026 Jason Swain
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #ifndef CODEGEN_H
 #define CODEGEN_H
 
 #include <stdbool.h>
 #include <stdint.h>
+
 #include "cpu.h"
 
 extern bool longa;
 extern bool longi;
+
+#define maxReloc 1024
+
+extern short int relocC;
+extern short int reloc[maxReloc];
 
 void codegen_gen(OpCode opcode, AddrMode mode, int value1, int value2);
 void codegen_byte(int b);
