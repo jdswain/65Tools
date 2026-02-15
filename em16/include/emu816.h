@@ -65,8 +65,12 @@ public:
 
   static void jumpLong(Addr ea)
   {
+	// Place BRK #0 at $0080 (safe area past DP registers, below stack)
+	// so that when the module RTLs, it halts cleanly via trap 0
+	setByte(0x0080, 0x00);  // BRK opcode
+	setByte(0x0081, 0x00);  // BRK operand = 0 (halt)
 	pbr = 0x00;
-	pc = 0x0000;
+	pc = 0x0080;            // JSL pushes pc-1; RTL returns to pc
 	op_jsl(ea);
 	mem816::run();
 	stopped = false;
@@ -114,6 +118,8 @@ public:
   static void setRegX(Word v) { x.w = v; }
   static Word getPBR() { return pbr; }
   static Word getPC() { return pc; }
+  static Word getDP() { return dp.w; }
+  static void setDP(Word v) { dp.w = v; }
 
 private:
 

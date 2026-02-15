@@ -124,6 +124,14 @@ test_level11: $(BINDIR)/oc
 test_level12: $(BINDIR)/oc
 	@bash test/run_level12_tests.sh
 
+# Level 13 procedure variable tests
+test_level13: $(BINDIR)/oc
+	@bash test/run_level13_tests.sh
+
+# DP relocation test (all levels with DP at $0200)
+test_dp: $(BINDIR)/oc
+	@bash test/run_dp_test.sh
+
 # Full test suite (compilation tests + L0 emulator tests)
 test:
 	@bash test/run_tests.sh; bash test/run_level0_tests.sh
@@ -190,4 +198,4 @@ test_disasm: $(BINDIR)/disasm
 	@$(BINDIR)/oc test/DisasmDemo.Mod
 	@$(BINDIR)/disasm DisasmDemo.816
 
-.PHONY: all clean test test_compile test_run test_level0 test_level1 test_level2 test_level3 test_level4 test_level5 test_level6 test_level7 test_level8 test_level9 test_level10 test_level11 test_level12 test_scanner test_orb test_orp test_disasm install
+.PHONY: all clean test test_compile test_run test_level0 test_level1 test_level2 test_level3 test_level4 test_level5 test_level6 test_level7 test_level8 test_level9 test_level10 test_level11 test_level12 test_level13 test_dp test_scanner test_orb test_orp test_disasm install

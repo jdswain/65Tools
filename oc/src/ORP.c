@@ -1381,6 +1381,8 @@ static void FPSection(LONGINT *adr, INTEGER *nofpar) {
     
     if ((tp->form == ORB_Array) && (tp->len < 0)) {
         parsize = 6;  // VAR open array: 2-byte addr + 2-byte bank + 2-byte length = 6 bytes
+    } else if ((cl == ORB_Par) && (tp->form == ORB_Record)) {
+        parsize = 4 * WordSize;  // VAR record: addr(2) + bank(2) + tag_lo(2) + tag_hi(2) = 8 bytes
     } else if (cl == ORB_Par) {
         parsize = 2 * WordSize;  // VAR and promoted value params use 4-byte pointers (2-byte addr + 2-byte bank)
     } else {

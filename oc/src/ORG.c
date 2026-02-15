@@ -73,13 +73,17 @@ static BOOLEAN check;
 static INTEGER version;
 static INTEGER relmap[6];
 uint8_t code[maxCode];
-static LONGINT data[maxTD];
+static uint16_t data[maxTD];
 static char str[maxStrx];
+static uint16_t td_fixup[maxTD][2];  // [byte_offset_of_lo_word, mno]
+static int td_fixupC = 0;
 
 // Forward declarations
 static int load(ORG_Item *x);
 static void loadAdr(ORG_Item *x);
 static LONGINT ORG_log2(LONGINT m, LONGINT *e);
+static void patch(LONGINT branchOperandAddr);
+static LONGINT emitFwdBranch(OpCode op);
 
 static void Set16(int a, int i) {
   int new_longa = (a?1:longa);
@@ -484,17 +488,49 @@ static int load(ORG_Item *x) {
                 x->r = RH;
                 incR(); incR();
             } else if (x->type->form == ORB_Proc) {
-                if (x->r > 0) {
-                    ORS_Mark("not allowed");
-                } else if (x->r == 0) {
-    // RISC: Put3(BL, 7, 0);
-    // RISC: Put1a(Sub, RH, LNK, ORG_pc * 4 - x->a);
+                if (x->r > 0 || (x->r == 0 && x->b == 0)) {
+                    // Local (nested) or non-exported procedure: cannot be used as proc var
+                    ORS_Mark("not exportd");
+                } else if (x->r == 0 && x->b == 1) {
+                    // Same-module exported procedure address
+                    // PER pushes PC + operand + 3; we want it to push proc address
+                    // operand = proc_addr - PER_addr - 3 = x->a - ORG_pc - 3
+                    Set16(1, 1);
+                    int per_addr = ORG_pc;
+                    int per_operand = x->a - per_addr - 3;
+                    codegen_gen(sPER, Immediate, per_operand & 0xFFFF, 0);
+                    codegen_gen(sPLA, Implied, 0, 0);
+                    codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);
+                    // Store program bank byte into R[RH+1]
+                    codegen_gen(sSTZ, DirectPage, reg_addr(RH + 1), 0);
+                    codegen_gen(sPHK, Implied, 0, 0);
+                    Set8(1, 0);
+                    codegen_gen(sPLA, Implied, 0, 0);
+                    codegen_gen(sSTA, DirectPage, reg_addr(RH + 1), 0);
+                    Set16(1, 0);
+                    x->r = RH;
+                    incR(); incR();
                 } else {
-                  // GetSB(x->r);
-    // RISC: Put1(Add, RH, RH, x->a + 0x100);
+                    // Imported procedure address
+                    // Encode (mno << 8) | exno in PER operand, add to relocation chain
+                    Set16(1, 1);
+                    int mno = -(x->r);
+                    int exno = x->a;
+                    int encoded = (mno << 8) | (exno & 0xFF);
+                    reloc[relocC++] = ORG_pc;
+                    codegen_gen(sPER, Immediate, encoded, 0);
+                    codegen_gen(sPLA, Implied, 0, 0);
+                    codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);
+                    // For imported procs, bank is set by emulator relocation
+                    codegen_gen(sSTZ, DirectPage, reg_addr(RH + 1), 0);
+                    codegen_gen(sPHK, Implied, 0, 0);
+                    Set8(1, 0);
+                    codegen_gen(sPLA, Implied, 0, 0);
+                    codegen_gen(sSTA, DirectPage, reg_addr(RH + 1), 0);
+                    Set16(1, 0);
+                    x->r = RH;
+                    incR(); incR();
                 }
-                x->r = RH;
-                incR();
             } else if (x->type->form == ORB_Real) {
                 // REAL constant: split 32-bit IEEE value into two 16-bit halves
                 Set16(1, 1);
@@ -529,8 +565,8 @@ static int load(ORG_Item *x) {
         } else if (x->mode == ORB_Var) {
             if (x->r > 0) {
                 // 65C816: Load stack-based local variable
-              if (x->type->form == ORB_Pointer || x->type->form == ORB_NilTyp || x->type->form == ORB_Real) {
-                // 4-byte load: (addr+bank for pointer, low+high for REAL) into 2 registers
+              if (x->type->form == ORB_Pointer || x->type->form == ORB_NilTyp || x->type->form == ORB_Real || x->type->form == ORB_Proc) {
+                // 4-byte load: (addr+bank for pointer/proc, low+high for REAL) into 2 registers
                 Set16(1, 1);
                 codegen_gen(sLDA, StackRelative, x->a, 0);                // LDA offset,S (low word)
                 codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);           // STA $reg
@@ -558,8 +594,8 @@ static int load(ORG_Item *x) {
             } else {
               // 65C816: Load module global variable
               int sb = GetSB(x->r);
-              if (x->type->form == ORB_Pointer || x->type->form == ORB_NilTyp || x->type->form == ORB_Real) {
-                // 4-byte load: (addr+bank for pointer, low+high for REAL) into 2 registers
+              if (x->type->form == ORB_Pointer || x->type->form == ORB_NilTyp || x->type->form == ORB_Real || x->type->form == ORB_Proc) {
+                // 4-byte load: (addr+bank for pointer/proc, low+high for REAL) into 2 registers
                 Set16(1, 1);
                 codegen_gen(sLDY, Immediate, x->a, 0);
                 codegen_gen(sLDA, DirectPageIndirectIndexedY, sb, 0);     // low word
@@ -605,8 +641,8 @@ static int load(ORG_Item *x) {
 		  
 		  // Now dereference through the pointer using DirectPageIndirectLong
 		  // Apply field offset x->b if nonzero (e.g., record field through VAR param)
-		  if (x->type->form == ORB_Real) {
-			// 4-byte REAL load through pointer (low word + high word)
+		  if (x->type->form == ORB_Real || x->type->form == ORB_Pointer || x->type->form == ORB_Proc) {
+			// 4-byte load through pointer (REAL: low+high, Pointer/Proc: addr+bank)
 			Set16(1, 1);
 			if (x->b != 0) {
 			  codegen_gen(sLDY, Immediate, x->b + 2, 0);
@@ -655,8 +691,8 @@ static int load(ORG_Item *x) {
         } else if (x->mode == RegI) {
           // 65C816: Load value from long indirect address in register + offset
           // RegI items occupy 2 registers: addr in x->r, bank in x->r+1
-          if (x->type->form == ORB_Pointer || x->type->form == ORB_NilTyp || x->type->form == ORB_Real) {
-            // Loading 4 bytes through RegI (pointer: addr+bank, REAL: low+high)
+          if (x->type->form == ORB_Pointer || x->type->form == ORB_NilTyp || x->type->form == ORB_Real || x->type->form == ORB_Proc) {
+            // Loading 4 bytes through RegI (pointer/proc: addr+bank, REAL: low+high)
             Set16(1, 1);
             // Load bank word first (base pointer still intact)
             codegen_gen(sLDY, Immediate, x->a + 2, 0);
@@ -1108,9 +1144,12 @@ void ORG_DeRef(ORG_Item *x) {
 static void Q(ORB_Type *T, LONGINT *dcw) {
     if (T->base != NULL) {
         Q(T->base, dcw);
-        data[*dcw] = (T->mno * 0x1000 + T->len) * 0x1000 + *dcw - fixorgT;
-        fixorgT = *dcw;
-        (*dcw)++;
+        data[*dcw] = T->len;      // addr_lo (module-relative TD offset)
+        data[*dcw + 1] = 0;       // addr_hi (bank, 0 for now)
+        td_fixup[td_fixupC][0] = *dcw * 2;  // byte offset of lo word
+        td_fixup[td_fixupC][1] = T->mno;    // 0=own module, >0=import
+        td_fixupC++;
+        *dcw += 2;                 // 2 words per ancestor
     }
 }
 
@@ -1136,42 +1175,32 @@ static void FindPtrFlds(ORB_Type *typ, LONGINT off, LONGINT *dcw) {
 }
 
 void ORG_BuildTD(ORB_Type *T, LONGINT *dc) {
-    LONGINT dcw, k, s;
-    dcw = *dc / 4;
-    s = T->size;
-    
-    if (s <= 24) {
-        s = 32;
-    } else if (s <= 56) {
-        s = 64;
-    } else if (s <= 120) {
-        s = 128;
-    } else {
-        s = (s + 263) / 256 * 256;
-    }
-    
-    T->len = *dc;
-    data[dcw] = s;
+    LONGINT dcw, k;
+    dcw = *dc / 2;  // 2-byte entries
+
+    T->len = *dc;   // byte offset of this TD in module data area
+    data[dcw] = T->size;  // actual allocation size (no RISC rounding)
     dcw++;
-    k = T->nofpar;
-    
+    k = T->nofpar;  // extension level
+
     if (k > 3) {
         ORS_Mark("ext level too large");
     } else {
         Q(T, &dcw);
         while (k < 3) {
-            data[dcw] = -1;
-            dcw++;
+            data[dcw] = 0xFFFF;
+            data[dcw + 1] = 0xFFFF;
+            dcw += 2;
             k++;
         }
     }
-    
+
     FindPtrFlds(T, 0, &dcw);
-    data[dcw] = -1;
+    data[dcw] = 0xFFFF;
     dcw++;
     tdx = dcw;
-    *dc = dcw * 4;
-    
+    *dc = dcw * 2;  // 2 bytes per entry
+
     if (tdx >= maxTD) {
         ORS_Mark("too many record types");
         tdx = 0;
@@ -1179,41 +1208,131 @@ void ORG_BuildTD(ORB_Type *T, LONGINT *dc) {
 }
 
 void ORG_TypeTest(ORG_Item *x, ORB_Type *T, BOOLEAN varpar, BOOLEAN isguard) {
-    LONGINT pc0;
-    
     if (T == NULL) {
         if (x->mode >= Reg) {
             RH--;
         }
-        SetCC(x, 7);
-    } else {
-        if (varpar) {
-    // RISC: Put2(Ldr, RH, SP, x->a + 4 + frame);
-        } else {
-            load(x);
-            pc0 = ORG_pc;
-    // RISC: Put3(BC, EQ, 0);
-    // RISC: Put2(Ldr, RH, x->r, -8);
-        }
-    // RISC: Put2(Ldr, RH, RH, T->nofpar * 4);
-        incR();
-        loadTypTagAdr(T);
-    // RISC: Put0(Cmp, RH - 1, RH - 1, RH - 2);
+        SetCC(x, AL);  // always true
+    } else if (varpar) {
+        // VAR record param type test: load 4-byte tag from stack frame
+        // Stack layout: [addr:2][bank:2][tag_lo:2][tag_hi:2]
+        Set16(1, 1);
+
+        // Load 4-byte tag into temp register pair
+        incR(); incR();
+        codegen_gen(sLDA, StackRelative, x->a + 4 + frame, 0);  // tag_lo
+        codegen_gen(sSTA, DirectPage, reg_addr(RH - 2), 0);
+        codegen_gen(sLDA, StackRelative, x->a + 6 + frame, 0);  // tag_hi
+        codegen_gen(sSTA, DirectPage, reg_addr(RH - 1), 0);
+
+        // Add ancestor offset: 2 + (nofpar-1)*4
+        // TD layout: size(2), ancestor[0](4), ancestor[1](4), ancestor[2](4)
+        LONGINT offset = 2 + (T->nofpar - 1) * 4;
+        codegen_gen(sCLC, Implied, 0, 0);
+        codegen_gen(sLDA, DirectPage, reg_addr(RH - 2), 0);
+        codegen_gen(sADC, Immediate, offset, 0);
+        codegen_gen(sSTA, DirectPage, reg_addr(RH - 2), 0);
+        codegen_gen(sLDA, DirectPage, reg_addr(RH - 1), 0);
+        codegen_gen(sADC, Immediate, 0, 0);  // carry propagation
+        codegen_gen(sSTA, DirectPage, reg_addr(RH - 1), 0);
+
+        // Load 4-byte ancestor via indirect long
+        codegen_gen(sLDA, DirectPageIndirectLong, reg_addr(RH - 2), 0);  // ancestor_lo
+        codegen_gen(sPHA, Implied, 0, 0);
+        codegen_gen(sLDY, Immediate, 2, 0);
+        codegen_gen(sLDA, DirectPageIndirectLongIndexedY, reg_addr(RH - 2), 0);  // ancestor_hi
+        codegen_gen(sSTA, DirectPage, reg_addr(RH - 1), 0);
+        codegen_gen(sPLA, Implied, 0, 0);
+        codegen_gen(sSTA, DirectPage, reg_addr(RH - 2), 0);
+
+        // XOR+ORA compare: target = SB + T->len (4-byte)
+        int sb = GetSB(-T->mno);
+        codegen_gen(sLDA, DirectPage, sb, 0);
+        codegen_gen(sCLC, Implied, 0, 0);
+        codegen_gen(sADC, Immediate, T->len, 0);       // target_lo
+        codegen_gen(sEOR, DirectPage, reg_addr(RH - 2), 0);
+        codegen_gen(sSTA, DirectPage, reg_addr(RH - 2), 0);
+        codegen_gen(sLDA, Immediate, 0, 0);             // target_hi = 0
+        codegen_gen(sEOR, DirectPage, reg_addr(RH - 1), 0);
+        codegen_gen(sORA, DirectPage, reg_addr(RH - 2), 0);  // Z=1 if match
         RH -= 2;
-        
-        if (!varpar) {
-            fix(pc0, ORG_pc - pc0 - 1);
-        }
-        
+
         if (isguard) {
             if (check) {
-                Trap(NE, 2);
+                Trap(EQ, 2);  // EQ=match → skip BRK; NE=mismatch → BRK #2
             }
         } else {
+            x->orig_type = intType;
             SetCC(x, EQ);
-            if (!varpar) {
-                RH--;
+        }
+    } else {
+        // Pointer-based type test (IS operator or type guard)
+        load(x);  // pointer in R[x->r] (addr), R[x->r+1] (bank)
+        Set16(1, 1);
+
+        // NIL check: if pointer is zero, skip type test
+        codegen_gen(sLDA, DirectPage, reg_addr(x->r), 0);
+        codegen_gen(sORA, DirectPage, reg_addr(x->r + 1), 0);
+        LONGINT nil_skip = emitFwdBranch(sBEQ);  // BEQ → skip to end (Z=1)
+
+        // Load 4-byte tag from [pointer - 4]
+        incR(); incR();  // temp pair for addressing AND tag storage
+        codegen_gen(sSEC, Implied, 0, 0);
+        codegen_gen(sLDA, DirectPage, reg_addr(x->r), 0);
+        codegen_gen(sSBC, Immediate, 4, 0);
+        codegen_gen(sSTA, DirectPage, reg_addr(RH - 2), 0);  // (ptr-4) addr
+        codegen_gen(sLDA, DirectPage, reg_addr(x->r + 1), 0);
+        codegen_gen(sSBC, Immediate, 0, 0);  // borrow propagation
+        codegen_gen(sSTA, DirectPage, reg_addr(RH - 1), 0);  // (ptr-4) bank
+        codegen_gen(sLDA, DirectPageIndirectLong, reg_addr(RH - 2), 0);  // tag_lo
+        codegen_gen(sPHA, Implied, 0, 0);
+        codegen_gen(sLDY, Immediate, 2, 0);
+        codegen_gen(sLDA, DirectPageIndirectLongIndexedY, reg_addr(RH - 2), 0);  // tag_hi
+        codegen_gen(sSTA, DirectPage, reg_addr(RH - 1), 0);
+        codegen_gen(sPLA, Implied, 0, 0);
+        codegen_gen(sSTA, DirectPage, reg_addr(RH - 2), 0);  // tag in temp pair
+
+        // Add ancestor offset: 2 + (nofpar-1)*4
+        LONGINT offset = 2 + (T->nofpar - 1) * 4;
+        codegen_gen(sCLC, Implied, 0, 0);
+        codegen_gen(sLDA, DirectPage, reg_addr(RH - 2), 0);
+        codegen_gen(sADC, Immediate, offset, 0);
+        codegen_gen(sSTA, DirectPage, reg_addr(RH - 2), 0);
+        codegen_gen(sLDA, DirectPage, reg_addr(RH - 1), 0);
+        codegen_gen(sADC, Immediate, 0, 0);  // carry propagation
+        codegen_gen(sSTA, DirectPage, reg_addr(RH - 1), 0);
+
+        // Load 4-byte ancestor
+        codegen_gen(sLDA, DirectPageIndirectLong, reg_addr(RH - 2), 0);  // ancestor_lo
+        codegen_gen(sPHA, Implied, 0, 0);
+        codegen_gen(sLDY, Immediate, 2, 0);
+        codegen_gen(sLDA, DirectPageIndirectLongIndexedY, reg_addr(RH - 2), 0);  // ancestor_hi
+        codegen_gen(sSTA, DirectPage, reg_addr(RH - 1), 0);
+        codegen_gen(sPLA, Implied, 0, 0);
+        codegen_gen(sSTA, DirectPage, reg_addr(RH - 2), 0);
+
+        // XOR+ORA compare with target: SB + T->len
+        int sb = GetSB(-T->mno);
+        codegen_gen(sLDA, DirectPage, sb, 0);
+        codegen_gen(sCLC, Implied, 0, 0);
+        codegen_gen(sADC, Immediate, T->len, 0);       // target_lo
+        codegen_gen(sEOR, DirectPage, reg_addr(RH - 2), 0);
+        codegen_gen(sSTA, DirectPage, reg_addr(RH - 2), 0);
+        codegen_gen(sLDA, Immediate, 0, 0);             // target_hi = 0
+        codegen_gen(sEOR, DirectPage, reg_addr(RH - 1), 0);
+        codegen_gen(sORA, DirectPage, reg_addr(RH - 2), 0);  // Z=1 if match
+        RH -= 2;  // free temp pair
+
+        patch(nil_skip);  // BEQ target: Z=1 from ORA (NIL → IS returns TRUE)
+
+        if (isguard) {
+            if (check) {
+                Trap(EQ, 2);  // EQ=match → skip BRK; NE=mismatch → BRK #2
             }
+        } else {
+            x->orig_type = intType;  // ensure unsigned comparison for SetCC
+            SetCC(x, EQ);  // IS result: EQ if types match
+            RH -= 2;       // free pointer registers
         }
     }
 }
@@ -1891,7 +2010,7 @@ void ORG_SetOp(LONGINT op, ORG_Item *x, ORG_Item *y) {
   END IntRelation;
 */
 void ORG_IntRelation(INTEGER op, ORG_Item *x, ORG_Item *y) {
-    BOOLEAN is_pointer = (x->type->form == ORB_Pointer) || (x->type->form == ORB_NilTyp);
+    BOOLEAN is_pointer = (x->type->form == ORB_Pointer) || (x->type->form == ORB_NilTyp) || (x->type->form == ORB_Proc);
     BOOLEAN use_8bit = !is_pointer && ((x->type->form == ORB_Char) || (x->type->form == ORB_Byte) || (x->type->form == ORB_Bool));
     BOOLEAN use_signed = !is_pointer && !use_8bit && (x->type->form == ORB_Int);
 
@@ -2041,8 +2160,8 @@ void ORG_Store(ORG_Item *x, ORG_Item *y) {
         if (x->r > 0) {
             // 65C816: Store to stack-based local variable with type conversion
             if (y->mode == Reg) {
-                if (x->type->form == ORB_Pointer || x->type->form == ORB_NilTyp || x->type->form == ORB_Real) {
-                    // 4-byte store: (pointer or REAL) from 2 registers
+                if (x->type->form == ORB_Pointer || x->type->form == ORB_NilTyp || x->type->form == ORB_Real || x->type->form == ORB_Proc) {
+                    // 4-byte store: (pointer, proc, or REAL) from 2 registers
                     Set16(1, 1);
                     codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);     // LDA low word
                     codegen_gen(sSTA, StackRelative, x->a, 0);            // STA offset,S
@@ -2079,8 +2198,8 @@ void ORG_Store(ORG_Item *x, ORG_Item *y) {
             // 65C816: Store register value to module global variable with type conversion
             int sb = GetSB(x->r);
             if (y->mode == Reg) {
-                if (x->type->form == ORB_Pointer || x->type->form == ORB_NilTyp || x->type->form == ORB_Real) {
-                    // 4-byte store: (pointer or REAL) from 2 registers
+                if (x->type->form == ORB_Pointer || x->type->form == ORB_NilTyp || x->type->form == ORB_Real || x->type->form == ORB_Proc) {
+                    // 4-byte store: (pointer, proc, or REAL) from 2 registers
                     Set16(1, 1);
                     codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);     // LDA low word
                     codegen_gen(sLDY, Immediate, x->a, 0);
@@ -2134,7 +2253,7 @@ void ORG_Store(ORG_Item *x, ORG_Item *y) {
 
             // Store value through the pointer
             // Apply field offset x->b if nonzero (e.g., record field through VAR param)
-            if (x->type->form == ORB_Pointer || x->type->form == ORB_NilTyp || x->type->form == ORB_Real) {
+            if (x->type->form == ORB_Pointer || x->type->form == ORB_NilTyp || x->type->form == ORB_Real || x->type->form == ORB_Proc) {
                 // 4-byte store through VAR param: store both words
                 codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);        // LDA low word
                 codegen_gen(sLDY, Immediate, x->b, 0);
@@ -2166,8 +2285,8 @@ void ORG_Store(ORG_Item *x, ORG_Item *y) {
     } else if (x->mode == RegI) {
         // 65C816: Store to register indirect (uses long indirect: [$dp] or [$dp],Y)
         if (y->mode == Reg) {
-            if (x->type->form == ORB_Pointer || x->type->form == ORB_NilTyp || x->type->form == ORB_Real) {
-                // 4-byte store through RegI: store both words (pointer or REAL)
+            if (x->type->form == ORB_Pointer || x->type->form == ORB_NilTyp || x->type->form == ORB_Real || x->type->form == ORB_Proc) {
+                // 4-byte store through RegI: store both words (pointer, proc, or REAL)
                 Set16(1, 1);
                 codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);  // LDA addr word
                 if (x->a == 0) {
@@ -2401,6 +2520,25 @@ void ORG_VarParam(ORG_Item *x, ORB_Type *ftype) {
             codegen_gen(sSTA, DirectPage, reg_addr(x->r + 2), 0);   // STA $reg+2 (same as ORG_OpenArrayParam)
         }
         incR(); // Allocate the length register
+    } else if (ftype->form == ORB_Record) {
+        // VAR record param: pass 4-byte type tag (2 registers)
+        Set16(1, 1);
+        if (xmd == ORB_Par) {
+            // Source is already a VAR param — forward existing 4-byte tag from stack
+            codegen_gen(sLDA, StackRelative, x->a + 4 + frame, 0);  // tag_lo from caller's frame
+            codegen_gen(sSTA, DirectPage, reg_addr(x->r + 2), 0);
+            codegen_gen(sLDA, StackRelative, x->a + 6 + frame, 0);  // tag_hi from caller's frame
+            codegen_gen(sSTA, DirectPage, reg_addr(x->r + 3), 0);
+        } else {
+            // Source is a direct variable — compute absolute tag: SB + T->len
+            int sb = GetSB(-x->type->mno);
+            codegen_gen(sLDA, DirectPage, sb, 0);
+            codegen_gen(sCLC, Implied, 0, 0);
+            codegen_gen(sADC, Immediate, x->type->len, 0);
+            codegen_gen(sSTA, DirectPage, reg_addr(x->r + 2), 0);   // tag_lo
+            codegen_gen(sSTZ, DirectPage, reg_addr(x->r + 3), 0);   // tag_hi = 0
+        }
+        incR(); incR();  // 2 registers for 4-byte tag
     }
 }
 
@@ -2667,19 +2805,60 @@ void ORG_Call(ORG_Item *x, LONGINT r) {
 	  codegen_gen(sJSR, Absolute, x->a, 0);  // JSR procedure_address
 	}
     } else {
+	  // Indirect call through procedure variable
+	  // Uses RTL trampoline (DP-relative): PHK; PER; SEP; LDA bank; PHA;
+	  // REP; LDA addr; DEC; PHA; RTL
+	  // PER operand = 11 ($0B): 16 bytes from PHK to return point
+	  int addr_reg, bank_reg;
 	  if (x->mode <= ORB_Par) {
+		// Proc var not yet loaded — load 4-byte address into 2 registers
 		load(x);
-		RH--;
+		addr_reg = reg_addr(RH - 2);
+		bank_reg = reg_addr(RH - 1);
+		if (check) {
+		  // NIL check: ORA addr and bank words, trap if zero
+		  codegen_gen(sLDA, DirectPage, addr_reg, 0);
+		  codegen_gen(sORA, DirectPage, bank_reg, 0);
+		  Trap(NE, 5);  // NE = non-nil → skip BRK
+		}
+		codegen_gen(sPHK, Implied, 0, 0);
+		codegen_gen(sPER, Immediate, 0x000B, 0);
+		Set8(1, 0);
+		codegen_gen(sLDA, DirectPage, bank_reg, 0);
+		codegen_gen(sPHA, Implied, 0, 0);
+		Set16(1, 0);
+		codegen_gen(sLDA, DirectPage, addr_reg, 0);
+		codegen_gen(sDEC, Accumulator, 0, 0);
+		codegen_gen(sPHA, Implied, 0, 0);
+		codegen_gen(sRTL, Implied, 0, 0);
+		RH -= 2;  // free proc addr registers
 	  } else {
-		// RISC: Put2(Ldr, RH, SP, 0);
-		// RISC: Put1(Add, SP, SP, 4);
-		r--;
-		frame -= 2;
+		// Proc var was loaded in PrepCall and saved on stack by SaveRegs
+		// Pop 4-byte proc address back from stack (pushed last = on top)
+		codegen_gen(sPLA, Implied, 0, 0);                       // pull bank (pushed last)
+		codegen_gen(sSTA, DirectPage, reg_addr(1), 0);
+		codegen_gen(sPLA, Implied, 0, 0);                       // pull addr
+		codegen_gen(sSTA, DirectPage, reg_addr(0), 0);
+		addr_reg = reg_addr(0);
+		bank_reg = reg_addr(1);
+		r -= 2;
+		frame -= 4;
+		if (check) {
+		  codegen_gen(sLDA, DirectPage, addr_reg, 0);
+		  codegen_gen(sORA, DirectPage, bank_reg, 0);
+		  Trap(NE, 5);
+		}
+		codegen_gen(sPHK, Implied, 0, 0);
+		codegen_gen(sPER, Immediate, 0x000B, 0);
+		Set8(1, 0);
+		codegen_gen(sLDA, DirectPage, bank_reg, 0);
+		codegen_gen(sPHA, Implied, 0, 0);
+		Set16(1, 0);
+		codegen_gen(sLDA, DirectPage, addr_reg, 0);
+		codegen_gen(sDEC, Accumulator, 0, 0);
+		codegen_gen(sPHA, Implied, 0, 0);
+		codegen_gen(sRTL, Implied, 0, 0);
 	  }
-	  if (check) {
-		Trap(EQ, 5);
-	  }
-	  // RISC: Put3(BLR, 7, RH);
     }
     
     if (x->type->base->form == ORB_NoTyp) {
@@ -2751,6 +2930,16 @@ void ORG_Enter(ORB_Object *params, LONGINT frame_size, BOOLEAN expo, BOOLEAN int
 	    codegen_gen(sSTA, StackRelative, param->val + 4, 0);   // STA param->val+4,S (store length)
 	    
 	    // Result on stack: [addr_low] [addr_high] [data_bank] [padding] [len_low] [len_high] = 6-byte VAR open array
+	  } else if (param->class == ORB_Par && param->type->form == ORB_Record) {
+	    // VAR record parameter: Store 8-byte value (addr + bank + tag_lo + tag_hi)
+	    codegen_gen(sLDA, DirectPage, reg_addr(r + 0), 0);     // LDA $reg (address)
+	    codegen_gen(sSTA, StackRelative, param->val, 0);       // STA param->val,S
+	    codegen_gen(sLDA, DirectPage, reg_addr(r + 1), 0);     // LDA $reg+1 (bank)
+	    codegen_gen(sSTA, StackRelative, param->val + 2, 0);   // STA param->val+2,S
+	    codegen_gen(sLDA, DirectPage, reg_addr(r + 2), 0);     // LDA $reg+2 (tag_lo)
+	    codegen_gen(sSTA, StackRelative, param->val + 4, 0);   // STA param->val+4,S
+	    codegen_gen(sLDA, DirectPage, reg_addr(r + 3), 0);     // LDA $reg+3 (tag_hi)
+	    codegen_gen(sSTA, StackRelative, param->val + 6, 0);   // STA param->val+6,S
 	  } else if (param->class == ORB_Par) {
 	    // VAR parameter or promoted value param: Store 4-byte pointer value to stack using two registers
 	    // First register contains 16-bit address, second register contains data bank (0)
@@ -2764,8 +2953,8 @@ void ORG_Enter(ORB_Object *params, LONGINT frame_size, BOOLEAN expo, BOOLEAN int
 	    codegen_gen(sSTA, StackRelative, param->val + 2, 0);   // STA param->val+2,S (store data bank)
 
 	    // Result on stack: [addr_low] [addr_high] [data_bank] [padding] = 4-byte pointer
-	  } else if (param->type->form == ORB_Real) {
-	    // REAL value parameter: store 4 bytes (low word + high word) directly
+	  } else if (param->type->form == ORB_Real || param->type->form == ORB_Proc) {
+	    // REAL or Proc value parameter: store 4 bytes (low word + high word) directly
 	    codegen_gen(sLDA, DirectPage, reg_addr(r), 0);          // LDA low word
 	    codegen_gen(sSTA, StackRelative, param->val, 0);        // STA param_offset,S
 	    codegen_gen(sLDA, DirectPage, reg_addr(r + 1), 0);      // LDA high word
@@ -2788,9 +2977,11 @@ void ORG_Enter(ORB_Object *params, LONGINT frame_size, BOOLEAN expo, BOOLEAN int
 	  }
 	  
 	  // Advance register pointer based on parameter type
-	  // Check open array VAR first (most specific), then simple VAR, then regular
+	  // Check open array VAR first, then VAR record, then simple VAR, then regular
 	  if (param->class == ORB_Par && param->type->form == ORB_Array && param->type->len < 0) {
 	    r += 3;  // Open array parameter uses three registers (addr_low + addr_high + length)
+	  } else if (param->class == ORB_Par && param->type->form == ORB_Record) {
+	    r += 4;  // VAR record parameter uses four registers (addr + bank + tag_lo + tag_hi)
 	  } else if (param->class == ORB_Par) {
 	    r += 2;  // VAR or promoted value parameter uses two registers (address + data bank)
 	  } else {
@@ -3110,18 +3301,47 @@ void ORG_Assert(ORG_Item *x) {
 void ORG_New(ORG_Item *x) {
   // 65C816: Heap allocation via BRK #10 trap
   // Emulator returns: addr in A, bank in X
+  // Heap layout: [tag_lo:2][tag_hi:2][object data...] — pointer points to data
+  ORB_Type *baseType = x->type->base;
   ORG_Item y = *x;  // save destination
   ORG_Item z;
   Set16(1, 1);
-  codegen_gen(sLDA, Immediate, x->type->base->size, 0);  // record size in A
-  codegen_gen(sBRK, Immediate, 10, 0);                    // trap #10 = NEW
-  codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);         // store addr
-  codegen_gen(sSTX, DirectPage, reg_addr(RH + 1), 0);     // store bank
+
+  // Compute absolute 4-byte tag: SB + T->len
+  int sb = GetSB(-baseType->mno);
+  codegen_gen(sLDA, DirectPage, sb, 0);
+  codegen_gen(sCLC, Implied, 0, 0);
+  codegen_gen(sADC, Immediate, baseType->len, 0);
+  codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);      // tag_lo
+  codegen_gen(sSTZ, DirectPage, reg_addr(RH + 1), 0);  // tag_hi = 0
+  incR(); incR();  // 2 regs for tag
+
+  // Allocate size + 4
+  codegen_gen(sLDA, Immediate, baseType->size + 4, 0);
+  codegen_gen(sBRK, Immediate, 10, 0);
+  codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);      // heap base addr
+  codegen_gen(sSTX, DirectPage, reg_addr(RH + 1), 0);  // bank
+
+  // Store 4-byte tag at heap base
+  codegen_gen(sLDA, DirectPage, reg_addr(RH - 2), 0);            // tag_lo
+  codegen_gen(sSTA, DirectPageIndirectLong, reg_addr(RH), 0);    // [base] := tag_lo
+  codegen_gen(sLDY, Immediate, 2, 0);
+  codegen_gen(sLDA, DirectPage, reg_addr(RH - 1), 0);            // tag_hi
+  codegen_gen(sSTA, DirectPageIndirectLongIndexedY, reg_addr(RH), 0);  // [base+2] := tag_hi
+
+  // Adjust pointer: addr += 4 (skip past tag)
+  codegen_gen(sCLC, Implied, 0, 0);
+  codegen_gen(sLDA, DirectPage, reg_addr(RH), 0);
+  codegen_gen(sADC, Immediate, 4, 0);
+  codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);
+
+  // Store pointer to destination variable
   z.r = RH;
   z.mode = Reg;
   z.type = y.type;
-  incR(); incR();  // 2 registers for pointer
+  incR(); incR();  // allocate pointer pair
   ORG_Store(&y, &z);  // store 4-byte pointer to variable (frees the 2 regs)
+  RH -= 2;  // free tag pair
 }
 
 void ORG_Pack(ORG_Item *x, ORG_Item *y) {
@@ -3507,6 +3727,7 @@ void ORG_Open(INTEGER v) {
   fixorgD = 0;
   fixorgT = 0;
   relocC = 0;
+  td_fixupC = 0;
   for (int i = 0; i < FP_OPS; i++) fp_fixup_count[i] = 0;
   check = (v != 0);
   version = v;
@@ -4393,14 +4614,13 @@ void ORG_Close(ORS_Ident modid, LONGINT key, LONGINT nofent) {
   }
   Files_Write(&R, 0);
   
-  Files_WriteInt(&R, tdx * 4);
-  i = 0;
-  while (i < tdx) {
-	Files_WriteInt(&R, data[i]);
-	i++;
+  Files_WriteInt(&R, tdx * 2);  // TD size in bytes (2-byte entries)
+  for (i = 0; i < tdx; i++) {
+    Files_Write(&R, data[i] & 0xFF);
+    Files_Write(&R, (data[i] >> 8) & 0xFF);
   }
-  
-  Files_WriteInt(&R, ORG_varsize - tdx * 4);
+
+  Files_WriteInt(&R, ORG_varsize - tdx * 2);
   Files_WriteInt(&R, strx);
   for (i = 0; i < strx; i++) {
 	Files_Write(&R, str[i]);
@@ -4457,6 +4677,15 @@ void ORG_Close(ORS_Ident modid, LONGINT key, LONGINT nofent) {
   Files_WriteInt(&R, fixorgP);
   Files_WriteInt(&R, fixorgD);
   Files_WriteInt(&R, fixorgT);
+
+  // Write TD fixup entries (ancestor addresses that need relocation)
+  Files_WriteInt(&R, td_fixupC);
+  for (i = 0; i < td_fixupC; i++) {
+    Files_Write(&R, td_fixup[i][0] & 0xFF);         // byte offset lo
+    Files_Write(&R, (td_fixup[i][0] >> 8) & 0xFF);  // byte offset hi
+    Files_Write(&R, td_fixup[i][1] & 0xFF);          // mno lo
+    Files_Write(&R, (td_fixup[i][1] >> 8) & 0xFF);   // mno hi
+  }
 
   Files_WriteInt(&R, relocC);
   for (int i = 0; i < relocC; i++) {

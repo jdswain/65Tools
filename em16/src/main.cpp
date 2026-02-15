@@ -399,6 +399,33 @@ static void apply_relocation(uint32_t reloc_addr, uint32_t module_base,
         printf("  LDA relocation at $%06X: operand=$%04X -> var_base $%04X\n",
                reloc_addr, operand, var_base);
 
+    } else if (opcode == 0x62) {    // PER - imported procedure address
+        uint16_t operand = emu816::getByte(reloc_addr + 1) |
+                          (emu816::getByte(reloc_addr + 2) << 8);
+        int mno = (operand >> 8) & 0xFF;
+        int exno = operand & 0xFF;
+        if (mno > 0 && mno <= import_count && import_map[mno]) {
+            ModuleInfo *target = import_map[mno];
+            if (exno > 0 && exno < target->export_count) {
+                uint32_t target_addr = target->base_address + target->exports[exno];
+                // PER pushes PC + operand + 3, we want it to push target_addr
+                // So operand = target_addr - (reloc_addr - bank_address) - 3
+                // where (reloc_addr - bank_address) gives the intra-bank PER address
+                uint16_t per_addr_inbank = (uint16_t)(reloc_addr & 0xFFFF);
+                int16_t per_offset = (int16_t)(target_addr - per_addr_inbank - 3);
+                emu816::setByte(reloc_addr + 1, per_offset & 0xFF);
+                emu816::setByte(reloc_addr + 2, (per_offset >> 8) & 0xFF);
+                printf("  PER import fixup at $%06X: mno=%d exno=%d -> %s addr=$%04X (PER operand=$%04X)\n",
+                       reloc_addr, mno, exno, target->name,
+                       target_addr, (uint16_t)per_offset);
+            } else {
+                printf("  Warning: Invalid exno %d for module %s (has %d exports)\n",
+                       exno, target->name, target->export_count - 1);
+            }
+        } else {
+            printf("Warning: PER relocation mno %d not found\n", mno);
+        }
+
     } else {
         printf("Warning: Relocation at $%06X points to unknown opcode $%02X\n",
                reloc_addr, opcode);
@@ -697,6 +724,42 @@ unsigned int loadMod(char * filename) {
     return 0;
   }
 
+  // 10b. Read and process TD fixup entries (ancestor addresses needing relocation)
+  int32_t td_fixup_count;
+  if (fread(&td_fixup_count, 4, 1, file) != 1) {
+    printf("Error reading TD fixup count\n");
+    fclose(file);
+    return 0;
+  }
+  if (td_fixup_count > 0) {
+    printf("Processing %d TD fixups:\n", td_fixup_count);
+    for (int i = 0; i < td_fixup_count; i++) {
+      uint16_t byte_offset, mno;
+      if (fread(&byte_offset, 2, 1, file) != 1 || fread(&mno, 2, 1, file) != 1) {
+        printf("Error reading TD fixup entry %d\n", i);
+        break;
+      }
+      // Read 4-byte ancestor value (lo + hi) from TD area
+      uint16_t lo = emu816::getWord(module_var_base + byte_offset);
+      uint16_t hi = emu816::getWord(module_var_base + byte_offset + 2);
+      uint32_t addr = ((uint32_t)hi << 16) | lo;
+      // Add the module's var base for the target module
+      uint16_t var_base;
+      if (mno == 0) {
+        var_base = module_var_base;  // own module
+      } else if (mno <= import_count && import_map[mno]) {
+        var_base = import_map[mno]->var_address;
+      } else {
+        var_base = 0;
+        printf("  Warning: TD fixup mno %d not resolved\n", mno);
+      }
+      addr += var_base;
+      emu816::setWord(module_var_base + byte_offset, addr & 0xFFFF);
+      emu816::setWord(module_var_base + byte_offset + 2, (addr >> 16) & 0xFFFF);
+      printf("  TD fixup[%d]: offset=%d mno=%d -> $%04X\n", i, byte_offset, mno, (unsigned)(addr & 0xFFFF));
+    }
+  }
+
   // Add module to tracking list BEFORE relocations (so it's findable)
   ModuleInfo *info = (ModuleInfo*)malloc(sizeof(ModuleInfo));
   strcpy(info->name, module_name);
@@ -779,7 +842,10 @@ static uint16_t heap_alloc(uint16_t size) {
 }
 
 static void trap_handler(int trap_num) {
-    if (trap_num == 10) {
+    if (trap_num == 0) {
+        // Module return halt - silent stop
+        emu816::stop();
+    } else if (trap_num == 10) {
         // NEW: allocate heap memory
         uint16_t size = emu816::getRegA();
         uint16_t addr = heap_alloc(size);
@@ -801,23 +867,37 @@ int main(int argc, char **argv)
 {
   int index = 1;
   unsigned int entry;
-  
+  int custom_dp = -1;    // -1 = use default (0), else custom DP address
+  int custom_sp = -1;    // -1 = use default ($0100), else custom SP address
+
   setup();
 
   while (index < argc) {
     if (argv[index][0] != '-') break;
-    
+
     if (!strcmp(argv[index], "-t")) {
       trace = true;
       ++index;
       continue;
     }
-    
+
+    if (!strcmp(argv[index], "-dp") && index + 1 < argc) {
+      custom_dp = (int)strtol(argv[index + 1], NULL, 0);
+      index += 2;
+      continue;
+    }
+
+    if (!strcmp(argv[index], "-sp") && index + 1 < argc) {
+      custom_sp = (int)strtol(argv[index + 1], NULL, 0);
+      index += 2;
+      continue;
+    }
+
     if (!strcmp(argv[index], "-?")) {
-      cerr << "Usage: em16 [-t] ELF-file ..." << endl;
+      cerr << "Usage: em16 [-t] [-dp addr] [-sp addr] ELF-file ..." << endl;
       return (1);
     }
-    
+
     cerr << "Invalid: option '" << argv[index] << "'" << endl;
     return (1);
   }
@@ -853,7 +933,16 @@ int main(int argc, char **argv)
   clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &start);
 #endif
 
+  if (custom_sp >= 0) {
+    emu816::setStackPage(custom_sp);
+  }
+
   emu816::reset(trace);
+
+  if (custom_dp >= 0) {
+    emu816::setDP(custom_dp);
+    printf("DP set to $%04X\n", custom_dp);
+  }
 
   // Initialize heap allocator: starts right after module variables
   heap_top = current_var_address;
