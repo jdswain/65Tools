@@ -549,12 +549,10 @@ static void OutType(Files_Rider *R, TypePtr t) {
                 bot = NULL;
             }
             
-            if (obj != NULL) {
-                Files_WriteNum(R, obj->exno);
-            } else {
-                Write(R, 0);
-            }
-            
+            /* Write TD byte offset (not exno) so importing modules
+               can directly use SB + len for type tag computation */
+            Files_WriteNum(R, t->len);
+
             Files_WriteNum(R, t->nofpar);
             Files_WriteNum(R, t->size);
             

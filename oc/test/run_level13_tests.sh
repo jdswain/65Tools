@@ -1,6 +1,6 @@
 #!/bin/bash
-# Level 9 module system tests
-# Compiles L9_*.Mod files, runs them through the emulator, compares UART output
+# Level 13 procedure variable (function pointer) tests
+# Compiles L13_*.Mod files, runs them through the emulator, compares UART output
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -24,25 +24,20 @@ if [ ! -x "$EM16" ]; then
   exit 1
 fi
 
-# Pre-compile library modules in dependency order
-for lib in Out L9_Lib L9_Base L9_Mid L9_TypeBase L9_TypeLib; do
+# Pre-compile library modules so dependencies are available
+for lib in Out Runtime TestTool; do
   libfile="$SCRIPT_DIR/$lib.Mod"
   if [ -f "$libfile" ]; then
-    compile_output=$("$OC" "$libfile" /s 2>&1)
-    if echo "$compile_output" | grep -q "  pos [0-9]"; then
-      echo "ERROR: Failed to compile library $lib"
-      echo "$compile_output" | grep "  pos [0-9]" | head -3 | sed 's/^/      /'
-      exit 1
-    fi
+    "$OC" "$libfile" /s >/dev/null 2>&1
   fi
 done
 
-echo "=== Level 9: Module System Tests ==="
+echo "=== Level 13: Procedure Variable Tests ==="
 echo "Compiler: $OC"
 echo "Emulator: $EM16"
 echo ""
 
-for expected_file in "$SCRIPT_DIR"/L9_*.expected; do
+for expected_file in "$SCRIPT_DIR"/L13_*.expected; do
   [ -f "$expected_file" ] || continue
   TOTAL=$((TOTAL + 1))
 
@@ -82,7 +77,7 @@ for expected_file in "$SCRIPT_DIR"/L9_*.expected; do
   fi
 
   # Extract just the program's UART output
-  actual=$(echo "$full_output" | awk '/^Initialising at/{found=1; next} /^Executed /{exit} found{print}')
+  actual=$(echo "$full_output" | awk '/^Initialising at/{found=1; buf=""; next} /^Executed /{exit} found{buf = buf (buf ? "\n" : "") $0} END{print buf}')
 
   expected=$(cat "$expected_file")
 

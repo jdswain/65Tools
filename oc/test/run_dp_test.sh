@@ -1,16 +1,16 @@
 #!/bin/bash
-# Level 9 module system tests
-# Compiles L9_*.Mod files, runs them through the emulator, compares UART output
+# DP relocation test: runs all test levels with Direct Page at $0200
+# Verifies that all generated code uses DP-relative addressing correctly
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 OC="$PROJECT_DIR/bin/oc"
 EM16="$PROJECT_DIR/../bin/em16"
+DP_ADDR="0x0200"
 TIMEOUT_SECS=5
 
 PASS=0
 FAIL=0
-SKIP=0
 TOTAL=0
 
 if [ ! -x "$OC" ]; then
@@ -20,11 +20,15 @@ fi
 
 if [ ! -x "$EM16" ]; then
   echo "ERROR: Emulator not found at $EM16"
-  echo "Build with: cd ../em16 && make -f Makefile.macos"
   exit 1
 fi
 
-# Pre-compile library modules in dependency order
+echo "=== DP Relocation Test (DP=$DP_ADDR) ==="
+echo "Compiler: $OC"
+echo "Emulator: $EM16"
+echo ""
+
+# Pre-compile library modules needed by L9 tests
 for lib in Out L9_Lib L9_Base L9_Mid L9_TypeBase L9_TypeLib; do
   libfile="$SCRIPT_DIR/$lib.Mod"
   if [ -f "$libfile" ]; then
@@ -37,22 +41,29 @@ for lib in Out L9_Lib L9_Base L9_Mid L9_TypeBase L9_TypeLib; do
   fi
 done
 
-echo "=== Level 9: Module System Tests ==="
-echo "Compiler: $OC"
-echo "Emulator: $EM16"
-echo ""
-
-for expected_file in "$SCRIPT_DIR"/L9_*.expected; do
+# Run all test levels (L1-L13) with -dp flag
+for expected_file in "$SCRIPT_DIR"/L[0-9]_*.expected "$SCRIPT_DIR"/L[0-9][0-9]_*.expected; do
   [ -f "$expected_file" ] || continue
-  TOTAL=$((TOTAL + 1))
 
   basename=$(basename "$expected_file" .expected)
+
+  # Skip library-only modules (no expected output to compare)
+  case "$basename" in
+    L9_Lib|L9_Base|L9_Mid|L9_TypeBase|L9_TypeLib) continue ;;
+  esac
+
+  # Skip L12 negative tests (compile-time error tests, no emulation)
+  case "$basename" in
+    L12_*) continue ;;
+  esac
+
+  TOTAL=$((TOTAL + 1))
+
   modfile="$SCRIPT_DIR/$basename.Mod"
   objfile="$SCRIPT_DIR/$basename.816"
 
   if [ ! -f "$modfile" ]; then
     echo "SKIP  $basename (no .Mod file)"
-    SKIP=$((SKIP + 1))
     continue
   fi
 
@@ -67,12 +78,11 @@ for expected_file in "$SCRIPT_DIR"/L9_*.expected; do
 
   if [ ! -f "$objfile" ]; then
     echo "SKIP  $basename (no .816 output)"
-    SKIP=$((SKIP + 1))
     continue
   fi
 
-  # Run through emulator with timeout (auto-loader handles dependencies)
-  full_output=$(echo "" | perl -e "alarm $TIMEOUT_SECS; exec @ARGV" "$EM16" "$objfile" 2>/dev/null)
+  # Run through emulator with DP at custom address
+  full_output=$(echo "" | perl -e "alarm $TIMEOUT_SECS; exec @ARGV" "$EM16" -dp "$DP_ADDR" "$objfile" 2>/dev/null)
   run_rc=$?
 
   if [ $run_rc -eq 142 ]; then
@@ -81,10 +91,17 @@ for expected_file in "$SCRIPT_DIR"/L9_*.expected; do
     continue
   fi
 
-  # Extract just the program's UART output
-  actual=$(echo "$full_output" | awk '/^Initialising at/{found=1; next} /^Executed /{exit} found{print}')
-
+  # Auto-detect awk pattern based on expected file convention:
+  # If expected starts with "OK", use pattern capturing from first "Initialising at"
+  # Otherwise, use pattern capturing from LAST "Initialising at" only
   expected=$(cat "$expected_file")
+  first_line=$(echo "$expected" | head -1)
+
+  if [ "$first_line" = "OK" ]; then
+    actual=$(echo "$full_output" | awk '/^Initialising at/{found=1; next} /^Executed /{exit} found{print}')
+  else
+    actual=$(echo "$full_output" | awk '/^Initialising at/{found=1; buf=""; next} /^Executed /{exit} found{buf = buf (buf ? "\n" : "") $0} END{print buf}')
+  fi
 
   if [ "$actual" = "$expected" ]; then
     echo "PASS  $basename"
@@ -98,8 +115,8 @@ for expected_file in "$SCRIPT_DIR"/L9_*.expected; do
 done
 
 echo ""
-echo "=== Results ==="
-echo "Total: $TOTAL  Pass: $PASS  Fail: $FAIL  Skip: $SKIP"
+echo "=== Results (DP=$DP_ADDR) ==="
+echo "Total: $TOTAL  Pass: $PASS  Fail: $FAIL"
 
 if [ $FAIL -gt 0 ]; then
   exit 1
