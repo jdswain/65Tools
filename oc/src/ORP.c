@@ -1989,17 +1989,24 @@ int main(int argc, char **argv) {
     
     // Parse command line arguments
     if (argc < 2) {
-        printf("Usage: %s <module.Mod> [/s]\n", argv[0]);
-        printf("  /s  Force new symbol file\n");
+        printf("Usage: %s <module.Mod> [-s] [-I<dir>] [-I <dir>]\n", argv[0]);
+        printf("  -s          Force new symbol file\n");
+        printf("  -I<dir>     Add symbol file search path\n");
         return 1;
     }
-    
+
     filename = argv[1];
-    
-    // Check for /s option
+
+    // Check for options
     for (i = 2; i < argc; i++) {
-        if (strcmp(argv[i], "/s") == 0) {
+        if (strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "/s") == 0) {
             forceNewSF = true;
+        } else if (strncmp(argv[i], "-I", 2) == 0) {
+            if (argv[i][2] != '\0') {
+                AddSearchPath(&argv[i][2]);
+            } else if (i + 1 < argc) {
+                AddSearchPath(argv[++i]);
+            }
         }
     }
     

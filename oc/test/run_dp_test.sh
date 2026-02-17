@@ -32,7 +32,7 @@ echo ""
 for lib in Out L9_Lib L9_Base L9_Mid L9_TypeBase L9_TypeLib; do
   libfile="$SCRIPT_DIR/$lib.Mod"
   if [ -f "$libfile" ]; then
-    compile_output=$("$OC" "$libfile" /s 2>&1)
+    compile_output=$("$OC" "$libfile" -s 2>&1)
     if echo "$compile_output" | grep -q "  pos [0-9]"; then
       echo "ERROR: Failed to compile library $lib"
       echo "$compile_output" | grep "  pos [0-9]" | head -3 | sed 's/^/      /'

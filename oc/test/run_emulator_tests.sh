@@ -63,7 +63,7 @@ echo ""
 for lib in "${LIBRARY_MODULES[@]}"; do
   libfile="$SCRIPT_DIR/$lib.Mod"
   if [ -f "$libfile" ]; then
-    "$OC" "$libfile" /s >/dev/null 2>&1
+    "$OC" "$libfile" -s >/dev/null 2>&1
   fi
 done
 
