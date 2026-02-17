@@ -25,6 +25,7 @@
 #include "wdc816.h"
 #include "UART_6551.h"
 #include "R6501.h"
+#include "WD1793.h"
 
 #include "Video.h"
 
@@ -45,8 +46,11 @@ public:
 	if ((ea >= VIDEO_BASE_ADDR) && (ea < VIDEO_BASE_ADDR + VIDEO_MEM_SIZE))
 	  return video.getByte(ea - VIDEO_BASE_ADDR);
 
-	if ((ea >= 0xC000) && (ea <= 0xC004))
+	if ((ea >= 0xC000) && (ea <= 0xC00F))
 	  return uart.getByte(ea);
+
+	if ((ea >= 0xC010) && (ea <= 0xC01F))
+	  return fdc.getByte(ea);
 
     if ((ea &= memMask) < ramSize)
       return (pRAM[ea]);
@@ -74,8 +78,15 @@ public:
 	  return;
 	}
 
-	if ((ea >= 0xC000) && (ea <= 0xC004))
+	if ((ea >= 0xC000) && (ea <= 0xC00F)) {
 	  uart.setByte(ea, data);
+	  return;
+	}
+
+	if ((ea >= 0xC010) && (ea <= 0xC01F)) {
+	  fdc.setByte(ea, data);
+	  return;
+	}
 
     if ((ea &= memMask) < ramSize)
       pRAM[ea] = data;
@@ -94,7 +105,8 @@ public:
   }
 
   static Video& getVideo() { return video; }
-  
+  static WD1793& getFDC() { return fdc; }
+
   protected:
   mem816();
   ~mem816();
@@ -108,5 +120,6 @@ private:
   static R6501 r6501;
   static UART uart;
   static Video video;
+  static WD1793 fdc;
 };
 #endif

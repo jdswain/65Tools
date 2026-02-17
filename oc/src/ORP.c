@@ -1256,7 +1256,7 @@ static void ArrayType(ORB_Type **type) {
         typ->base = intType;
     }
     
-    typ->size = len * typ->base->size + 3;
+    typ->size = len * typ->base->size;
     typ->form  = ORB_Array;
     typ->len = len;
     *type = typ;
@@ -1371,16 +1371,16 @@ static void FPSection(LONGINT *adr, INTEGER *nofpar) {
     } else {
         cl = ORB_Var;
     }
-    
+
     IdentList(cl, &first);
     FormalType(&tp, 0);
-    
+
     rdo = FALSE;
     if ((cl == ORB_Var) && (tp->form >= ORB_Array)) {
         cl = ORB_Par;
         rdo = TRUE;  // Array/record value parameters promoted to ORB_Par, read-only
     }
-    
+
     if ((tp->form == ORB_Array) && (tp->len < 0)) {
         parsize = 6;  // VAR open array: 2-byte addr + 2-byte bank + 2-byte length = 6 bytes
     } else if ((cl == ORB_Par) && (tp->form == ORB_Record)) {
@@ -1673,8 +1673,7 @@ static void Declarations(LONGINT *varsize, LONGINT parblksize) {
                 obj->lev = level;
                 // 65C816: No alignment needed
                 if (level > 0) {
-                    // Local variable: calculate stack relative offset  
-                    // 65C816: params start at 1, locals start at 1+parblksize
+                    // Local variable: assign preliminary offset (will be reordered below)
                     obj->val = 1 + parblksize + *varsize;
                 } else {
                     // Global variable: use absolute address
@@ -1688,6 +1687,32 @@ static void Declarations(LONGINT *varsize, LONGINT parblksize) {
                 obj = obj->next;
             }
             Check(ORS_semicolon, "; missing");
+        }
+    }
+
+    // 65C816: Reorder local variable offsets to keep scalars within
+    // 8-bit stack-relative offset range. LDA nn,S only supports nn=0..255.
+    // Place small types first (low offsets), large arrays/records last.
+    // IMPORTANT: Only reorder LOCAL variables (val > parblksize), not parameters.
+    // Parameters have val in [1, parblksize], locals have val >= 1 + parblksize.
+    // Value params with class=ORB_Var look the same as locals but must keep
+    // their FPSection-assigned offsets.
+    if (level > 0 && *varsize > 0) {
+        LONGINT reorder_ofs = 0;
+        ORB_Object *p;
+        // Pass 1: small types (size <= 8) get low offsets
+        for (p = topScope->next; p != NULL; p = p->next) {
+            if (p->class == ORB_Var && p->lev == level && p->val > parblksize && p->type->size <= 8) {
+                p->val = 1 + parblksize + reorder_ofs;
+                reorder_ofs += p->type->size;
+            }
+        }
+        // Pass 2: large types get high offsets
+        for (p = topScope->next; p != NULL; p = p->next) {
+            if (p->class == ORB_Var && p->lev == level && p->val > parblksize && p->type->size > 8) {
+                p->val = 1 + parblksize + reorder_ofs;
+                reorder_ofs += p->type->size;
+            }
         }
     }
     

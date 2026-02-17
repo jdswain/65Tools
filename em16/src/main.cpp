@@ -908,8 +908,20 @@ int main(int argc, char **argv)
       continue;
     }
 
+    if (!strcmp(argv[index], "-disk0") && index + 1 < argc) {
+      mem816::getFDC().mountDisk(0, argv[index + 1]);
+      index += 2;
+      continue;
+    }
+
+    if (!strcmp(argv[index], "-disk1") && index + 1 < argc) {
+      mem816::getFDC().mountDisk(1, argv[index + 1]);
+      index += 2;
+      continue;
+    }
+
     if (!strcmp(argv[index], "-?")) {
-      cerr << "Usage: em16 [-t] [-dp addr] [-sp addr] [-video] [-test-pattern] file ..." << endl;
+      cerr << "Usage: em16 [-t] [-dp addr] [-sp addr] [-video] [-test-pattern] [-disk0 file] [-disk1 file] file ..." << endl;
       return (1);
     }
 

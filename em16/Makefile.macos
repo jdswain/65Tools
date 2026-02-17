@@ -14,7 +14,7 @@ INCDIR = include
 OBJDIR = obj
 BINDIR = ../bin
 
-CPP_SOURCES = emu816.cpp wdc816.cpp mem816.cpp UART_6551.cpp R6501.cpp memory.cpp main.cpp
+CPP_SOURCES = emu816.cpp wdc816.cpp mem816.cpp UART_6551.cpp R6501.cpp WD1793.cpp memory.cpp main.cpp
 MM_SOURCES = Video.mm
 
 OBJECTS = $(CPP_SOURCES:%.cpp=$(OBJDIR)/%.o) $(MM_SOURCES:%.mm=$(OBJDIR)/%.o)

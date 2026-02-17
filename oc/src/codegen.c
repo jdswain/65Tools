@@ -18,6 +18,7 @@
 
 #include "codegen.h"
 
+#include <stdio.h>
 #include "ORG.h"
 
 #define CODE_ORG 0x0000  // Code starts at $0000
@@ -40,6 +41,9 @@ void o(uint8_t byte)
 
 void ob(uint8_t op, int v)
 {
+  if (v > 255 || v < 0) {
+    fprintf(stderr, "Warning: 8-bit operand overflow: %d (0x%x) at PC $%04X\n", v, v, ORG_pc);
+  }
   o(op); o(v & 0xff);
 }
 
