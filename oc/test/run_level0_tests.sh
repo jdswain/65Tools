@@ -55,13 +55,13 @@ get_dependencies() {
 for lib in Out Runtime TestTool; do
   libfile="$SCRIPT_DIR/$lib.Mod"
   if [ -f "$libfile" ]; then
-    "$OC" "$libfile" /s >/dev/null 2>&1
+    "$OC" "$libfile" -s >/dev/null 2>&1
   fi
 done
 
 # Compile ExportVar (dependency of L0_ImportVar)
 if [ -f "$SCRIPT_DIR/ExportVar.Mod" ]; then
-  "$OC" "$SCRIPT_DIR/ExportVar.Mod" /s >/dev/null 2>&1
+  "$OC" "$SCRIPT_DIR/ExportVar.Mod" -s >/dev/null 2>&1
 fi
 
 echo "=== Level 0: Legacy / Integration Tests ==="

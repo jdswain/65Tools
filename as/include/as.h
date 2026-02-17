@@ -72,5 +72,7 @@ void as_define_macro(char *ident, MacroDef *value);
 
 char *cpu_string(void);
 
+/* Import .smb files for inter-module calls */
+void as_import(const char *modname);
 
 #endif

@@ -44,6 +44,7 @@ enum FileType {
   FileIntel,      /* .hex */
   FileTIM,        /* .tim */
   FileBinary,     /* .bin */
+  File816,        /* .816 Oberon module */
   FileLinkMap,    /* .map */
   FileUnknown,
 };

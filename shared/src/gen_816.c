@@ -344,16 +344,16 @@ void gen_816(const char* filename, int line_num, Instr *instr, AddrMode mode, in
     switch( mode ) {
     case DirectPage:
     case Absolute:
-    case AbsoluteLong:                   ol(0x22, value1); return;
+    case AbsoluteLong:                   if (relocC < maxReloc) reloc[relocC++] = addr; ol(0x22, value1); return;
     default:                             break;
     }
     break;
   case sJSR:
     switch( mode ) {
     case DirectPage:
-    case Absolute:                       ow(0x20, value1); return;
+    case Absolute:                       if (relocC < maxReloc) reloc[relocC++] = addr; ow(0x20, value1); return;
     case AbsoluteIndexedIndirect:        ow(0xfc, value1); return;
-    case AbsoluteLong:                   ol(0x22, value1); return;
+    case AbsoluteLong:                   if (relocC < maxReloc) reloc[relocC++] = addr; ol(0x22, value1); return;
     default:                             break;
     }
     break;
@@ -466,7 +466,7 @@ void gen_816(const char* filename, int line_num, Instr *instr, AddrMode mode, in
     switch( mode ) {
     case Immediate:
     case DirectPage:
-    case Absolute:                        ow(0x62, value1); return;
+    case Absolute:                        orl(filename, line_num, 0x62, value1); return;
     default:                              break;
     }
     break;

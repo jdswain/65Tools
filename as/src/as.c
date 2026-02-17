@@ -1,4 +1,6 @@
 #include <stdio.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #include "memory.h"
 #include "scanner.h"
@@ -44,6 +46,7 @@ bool list; // Listing on or off
 // End Globals
 
 void as_print_include_paths(void);
+extern void create_standard_file(void);
 
 void help(void) {
   printf("as version " AS_VERSION " - 65XXX Assembler - Copyright 2020 Jason Swain.\n"
@@ -243,11 +246,11 @@ void as_cleanup(void)
   // as_print_include_paths();
 }
 
-void create_standard_file(void)
+static void create_builtin_symbols(void)
 {
   int a, b, c;
   char *buffer = as_malloc(12);
-  
+
   sscanf(AS_VERSION, "%d.%d.%d", &a, &b, &c);
   snprintf(buffer, 12, "%d", a*10000 + b*100 + c);
   Object *value = object_new(Const, typeString);
@@ -255,7 +258,7 @@ void create_standard_file(void)
   /* Can't set with as_define_symbol */
   scope_add_object("__65AS__", value);
   object_release(value);
-  
+
   // Special constants
   define_bool("off", 0);
   define_bool("on", 1);
@@ -273,21 +276,31 @@ void as_open_output(const char *name)
     elf_context = elf_create(name, EM_816);
     elf_context->ehdr->e_type = ET_EXEC;
     create_standard_file();
+    create_builtin_symbols();
     break;
   case FileObject:
     elf_context = elf_create(name, EM_816);
     elf_context->ehdr->e_type = ET_REL;
     create_standard_file();
+    create_builtin_symbols();
     break;
   case FileLib:
     elf_context = elf_create(name, EM_816);
     elf_context->ehdr->e_type = ET_EXEC;
     create_standard_file();
+    create_builtin_symbols();
     break;
   case FileDylib:
     elf_context = elf_create(name, EM_816);
     elf_context->ehdr->e_type = ET_DYN;
     create_standard_file();
+    create_builtin_symbols();
+    break;
+  case File816:
+    elf_context = elf_create(name, EM_816);
+    elf_context->ehdr->e_type = ET_EXEC;
+    create_standard_file();
+    create_builtin_symbols();
     break;
   case FileNone:
   case FileBinary:
@@ -299,6 +312,7 @@ void as_open_output(const char *name)
     elf_context = elf_create(name, EM_02);
     elf_context->ehdr->e_type = ET_EXEC;
     create_standard_file();
+    create_builtin_symbols();
     break;
   case FileAsmSrc:
   case FileLinkMap:
@@ -318,12 +332,9 @@ void as_write_symbols(MapNode *node)
   if (node != 0) {
 	as_write_symbols(node->left);
     if (!node->value->is_local) {
-	  unsigned char info = 0;
-	  // We shouldn't write local symbols to the symbol table, but it's useful
-	  // for debugging
-	  if (node->value->is_local) info &= STB_LOCAL;
-	  if (node->value->is_global) info &= STB_GLOBAL;
-	  elf_symbol_create(elf_context, node->key, node->value->int_val, info, 0);
+	  unsigned char bind = node->value->is_global ? STB_GLOBAL : STB_LOCAL;
+	  unsigned char info = ELF32_ST_INFO(bind, 0);
+	  elf_symbol_create(elf_context, node->key, node->value->int_val, 0, info);
     }
 	as_write_symbols(node->right);
   }
@@ -338,7 +349,7 @@ void as_compile(const char *filename)
   
   bf_init();
   
-  if (bf_open(filename)) {
+  if (bf_open(filename) >= 0) {
     switch (as_file_type(filename)) {
     case FileAsmSrc:
       printf("Assembling '%s'\n", filename);
@@ -354,13 +365,16 @@ void as_compile(const char *filename)
     bf_close();
 	if (error_count == 0) {
 	  _pass++;
+	  codegen_current_pass = _pass;
 	  code_len = interp_run(filename);
 	  while (code_len != last_code_len) {
 		_pass++;
+		codegen_current_pass = _pass;
 		last_code_len = code_len;
 		code_len = interp_run(filename);
 	  }
 	  _pass = 0;
+	  codegen_current_pass = 0;
 	  interp_run(filename); // Output pass
 	  as_write_symbols(scope->desc);
 	} else {
@@ -402,6 +416,9 @@ void as_close_output(void)
     break;
   case FileBinary:
     elf_write_binary(elf_context);
+    break;
+  case File816:
+    elf_write_816(elf_context);
     break;
   case FileAsmSrc:
   case FileLinkMap:
@@ -604,5 +621,206 @@ void as_print_include_paths(void)
   } else {
     printf("No include paths.\n");
   }
+}
+
+/* .smb file reading for import directive */
+
+static int smb_read_byte(int fd) {
+  unsigned char b;
+  if (read(fd, &b, 1) != 1) return -1;
+  return b;
+}
+
+static int32_t smb_read_int32(int fd) {
+  unsigned char buf[4];
+  if (read(fd, buf, 4) != 4) return 0;
+  return buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24);
+}
+
+static int smb_read_string(int fd, char *buf, int maxlen) {
+  int i = 0;
+  unsigned char ch;
+  while (i < maxlen - 1) {
+    if (read(fd, &ch, 1) != 1) break;
+    buf[i++] = ch;
+    if (ch == 0) return i;
+  }
+  buf[i] = 0;
+  return i;
+}
+
+static int32_t smb_read_num(int fd) {
+  int32_t x = 0;
+  int shift = 0;
+  unsigned char b;
+  do {
+    if (read(fd, &b, 1) != 1) return 0;
+    x |= (int32_t)(b & 0x7F) << shift;
+    shift += 7;
+  } while (b & 0x80);
+  /* Sign extend */
+  if ((b & 0x40) && shift < 32) {
+    x |= -(1 << shift);
+  }
+  return x;
+}
+
+/* Skip an OutType encoding in .smb without fully parsing it */
+static void smb_skip_type(int fd) {
+  int ref = (int8_t)smb_read_byte(fd);
+  if (ref < 0) return; /* back-reference, done */
+
+  int form = smb_read_byte(fd);
+
+  if (form == 7) { /* ORB_Pointer */
+    smb_skip_type(fd);
+  } else if (form == 12) { /* ORB_Array */
+    smb_skip_type(fd);
+    smb_read_num(fd); /* len */
+    smb_read_num(fd); /* size */
+  } else if (form == 13) { /* ORB_Record */
+    smb_skip_type(fd); /* base */
+    /* skip 3 Nums: extension level, descr address, size */
+    smb_read_num(fd);
+    smb_read_num(fd);
+    smb_read_num(fd);
+    /* skip fields until class==0 */
+    int cls;
+    while ((cls = smb_read_byte(fd)) != 0) {
+      char fname[64];
+      if (cls == 4) { /* ORB_Fld */
+        smb_read_string(fd, fname, sizeof(fname));
+        smb_skip_type(fd);
+        smb_read_num(fd); /* offset */
+      } else {
+        /* hidden pointer field: class != ORB_Fld */
+        smb_read_byte(fd); /* 0 */
+        smb_skip_type(fd);
+        smb_read_num(fd); /* offset */
+      }
+    }
+  } else if (form == 10) { /* ORB_Proc */
+    smb_skip_type(fd); /* return type */
+    /* skip params until class==0 */
+    int cls;
+    while ((cls = smb_read_byte(fd)) != 0) {
+      smb_read_byte(fd); /* rdo */
+      smb_skip_type(fd); /* param type */
+    }
+  }
+  /* basic types (1-6, 8, 9): no extra data */
+
+  /* re-export marker */
+  int reexport = smb_read_byte(fd);
+  if (reexport != 0) {
+    char str[64];
+    smb_read_string(fd, str, sizeof(str)); /* module name */
+    smb_read_int32(fd);                    /* key */
+    smb_read_string(fd, str, sizeof(str)); /* original name */
+  }
+}
+
+void as_import(const char *modname)
+{
+  char smbpath[256];
+  int fd = -1;
+
+  /* Try 1: relative to output file directory */
+  const char *outfile = elf_context->filename;
+  const char *slash = strrchr(outfile, '/');
+  if (slash) {
+    int dirlen = (int)(slash - outfile) + 1;
+    memcpy(smbpath, outfile, dirlen);
+    smbpath[dirlen] = 0;
+    strncat(smbpath, modname, sizeof(smbpath) - strlen(smbpath) - 5);
+    strcat(smbpath, ".smb");
+    fd = open(smbpath, O_RDONLY);
+  }
+
+  /* Try 2: relative to source file directory */
+  if (fd < 0 && file && file->filename[0]) {
+    const char *srcslash = strrchr(file->filename, '/');
+    if (srcslash) {
+      int dirlen = (int)(srcslash - file->filename) + 1;
+      memcpy(smbpath, file->filename, dirlen);
+      smbpath[dirlen] = 0;
+    } else {
+      smbpath[0] = 0;
+    }
+    strncat(smbpath, modname, sizeof(smbpath) - strlen(smbpath) - 5);
+    strcat(smbpath, ".smb");
+    fd = open(smbpath, O_RDONLY);
+  }
+
+  /* Try 3: current directory */
+  if (fd < 0) {
+    snprintf(smbpath, sizeof(smbpath), "%s.smb", modname);
+    fd = open(smbpath, O_RDONLY);
+  }
+
+  if (fd < 0) {
+    as_error("Cannot open symbol file: %s.smb", modname);
+    return;
+  }
+
+  /* Read .smb header */
+  smb_read_int32(fd); /* placeholder */
+  int32_t key = smb_read_int32(fd);
+  char name[64];
+  smb_read_string(fd, name, sizeof(name));
+  smb_read_byte(fd); /* versionkey */
+
+  /* Assign mno (1-based) */
+  int mno = elf_context->import_count + 1;
+
+  /* Store import in elf_context */
+  if (elf_context->import_count < MAX_IMPORTS) {
+    strncpy(elf_context->imports[elf_context->import_count].name, modname, 63);
+    elf_context->imports[elf_context->import_count].name[63] = 0;
+    elf_context->imports[elf_context->import_count].key = key;
+    elf_context->import_count++;
+  }
+
+  /* Create scope object for the module */
+  Object *mod = object_new(Const, typeNoType);
+  mod->mode = Var;
+  mod->is_import = true;
+  scope_add_object(modname, mod);
+
+  /* Read exports */
+  int class;
+  while ((class = smb_read_byte(fd)) != 0) {
+    char ename[64];
+    smb_read_string(fd, ename, sizeof(ename));
+    smb_skip_type(fd);
+
+    int32_t exno;
+    if (class == 1) { /* ORB_Const = procedure */
+      exno = smb_read_num(fd);
+    } else if (class == 2) { /* ORB_Var */
+      exno = smb_read_num(fd);
+    } else if (class == 3) { /* ORB_Par */
+      exno = smb_read_num(fd);
+    } else if (class == 5) { /* ORB_Typ */
+      exno = smb_read_num(fd);
+    } else {
+      exno = smb_read_num(fd);
+    }
+
+    /* Create child entry: value = (mno << 16) | exno
+       This encodes as bank=mno, addr=exno for JSL */
+    Object *entry = object_new(Const, typeInt);
+    entry->int_val = (mno << 16) | (exno & 0xFFFF);
+    entry->is_import = true;
+
+    /* Add to module's desc map */
+    mod->desc = map_set(mod->desc, as_strdup(ename), entry);
+    object_release(entry);
+  }
+
+  close(fd);
+  object_release(mod);
+
+  printf("  Imported %s (key=%d, mno=%d)\n", modname, key, mno);
 }
 

@@ -8,7 +8,7 @@ VAR
     byteValue: BYTE;
     intValue: INTEGER;
 BEGIN
-    SYSTEM.GET(CODE_START, byteValue);  (* Read first byte of code as BYTE *)
+    SYSTEM.GET(0, CODE_START, byteValue);  (* Read first byte of code as BYTE *)
     intValue := byteValue;              (* Convert BYTE to INTEGER *)
 END Main;
 

@@ -5,7 +5,7 @@ MODULE MinimalLTTest;
 	  CONST
 		 ACIA_DATA = 0C000H;
    BEGIN
-      SYSTEM.PUT(ACIA_DATA, value);
+      SYSTEM.PUT(0, ACIA_DATA, value);
    END PutChar;
 
 BEGIN

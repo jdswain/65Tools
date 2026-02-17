@@ -120,6 +120,7 @@ void SetSourceDirectory(const char *source_filename);
 void MakeFileName(char *FName, const char *name, const char *ext);
 void Import(char *modid, char *modid1);
 void Export(const char *modid, BOOLEAN *newSF, int32_t *key);
+void AddSearchPath(const char *path);
 void ORB_Init(void);  /* renamed from Init */
 void ORB_Initialize(void);  /* Module initialization */
 

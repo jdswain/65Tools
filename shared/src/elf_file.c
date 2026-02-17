@@ -9,6 +9,7 @@
 
 #include "memory.h"
 #include "buffered_file.h" // For as_error
+#include "codegen.h"       // For relocC, reloc[]
 
 elf_context_t *elf_context;
 elf_section_t *section;
@@ -568,15 +569,15 @@ elf_section_t *elf_section_create(elf_context_t *context,
   ELF_Word name = 0;
   if (nm != 0) {
 	name = elf_string_locate(elf_context->shstrtab, nm);
-	if (nm == 0) {
+	if (name == 0) {
 	  name = elf_string_create(elf_context->shstrtab, nm);
 	}
   }
-  
+
   elf_section_t *section = 0;
   elf_section_t **sections = context->sections;
   for (int i = 0; i < context->ehdr->e_shnum; i++) {
-	section = *sections;
+	section = *sections++;
 	if (section->shdr->sh_name == name) return section;
   }
 
@@ -821,6 +822,292 @@ void buf_reset(unsigned char **pbuf, ELF_Word *num_ptr)
     *pbuf = 0;
     *num_ptr = 0;
   }
+}
+
+/* .816 Oberon module format writer */
+
+static void write_byte(int fd, unsigned char b) {
+  write(fd, &b, 1);
+}
+
+static void write_int32(int fd, int32_t v) {
+  unsigned char buf[4];
+  buf[0] = v & 0xFF;
+  buf[1] = (v >> 8) & 0xFF;
+  buf[2] = (v >> 16) & 0xFF;
+  buf[3] = (v >> 24) & 0xFF;
+  write(fd, buf, 4);
+}
+
+static void write_string(int fd, const char *s) {
+  int len = strlen(s) + 1;
+  write(fd, s, len);
+}
+
+static void elf_write_smb(elf_context_t *context, const char *modname,
+                           int nofent, int code_start);
+
+void elf_write_816(elf_context_t *context)
+{
+  /* Extract module name from filename (strip path and .816 extension) */
+  const char *name = strrchr(context->filename, '/');
+  if (name) name++; else name = context->filename;
+  char modname[64];
+  strncpy(modname, name, sizeof(modname) - 1);
+  modname[sizeof(modname) - 1] = '\0';
+  char *dot = strrchr(modname, '.');
+  if (dot) *dot = '\0';
+
+  /* Find the text section (code) by name, same approach as elf_write_tim */
+  elf_set_section("text");
+  elf_section_t *text = section;
+  if (!text) {
+    as_error("No code section found for .816 output");
+    return;
+  }
+
+  int code_size = text->shdr->sh_size;
+  int code_start = text->shdr->sh_addr;
+  unsigned char *code = text->data;
+
+  /* Collect global symbols from symtab, sorted by address.
+     These become the module's exported procedures. */
+  elf_section_t *symtab = context->symtab;
+  int sym_count = symtab ? symtab->shdr->sh_size / sizeof(ELF_Sym) : 0;
+
+  /* Count exported globals (skip _init which is the entry point, skip non-global) */
+  int nofent = 0;
+  int entry = 0;
+  int has_init = 0;
+
+  for (int i = 0; i < sym_count; i++) {
+    ELF_Sym *sym = (ELF_Sym *)(symtab->data + i * sizeof(ELF_Sym));
+    const char *sname = elf_string_get(context->shstrtab, sym->st_name);
+    if (strcmp(sname, "_init") == 0) {
+      entry = sym->st_value - code_start;
+      has_init = 1;
+    } else if (ELF32_ST_BIND(sym->st_info) == STB_GLOBAL) {
+      nofent++;
+    }
+  }
+
+  /* Compute a simple key from module name */
+  int32_t key = 0;
+  for (const char *p = modname; *p; p++) {
+    key = key * 31 + *p;
+  }
+
+  int fd = open(context->filename, O_CREAT | O_TRUNC | O_WRONLY, S_IRWXU);
+  if (fd < 0) {
+    as_error("Cannot create .816 file: %s", context->filename);
+    return;
+  }
+
+  /* Header */
+  write_string(fd, modname);           /* module name */
+  write_int32(fd, key);                /* key */
+  write_byte(fd, 1);                   /* version */
+  write_int32(fd, 0);                  /* size (placeholder) */
+
+  /* Import table */
+  for (int i = 0; i < context->import_count; i++) {
+    write_string(fd, context->imports[i].name);
+    write_int32(fd, context->imports[i].key);
+  }
+  write_byte(fd, 0);                   /* terminator */
+
+  /* TD section (empty) */
+  write_int32(fd, 0);                  /* td_size = 0 */
+
+  /* Variable section (empty) */
+  write_int32(fd, 0);                  /* var_size = 0 */
+
+  /* String section (empty) */
+  write_int32(fd, 0);                  /* str_size = 0 */
+
+  /* Code section */
+  write_int32(fd, code_size);
+  if (code_size > 0) {
+    write(fd, code, code_size);
+  }
+
+  /* Export procedures name table (global symbols only, skip _init) */
+  for (int i = 0; i < sym_count; i++) {
+    ELF_Sym *sym = (ELF_Sym *)(symtab->data + i * sizeof(ELF_Sym));
+    if (ELF32_ST_BIND(sym->st_info) != STB_GLOBAL) continue;
+    const char *sname = elf_string_get(context->shstrtab, sym->st_name);
+    if (strcmp(sname, "_init") != 0) {
+      write_string(fd, sname);
+      write_int32(fd, sym->st_value - code_start);
+    }
+  }
+  write_byte(fd, 0);                   /* terminator */
+
+  /* nofent + entry */
+  write_int32(fd, nofent);
+  write_int32(fd, entry);
+
+  /* Export values table (one per export, indexed by exno) */
+  int exno = 1;
+  for (int i = 0; i < sym_count; i++) {
+    ELF_Sym *sym = (ELF_Sym *)(symtab->data + i * sizeof(ELF_Sym));
+    if (ELF32_ST_BIND(sym->st_info) != STB_GLOBAL) continue;
+    const char *sname = elf_string_get(context->shstrtab, sym->st_name);
+    if (strcmp(sname, "_init") != 0) {
+      write_int32(fd, sym->st_value - code_start);  /* code offset */
+      exno++;
+    }
+  }
+
+  /* Pointer table (empty, terminated by -1) */
+  write_int32(fd, -1);
+
+  /* fixorgP, fixorgD, fixorgT (all zero) */
+  write_int32(fd, 0);
+  write_int32(fd, 0);
+  write_int32(fd, 0);
+
+  /* TD fixup table (empty) */
+  write_int32(fd, 0);
+
+  /* Relocation table */
+  write_int32(fd, relocC);
+  for (int i = 0; i < relocC; i++) {
+    write_int32(fd, reloc[i]);
+  }
+
+  /* Footer */
+  write_int32(fd, entry);
+  write_byte(fd, 'O');
+
+  close(fd);
+
+  printf("  %s.816  %d bytes code, %d exports\n", modname, code_size, nofent);
+
+  /* Generate .smb symbol file alongside .816 */
+  elf_write_smb(context, modname, nofent, code_start);
+}
+
+/* Variable-length number encoding (same as Oberon Files.WriteNum) */
+static void write_num(int fd, int32_t x) {
+  while (x < -64 || x >= 64) {
+    write_byte(fd, (x & 0x7F) | 0x80);
+    x >>= 7;
+  }
+  write_byte(fd, x & 0x7F);
+}
+
+/*
+   Generate .smb (Oberon symbol file) for an assembly module.
+   This allows Oberon modules to IMPORT the assembly module's exports.
+
+   Format matches ORB.Export output:
+   - int32 placeholder (0)
+   - int32 key (checksum, written after computing)
+   - string module_name
+   - byte versionkey (1)
+   - for each export:
+     - byte class (ORB_Const=1 for procedures)
+     - string name
+     - OutType: byte(0) byte(ORB_Proc=10) byte(-ORB_NoTyp) byte(0) byte(0)
+     - WriteNum(exno)
+   - pad to 4-byte boundary with 0 bytes
+   - then rewrite key as checksum of all int32s
+*/
+static void elf_write_smb(elf_context_t *context, const char *modname,
+                           int nofent, int code_start)
+{
+  /* Build .smb filename from .816 filename */
+  char smbname[256];
+  strncpy(smbname, context->filename, sizeof(smbname) - 1);
+  smbname[sizeof(smbname) - 1] = '\0';
+  char *dot = strrchr(smbname, '.');
+  if (dot) strcpy(dot, ".smb");
+  else strcat(smbname, ".smb");
+
+  int fd = open(smbname, O_CREAT | O_TRUNC | O_WRONLY, S_IRWXU);
+  if (fd < 0) {
+    as_error("Cannot create .smb file: %s", smbname);
+    return;
+  }
+
+  /* Header */
+  write_int32(fd, 0);          /* placeholder */
+  write_int32(fd, 0);          /* key (overwritten later) */
+  write_string(fd, modname);   /* module name */
+  write_byte(fd, 1);           /* versionkey */
+
+  /* Export each global symbol as a procedure */
+  elf_section_t *symtab = context->symtab;
+  int sym_count = symtab ? symtab->shdr->sh_size / sizeof(ELF_Sym) : 0;
+  int exno = 1;
+
+  for (int i = 0; i < sym_count; i++) {
+    ELF_Sym *sym = (ELF_Sym *)(symtab->data + i * sizeof(ELF_Sym));
+    if (ELF32_ST_BIND(sym->st_info) != STB_GLOBAL) continue;
+    const char *sname = elf_string_get(context->shstrtab, sym->st_name);
+    if (strcmp(sname, "_init") == 0) continue;
+
+    write_byte(fd, 1);           /* class = ORB_Const */
+    write_string(fd, sname);     /* procedure name */
+
+    /* Look up procedure signature */
+    elf_proc_sig_t *sig = NULL;
+    for (int s = 0; s < context->proc_sig_count; s++) {
+      if (strcmp(context->proc_sigs[s].name, sname) == 0) {
+        sig = &context->proc_sigs[s];
+        break;
+      }
+    }
+
+    /* OutType for procedure */
+    write_byte(fd, 0);           /* ref = 0 (anonymous type) */
+    write_byte(fd, 10);          /* form = ORB_Proc */
+    write_byte(fd, sig ? (sig->return_type & 0xFF) : 0xF7);  /* base type ref */
+
+    if (sig && sig->nparams > 0) {
+      /* Write params in REVERSE order (matches Oberon OutPar) */
+      for (int p = sig->nparams - 1; p >= 0; p--) {
+        int cls = sig->param_var[p] ? 2 : 1;  /* 2=Par(VAR), 1=Var */
+        write_byte(fd, cls);                    /* param class */
+        write_byte(fd, 0);                      /* rdo = false */
+        write_byte(fd, sig->param_types[p] & 0xFF);  /* type back-ref */
+      }
+    }
+    write_byte(fd, 0);           /* params terminator */
+    write_byte(fd, 0);           /* no re-export */
+
+    write_num(fd, exno);         /* export number */
+    exno++;
+  }
+
+  /* Pad to 4-byte boundary */
+  off_t pos = lseek(fd, 0, SEEK_CUR);
+  while (pos % 4 != 0) {
+    write_byte(fd, 0);
+    pos++;
+  }
+
+  close(fd);
+
+  /* Compute checksum: sum all int32s in the file */
+  fd = open(smbname, O_RDONLY);
+  if (fd < 0) return;
+
+  int32_t sum = 0, word;
+  while (read(fd, &word, 4) == 4) {
+    sum += word;
+  }
+  close(fd);
+
+  /* Write checksum at offset 4 */
+  fd = open(smbname, O_WRONLY);
+  if (fd < 0) return;
+  lseek(fd, 4, SEEK_SET);
+  write_int32(fd, sum);
+  close(fd);
+
+  printf("  %s  %d exports\n", smbname, nofent);
 }
 
 

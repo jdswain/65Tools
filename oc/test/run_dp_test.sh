@@ -32,7 +32,7 @@ echo ""
 for lib in Out L9_Lib L9_Base L9_Mid L9_TypeBase L9_TypeLib; do
   libfile="$SCRIPT_DIR/$lib.Mod"
   if [ -f "$libfile" ]; then
-    compile_output=$("$OC" "$libfile" /s 2>&1)
+    compile_output=$("$OC" "$libfile" -s 2>&1)
     if echo "$compile_output" | grep -q "  pos [0-9]"; then
       echo "ERROR: Failed to compile library $lib"
       echo "$compile_output" | grep "  pos [0-9]" | head -3 | sed 's/^/      /'
@@ -92,12 +92,14 @@ for expected_file in "$SCRIPT_DIR"/L[0-9]_*.expected "$SCRIPT_DIR"/L[0-9][0-9]_*
   fi
 
   # Auto-detect awk pattern based on expected file convention:
-  # If expected starts with "OK", use pattern capturing from first "Initialising at"
-  # Otherwise, use pattern capturing from LAST "Initialising at" only
+  # L0 tests and tests starting with "OK": capture from first "Initialising at"
+  #   (expected includes library init output like "OK" or "TTB")
+  # Other tests: capture from LAST "Initialising at" only
+  #   (expected does not include library init output)
   expected=$(cat "$expected_file")
   first_line=$(echo "$expected" | head -1)
 
-  if [ "$first_line" = "OK" ]; then
+  if [ "$first_line" = "OK" ] || [[ "$basename" == L0_* ]]; then
     actual=$(echo "$full_output" | awk '/^Initialising at/{found=1; next} /^Executed /{exit} found{print}')
   else
     actual=$(echo "$full_output" | awk '/^Initialising at/{found=1; buf=""; next} /^Executed /{exit} found{buf = buf (buf ? "\n" : "") $0} END{print buf}')

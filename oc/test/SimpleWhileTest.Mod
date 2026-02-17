@@ -5,7 +5,7 @@ VAR i: INTEGER;
 
 PROCEDURE Put(adr: LONGINT; x: CHAR);
 BEGIN
-  SYSTEM.PUT(adr, x)
+  SYSTEM.PUT(0, adr, x)
 END Put;
 
 BEGIN

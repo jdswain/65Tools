@@ -41,8 +41,10 @@
 // - use R8 as StaticBase
 
 #define REG_SIZE 2  // 16-bit registers
+#define SB_DP 0x00  // SB lives at DP $00-$01
+
 static LONGINT reg_addr(int reg) {
-    return reg * REG_SIZE;  // $00, $02, $04, $06, $08, $0A, $0C, $0E, $10, $12, $14, $16
+    return reg * REG_SIZE + 2;  // R[0]=$02, R[1]=$04, ... R[14]=$1E
 }
 
 // Internal item modes
@@ -148,11 +150,11 @@ static int fp_fixup_count[FP_OPS];
 static LONGINT fp_sub_addr[FP_OPS];
 
 // Returns DP address of the correct module's var_base.
-// mno >= 0 (own module): returns reg_addr(SB), no code emitted.
+// mno >= 0 (own module): returns SB_DP ($00), no code emitted.
 // mno < 0 (import): emits LDA #(-mno) / STA SB_TEMP with relocation.
 static int GetSB(LONGINT mno) {
   if (mno >= 0) {
-    return reg_addr(SB);
+    return SB_DP;
   }
   Set16(1, 1);
   reloc[relocC++] = ORG_pc;
@@ -568,16 +570,16 @@ static int load(ORG_Item *x) {
               if (x->type->form == ORB_Pointer || x->type->form == ORB_NilTyp || x->type->form == ORB_Real || x->type->form == ORB_Proc) {
                 // 4-byte load: (addr+bank for pointer/proc, low+high for REAL) into 2 registers
                 Set16(1, 1);
-                codegen_gen(sLDA, StackRelative, x->a, 0);                // LDA offset,S (low word)
+                codegen_gen(sLDA, StackRelative, x->a + frame, 0);          // LDA offset,S (low word)
                 codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);           // STA $reg
-                codegen_gen(sLDA, StackRelative, x->a + 2, 0);            // LDA offset+2,S (high word)
+                codegen_gen(sLDA, StackRelative, x->a + 2 + frame, 0);    // LDA offset+2,S (high word)
                 codegen_gen(sSTA, DirectPage, reg_addr(RH + 1), 0);       // STA $reg+1
                 x->r = RH;
                 incR(); incR();
               } else if (x->type->size == 1) {
                 // Byte load from stack (handles BYTE, BOOL, CHAR)
                 Set8(1, 0);
-                codegen_gen(sLDA, StackRelative, x->a, 0);                // LDA x->a,S (8-bit)
+                codegen_gen(sLDA, StackRelative, x->a + frame, 0);          // LDA x->a,S (8-bit)
                 Set16(1, 0);
                 codegen_gen(sAND, Immediate, 0x00FF, 0);                  // AND #$00FF zero-extend
                 codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);           // STA $reg (16-bit)
@@ -586,7 +588,7 @@ static int load(ORG_Item *x) {
               } else {
                 // Word load from stack (handles INTEGER and other multi-byte types)
                 Set16(1, 1);
-                codegen_gen(sLDA, StackRelative, x->a, 0);                // LDA x->a,S (16-bit)
+                codegen_gen(sLDA, StackRelative, x->a + frame, 0);          // LDA x->a,S (16-bit)
                 codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);           // STA $reg
                 x->r = RH;
                 incR();
@@ -632,11 +634,11 @@ static int load(ORG_Item *x) {
 		  // Load the 4-byte pointer from stack into two registers
 		  Set16(1, 1);
 		  // Load 16-bit address into first register
-		  codegen_gen(sLDA, StackRelative, x->a, 0);        // LDA param_offset,S (load address)
+		  codegen_gen(sLDA, StackRelative, x->a + frame, 0);  // LDA param_offset,S (load address)
 		  codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);   // STA $reg0 (store address)
-		  
-		  // Load data bank into second register  
-		  codegen_gen(sLDA, StackRelative, x->a + 2, 0);    // LDA param_offset+2,S (load data bank)
+
+		  // Load data bank into second register
+		  codegen_gen(sLDA, StackRelative, x->a + 2 + frame, 0); // LDA param_offset+2,S (load data bank)
 		  codegen_gen(sSTA, DirectPage, reg_addr(RH + 1), 0); // STA $reg1 (store data bank)
 		  
 		  // Now dereference through the pointer using DirectPageIndirectLong
@@ -800,9 +802,9 @@ static void loadAdr(ORG_Item *x) {
         // 65C816: Load address from VAR parameter (global variables only for now)
         // The stack contains the absolute address of the variable
         Set16(1, 1);
-        codegen_gen(sLDA, StackRelative, x->a, 0);               // LDA param_offset,S (load address)
+        codegen_gen(sLDA, StackRelative, x->a + frame, 0);         // LDA param_offset,S (load address)
         codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);          // STA $reg
-        codegen_gen(sLDA, StackRelative, x->a + 2, 0);           // LDA param_offset,S (load address)
+        codegen_gen(sLDA, StackRelative, x->a + 2 + frame, 0);   // LDA param_offset+2,S (load address)
         codegen_gen(sSTA, DirectPage, reg_addr(RH + 1), 0);      // STA $reg
         if (x->b != 0) {
             // Add offset if present
@@ -837,10 +839,12 @@ static void loadCond(ORG_Item *x) {
 	  x->r = 15 - x->a * 8;
 	} else {
 	  load(x);
-	  // 65C816: Load sets Z flag. For boolean: 0=FALSE (Z=1), non-zero=TRUE (Z=0)
-	  // We don't need explicit CMP if load already set flags appropriately
-	  // Check if we need to compare with 0 (similar to RISC5 check)
-	  // For now, assume load always sets flags correctly
+	  // 65C816: Explicitly load the register to set Z flag.
+	  // load() may be a no-op when item is already in Reg mode (e.g. function return),
+	  // and even when load() generates LDA+STA, the STA doesn't affect flags.
+	  // So always emit LDA R[x->r] to ensure Z flag reflects the actual value.
+	  Set16(1, 1);
+	  codegen_gen(sLDA, DirectPage, reg_addr(x->r), 0);
 	  x->r = NE;  // NE (9) = branch if not zero (TRUE condition)
 	  RH--;
 	}
@@ -865,7 +869,7 @@ static void loadStringAdr(ORG_Item *x) {
     // 65C816: Compute string address = SB + ORG_varsize + x->a
     // We need the ADDRESS itself (for use as a pointer), not the data at that address.
     Set16(1, 1);
-    codegen_gen(sLDA, DirectPage, reg_addr(SB), 0);           // Load SB value
+    codegen_gen(sLDA, DirectPage, SB_DP, 0);           // Load SB value
     codegen_gen(sCLC, Implied, 0, 0);                          // CLC
     codegen_gen(sADC, Immediate, ORG_varsize + x->a, 0);      // Add string offset
     codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);            // Store address
@@ -959,12 +963,20 @@ void ORG_Index(ORG_Item *x, ORG_Item *y) {
         if ((y->a < 0) || (y->a >= lim)) {
             ORS_Mark("bad index");
         }
+        // 65C816: Check if computed offset would exceed 8-bit StackRelative limit
+        if ((x->mode == ORB_Var) && (x->r > 0) && (y->a * s + x->a + frame > 255)) {
+            // Offset too large for LDA nn,S — use computed address (TSC+ADC) path
+            // Convert constant index to register and fall through to runtime path
+            load(y);
+            goto runtime_index;
+        }
         if ((x->mode == ORB_Var) || (x->mode == RegI)) {
             x->a = y->a * s + x->a;
         } else if (x->mode == ORB_Par) {
             x->b = y->a * s + x->b;
         }
     } else {
+        runtime_index:
         // Runtime indexing (non-constant index OR open array)
         load(y);
         if (check) {
@@ -1062,9 +1074,9 @@ void ORG_DeRef(ORG_Item *x) {
     if (x->mode == ORB_Var) {
         if (x->r > 0) {
             // Local pointer variable: load 4 bytes from stack
-            codegen_gen(sLDA, StackRelative, x->a, 0);                // addr word
+            codegen_gen(sLDA, StackRelative, x->a + frame, 0);        // addr word
             codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);
-            codegen_gen(sLDA, StackRelative, x->a + 2, 0);            // bank word
+            codegen_gen(sLDA, StackRelative, x->a + 2 + frame, 0);    // bank word
             codegen_gen(sSTA, DirectPage, reg_addr(RH + 1), 0);
         } else {
             // Global pointer variable: load 4 bytes through SB
@@ -1086,9 +1098,9 @@ void ORG_DeRef(ORG_Item *x) {
         incR(); incR();
     } else if (x->mode == ORB_Par) {
         // VAR param pointer: load the 4-byte address from stack, then load 4-byte pointer through it
-        codegen_gen(sLDA, StackRelative, x->a, 0);                    // load VAR param addr
+        codegen_gen(sLDA, StackRelative, x->a + frame, 0);              // load VAR param addr
         codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);
-        codegen_gen(sLDA, StackRelative, x->a + 2, 0);                // load VAR param bank
+        codegen_gen(sLDA, StackRelative, x->a + 2 + frame, 0);        // load VAR param bank
         codegen_gen(sSTA, DirectPage, reg_addr(RH + 1), 0);
         // Load 4-byte pointer through long indirect
         codegen_gen(sLDY, Immediate, x->b + 2, 0);
@@ -1667,22 +1679,13 @@ void ORG_DivOp(LONGINT op, ORG_Item *x, ORG_Item *y) {
             }
         } else if ((y->mode == ORB_Const) && (y->a >= 2) && (ORG_log2(y->a, &e) == 1)) {
             load(x);
-            codegen_gen(sCMP, Immediate, 0x8000, 0); // Set carry if negative
-            codegen_gen(sAND, Immediate, 0x7FFF, 0); // Clear the sign bit
-            if (e > 1) {
-              codegen_gen(sPHP, Implied, 0, 0); // Save the carry
-              codegen_gen(sCLC, Implied, 0, 0); // Clear  the carry
-              codegen_gen(sROR, Implied, 0, 0); // Divide by two
-              if (e > 2) {
-                codegen_gen(sROR, Implied, 0, 0); // Divide by two
-              }
-              if (e > 3) {
-                codegen_gen(sROR, Implied, 0, 0); // Divide by two
-              }
-              codegen_gen(sPLP, Implied, 0, 0); // Restore the carry
+            // Arithmetic shift right e times (signed divide by power of 2)
+            // CMP #$8000 sets carry = sign bit; ROR shifts carry into bit 15
+            for (int i = 0; i < e; i++) {
+              codegen_gen(sCMP, Immediate, 0x8000, 0);
+              codegen_gen(sROR, Implied, 0, 0);
             }
-            codegen_gen(sROR, Implied, 0, 0); // Last divide by two restores the sign
-            codegen_gen(sSTA, DirectPage, reg_addr(x->r), 0); // Store result back
+            codegen_gen(sSTA, DirectPage, reg_addr(x->r), 0);
         } else if (y->mode == ORB_Const) {
             if (y->a > 0) {
                 load(x);
@@ -2164,33 +2167,33 @@ void ORG_Store(ORG_Item *x, ORG_Item *y) {
                     // 4-byte store: (pointer, proc, or REAL) from 2 registers
                     Set16(1, 1);
                     codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);     // LDA low word
-                    codegen_gen(sSTA, StackRelative, x->a, 0);            // STA offset,S
+                    codegen_gen(sSTA, StackRelative, x->a + frame, 0);    // STA offset,S
                     codegen_gen(sLDA, DirectPage, reg_addr(y->r + 1), 0); // LDA high word
-                    codegen_gen(sSTA, StackRelative, x->a + 2, 0);        // STA offset+2,S
+                    codegen_gen(sSTA, StackRelative, x->a + 2 + frame, 0); // STA offset+2,S
                     RH--;  // free extra register
                 } else if (x->type->size == 1 && y->type->size == 1) {
                     // BYTE to BYTE store (no conversion needed)
                     Set8(1, 0);
                     codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);     // LDA $reg
-                    codegen_gen(sSTA, StackRelative, x->a, 0);            // STA x->a,S (8-bit)
+                    codegen_gen(sSTA, StackRelative, x->a + frame, 0);    // STA x->a,S (8-bit)
                     Set16(1, 0);
                 } else if (x->type->size == 1 && y->type->size > 1) {
                     // INTEGER to BYTE store (truncate to low byte)
                     Set8(1, 0);
                     codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);     // LDA $reg
-                    codegen_gen(sSTA, StackRelative, x->a, 0);            // STA x->a,S (8-bit)
+                    codegen_gen(sSTA, StackRelative, x->a + frame, 0);    // STA x->a,S (8-bit)
                     Set16(1, 0);
                 } else if (x->type->size > 1 && y->type->size == 1) {
                     // BYTE to INTEGER store (zero-extend)
                     Set16(1, 0);
                     codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);     // LDA $reg (already zero-extended from load)
-                    codegen_gen(sSTA, StackRelative, x->a, 0);            // STA x->a,S (16-bit)
+                    codegen_gen(sSTA, StackRelative, x->a + frame, 0);    // STA x->a,S (16-bit)
                     Set16(1, 0);
                 } else {
                     // INTEGER to INTEGER store (no conversion needed)
                     Set16(1, 0);
                     codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);     // LDA $reg
-                    codegen_gen(sSTA, StackRelative, x->a, 0);            // STA x->a,S (16-bit)
+                    codegen_gen(sSTA, StackRelative, x->a + frame, 0);    // STA x->a,S (16-bit)
                     Set16(1, 0);
                 }
             }
@@ -2224,18 +2227,17 @@ void ORG_Store(ORG_Item *x, ORG_Item *y) {
                     Set16(1, 0);
                 } else if (x->type->size > 1 && y->type->size == 1) {
                     // BYTE to INTEGER store (zero-extend)
-                    Set8(1, 0);
+                    // load() already zero-extends BYTE to 16-bit, so just do 16-bit store
+                    Set16(1, 1);
                     codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);
                     codegen_gen(sLDY, Immediate, x->a, 0);
                     codegen_gen(sSTA, DirectPageIndirectIndexedY, sb, 0);
-                    Set16(1, 0);
                 } else {
                     // INTEGER to INTEGER store (no conversion needed)
                     Set16(1, 1);
                     codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);
                     codegen_gen(sLDY, Immediate, x->a, 0);
                     codegen_gen(sSTA, DirectPageIndirectIndexedY, sb, 0);
-                    Set16(1, 0);
                 }
             }
         }
@@ -2246,9 +2248,9 @@ void ORG_Store(ORG_Item *x, ORG_Item *y) {
         if (y->mode == Reg) {
             Set16(1, 1);
             // Load 3-byte pointer (address + bank) from stack into temp registers
-            codegen_gen(sLDA, StackRelative, x->a, 0);              // LDA offset,S (address)
+            codegen_gen(sLDA, StackRelative, x->a + frame, 0);      // LDA offset,S (address)
             codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);          // STA $temp (address lo/hi)
-            codegen_gen(sLDA, StackRelative, x->a + 2, 0);           // LDA offset+2,S (bank)
+            codegen_gen(sLDA, StackRelative, x->a + 2 + frame, 0);   // LDA offset+2,S (bank)
             codegen_gen(sSTA, DirectPage, reg_addr(RH + 1), 0);      // STA $temp+1 (bank in lo byte)
 
             // Store value through the pointer
@@ -2456,32 +2458,21 @@ void ORG_VarParam(ORG_Item *x, ORB_Type *ftype) {
     // Check if this is a local variable - implement 24-bit address calculation
     if (x->mode == ORB_Var && x->r > 0) {
         // 65C816: Calculate 24-bit address of local variable using stack pointer
-        // For local variables, we need to store a 3-byte pointer on the stack:
-        // - First store 16-bit 0 (this writes 00 00 in first two bytes)
-        // - Then store the calculated 16-bit address (overwrites the second 00)
-        // - Result: [00] [low addr] [high addr] = 24-bit pointer with data bank 0
-        
         Set16(1, 1);
-        // Calculate the actual stack address: TSC - SEC - SBC #offset
         codegen_gen(sTSC, Implied, 0, 0);                       // TSC - get stack pointer
         codegen_gen(sCLC, Implied, 0, 0);                       // CLC - clear carry for addition
-        codegen_gen(sADC, Immediate, x->a, 0);                  // ADC #offset - add local var offset
+        codegen_gen(sADC, Immediate, x->a + frame, 0);          // ADC #offset+frame - add local var offset
         codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);         // STA $reg - store calculated address
-		
-        x->r = RH;  // Acutally RH and RH+1
+
+        x->r = RH;
         x->mode = Reg;
         incR();
 
-		// Store 16-bit 0 to define this as being in bank 0, where the stack resides
+        // Store 16-bit 0 to define this as being in bank 0, where the stack resides
         codegen_gen(sLDA, Immediate, 0, 0);                     // LDA #0
         codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);         // STA $reg (store 0)
         incR();
-        
-        return;
-    }
-    
-    // For module-level global variables (x->r <= 0), compute absolute address
-    if (x->mode == ORB_Var && x->r <= 0) {
+    } else if (x->mode == ORB_Var && x->r <= 0) {
         int sb = GetSB(x->r);
         Set16(1, 1);
         // Compute address: SB_base + offset
@@ -2552,7 +2543,7 @@ void ORG_StringParam(ORG_Item *x) {
 	//    LONGINT string_addr = MODULE_VAR_BASE + ORG_varsize + x->a;
     
     // Load lower 16 bits of address into RH
-    codegen_gen(sLDA, DirectPage, reg_addr(SB), 0);     // LDA #string_address_low
+    codegen_gen(sLDA, DirectPage, SB_DP, 0);     // LDA #string_address_low
 	codegen_gen(sCLC, Implied, 0, 0);
 	codegen_gen(sADC, Immediate, ORG_varsize + x->a, 0);
     codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);            // STA $reg
@@ -2664,7 +2655,7 @@ void ORG_For2(ORG_Item *x, ORG_Item *y, ORG_Item *w) {
     // The value is already in the accumulator, just store it to x
     if (x->mode == ORB_Var) {
 	  codegen_gen(sLDY, Immediate, x->a, 0);
-	  codegen_gen(sSTA, DirectPageIndirectIndexedY, reg_addr(SB), 0);
+	  codegen_gen(sSTA, DirectPageIndirectIndexedY, SB_DP, 0);
     } else {
         codegen_gen(sSTA, DirectPage, reg_addr(x->r), 0);
     }
@@ -2865,16 +2856,23 @@ void ORG_Call(ORG_Item *x, LONGINT r) {
 	  if (r > 0) RestoreRegs(r);
 	  RH = r;
     } else {
+	  int wide = (x->type->base->form == ORB_Pointer ||
+	              x->type->base->form == ORB_Real ||
+	              x->type->base->form == ORB_Proc);
 	  if (r > 0) {
 		// Move function result from R[0] to R[r] before restoring saved regs
 		Set16(1, 1);
 		codegen_gen(sLDA, DirectPage, reg_addr(0), 0);    // LDA R[0]
 		codegen_gen(sSTA, DirectPage, reg_addr(r), 0);     // STA R[r]
+		if (wide) {
+		  codegen_gen(sLDA, DirectPage, reg_addr(1), 0);   // LDA R[1] (bank/high word)
+		  codegen_gen(sSTA, DirectPage, reg_addr(r+1), 0); // STA R[r+1]
+		}
 		RestoreRegs(r);
 	  }
 	  x->mode = Reg;
 	  x->r = r;
-	  RH = r + 1;
+	  RH = wide ? r + 2 : r + 1;
     }
 }
 
@@ -2890,11 +2888,11 @@ void ORG_Enter(ORB_Object *params, LONGINT frame_size, BOOLEAN expo, BOOLEAN int
 	Set16(1, 1);
 	if (expo) {
 	  // Save caller's SB and load own module's SB
-	  codegen_gen(sLDA, DirectPage, reg_addr(SB), 0);   // LDA SB
+	  codegen_gen(sLDA, DirectPage, SB_DP, 0);   // LDA SB
 	  codegen_gen(sPHA, Implied, 0, 0);                  // PHA (save on stack)
 	  reloc[relocC++] = ORG_pc;                          // record for relocation
 	  codegen_gen(sLDA, Immediate, 0x0000, 0);           // LDA #var_base (patched)
-	  codegen_gen(sSTA, DirectPage, reg_addr(SB), 0);    // STA SB
+	  codegen_gen(sSTA, DirectPage, SB_DP, 0);    // STA SB
 	}
 
 	if (frame_size > 0) {
@@ -2913,7 +2911,7 @@ void ORG_Enter(ORB_Object *params, LONGINT frame_size, BOOLEAN expo, BOOLEAN int
 
 	Set16(1, 1);
 	while (param != NULL && (param->class == ORB_Var || param->class == ORB_Par)) {
-	  // For VAR parameters (ORB_Par with rdo=FALSE), we need to store the pointer value itself 
+	  // For VAR parameters (ORB_Par with rdo=FALSE), we need to store the pointer value itself
 	  // to the stack frame, not store through the pointer
 	  if (param->class == ORB_Par && param->type->form == ORB_Array && param->type->len < 0) {
 	    // Open array parameter (VAR or value): Store both array address and length
@@ -3023,7 +3021,7 @@ void ORG_Return(INTEGER form, ORG_Item *x, LONGINT size, BOOLEAN expo, BOOLEAN i
 	if (expo) {
 	  // Restore caller's SB before returning
 	  codegen_gen(sPLA, Implied, 0, 0);                  // PLA
-	  codegen_gen(sSTA, DirectPage, reg_addr(SB), 0);    // STA SB
+	  codegen_gen(sSTA, DirectPage, SB_DP, 0);    // STA SB
 	  codegen_gen(sRTL, Implied, 0, 0);                  // RTL
 	} else {
 	  codegen_gen(sRTS, Implied, 0, 0);                  // RTS
@@ -3061,8 +3059,8 @@ void ORG_Increment(LONGINT upordown, ORG_Item *x, ORG_Item *y) {
         zr = RH;
         if (is_byte) Set8(1, 0); else Set16(1, 1);
         
-        // Load from stack to register: LDA x,S -> STA $zr  
-        codegen_gen(sLDA, StackRelative, x->a, 0);
+        // Load from stack to register: LDA x,S -> STA $zr
+        codegen_gen(sLDA, StackRelative, x->a + frame, 0);
         codegen_gen(sSTA, DirectPage, reg_addr(zr), 0);
         incR();
         
@@ -3105,7 +3103,7 @@ void ORG_Increment(LONGINT upordown, ORG_Item *x, ORG_Item *y) {
 
         // Store back to stack: RISC: Put2(Str+v, zr, SP, x->a);
         codegen_gen(sLDA, DirectPage, reg_addr(zr), 0);
-        codegen_gen(sSTA, StackRelative, x->a, 0);
+        codegen_gen(sSTA, StackRelative, x->a + frame, 0);
         
         if (is_byte) Set16(1, 1);  // Restore 16-bit mode
         RH--;  // RISC: DEC(RH)
@@ -3184,7 +3182,7 @@ void ORG_Include(LONGINT inorex, ORG_Item *x, ORG_Item *y) {
         // Local variable: load from stack, modify, store back
         Set16(1, 1);
         LONGINT zr = RH;
-        codegen_gen(sLDA, StackRelative, x->a, 0);         // Load set value from stack
+        codegen_gen(sLDA, StackRelative, x->a + frame, 0);   // Load set value from stack
         codegen_gen(sSTA, DirectPage, reg_addr(zr), 0);
         incR();
 
@@ -3225,7 +3223,7 @@ void ORG_Include(LONGINT inorex, ORG_Item *x, ORG_Item *y) {
 
         // Store back to stack
         codegen_gen(sLDA, DirectPage, reg_addr(zr), 0);
-        codegen_gen(sSTA, StackRelative, orig.a, 0);
+        codegen_gen(sSTA, StackRelative, orig.a + frame, 0);
         RH--;
 
     } else {
@@ -3374,30 +3372,24 @@ void ORG_IntEn(ORG_Item *x) {
   (void)x;
 }
 
-void ORG_Get(ORG_Item *x, ORG_Item *y) {
-  // 65C816: GET(address, var) - load value from address into variable
-  // Following original Oberon: load(x); x.type := y.type; x.mode := RegI; x.a := 0; Store(y, x)
-  load(x);
-  // Allocate and zero bank register for RegI (long indirect needs 2 regs)
-  codegen_gen(sSTZ, DirectPage, reg_addr(RH), 0);
-  incR();
-  x->type = y->type;
-  x->mode = RegI;
-  x->a = 0;
-  ORG_Store(y, x);
+void ORG_Get(ORG_Item *bank, ORG_Item *addr, ORG_Item *var) {
+  // 65C816: GET(bank, address, var) - load value from [bank:address] into variable
+  load(addr);
+  load(bank);  // bank in R[RH-1], address in R[RH-2]
+  addr->type = var->type;
+  addr->mode = RegI;
+  addr->a = 0;
+  ORG_Store(var, addr);
 }
 
-void ORG_Put(ORG_Item *x, ORG_Item *y) {
-  // 65C816: PUT(address, value) - store value at address
-  // Following original Oberon: load(x); x.type := y.type; x.mode := RegI; x.a := 0; Store(x, y)
-  load(x);
-  // Allocate and zero bank register for RegI (long indirect needs 2 regs)
-  codegen_gen(sSTZ, DirectPage, reg_addr(RH), 0);
-  incR();
-  x->type = y->type;
-  x->mode = RegI;
-  x->a = 0;
-  ORG_Store(x, y);
+void ORG_Put(ORG_Item *bank, ORG_Item *addr, ORG_Item *val) {
+  // 65C816: PUT(bank, address, value) - store value at [bank:address]
+  load(addr);
+  load(bank);  // bank in R[RH-1], address in R[RH-2]
+  addr->type = val->type;
+  addr->mode = RegI;
+  addr->a = 0;
+  ORG_Store(addr, val);
 }
 
 void ORG_Copy(ORG_Item *x, ORG_Item *y, ORG_Item *z) {
@@ -3758,7 +3750,7 @@ void ORG_Header(void) {
   // SB initialisation — loader patches the $0000 to actual var_base
   reloc[relocC++] = ORG_pc;
   codegen_gen(sLDA, Immediate, 0x0000, 0);
-  codegen_gen(sSTA, DirectPage, reg_addr(SB), 0);
+  codegen_gen(sSTA, DirectPage, SB_DP, 0);
 }
 
 static LONGINT NofPtrs(ORB_Type *typ) {

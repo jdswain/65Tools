@@ -6,7 +6,7 @@ MODULE BranchTest;
     
   PROCEDURE PutChar(value: CHAR);
   BEGIN
-    SYSTEM.PUT(ACIA_DATA, value);
+    SYSTEM.PUT(0, ACIA_DATA, value);
   END PutChar;
 
   PROCEDURE TestBranch(x: INTEGER);

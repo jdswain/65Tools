@@ -9,7 +9,7 @@ MODULE PutHexTest;
 	  
    PROCEDURE PutChar(value: CHAR);
    BEGIN
-      SYSTEM.PUT(ACIA_DATA, value);
+      SYSTEM.PUT(0, ACIA_DATA, value);
    END PutChar;
    
    PROCEDURE PutHex(value: INTEGER);
@@ -38,7 +38,7 @@ MODULE PutHexTest;
    
    PROCEDURE NewLine();
    BEGIN
-      SYSTEM.PUT(ACIA_DATA, 0AX);
+      SYSTEM.PUT(0, ACIA_DATA, 0AX);
    END NewLine;
    
 BEGIN

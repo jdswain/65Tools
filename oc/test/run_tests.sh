@@ -53,7 +53,7 @@ echo "=== Oberon Compilation Tests ==="
 echo "Compiler: $OC"
 echo ""
 
-# Compile library modules first (with /s to generate .smb files)
+# Compile library modules first (with -s to generate .smb files)
 echo "--- Compiling library modules ---"
 for lib in "${LIBRARY_MODULES[@]}"; do
   libfile="$SCRIPT_DIR/$lib"
@@ -61,7 +61,7 @@ for lib in "${LIBRARY_MODULES[@]}"; do
     continue
   fi
   TOTAL=$((TOTAL + 1))
-  output=$("$OC" "$libfile" /s 2>&1)
+  output=$("$OC" "$libfile" -s 2>&1)
   if echo "$output" | grep -q "  pos [0-9]"; then
     echo "FAIL  $lib (library)"
     echo "$output" | grep "  pos [0-9]" | head -3 | sed 's/^/      /'

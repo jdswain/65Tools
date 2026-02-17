@@ -13,6 +13,6 @@ BEGIN
   END;
 
   (* Write through address using GET/PUT *)
-  SYSTEM.PUT(addr, 99);
+  SYSTEM.PUT(0, addr, 99);
   Out.Int(x, 1); Out.Ln()
 END L10_SystemAdr.

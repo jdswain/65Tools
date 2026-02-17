@@ -25,6 +25,7 @@
 #include "wdc816.h"
 #include "UART_6551.h"
 #include "R6501.h"
+#include "WD1793.h"
 
 #include "Video.h"
 
@@ -42,15 +43,15 @@ public:
   // Fetch a byte from memory
   INLINE static Byte getByte(Addr ea)
   {
-	if ((ea >= 0xC000) && (ea <= 0xC004))
+	if ((ea >= VIDEO_BASE_ADDR) && (ea < VIDEO_BASE_ADDR + VIDEO_MEM_SIZE))
+	  return video.getByte(ea - VIDEO_BASE_ADDR);
+
+	if ((ea >= 0xC000) && (ea <= 0xC00F))
 	  return uart.getByte(ea);
 
-	// if ((ea >= 0x0000) && (ea <= 0x0FF))
-	//   return r6501.getByte(ea);
+	if ((ea >= 0xC010) && (ea <= 0xC01F))
+	  return fdc.getByte(ea);
 
-	//if ((ea >= 0x9000) && (ea <= 0xA000))
-	//	return video.getByte(ea - 0x9000);
-		
     if ((ea &= memMask) < ramSize)
       return (pRAM[ea]);
 
@@ -72,15 +73,21 @@ public:
   // Write a byte to memory
   INLINE static void setByte(Addr ea, Byte data)
   {
-	// std::cout << "Set byte at " << ea << std::endl;
-	if ((ea >= 0xC000) && (ea <= 0xC004))
-	  uart.setByte(ea, data);
-	// if ((ea >= 0x0000) && (ea <= 0x00FF))
-	//  r6501.setByte(ea, data);
+	if ((ea >= VIDEO_BASE_ADDR) && (ea < VIDEO_BASE_ADDR + VIDEO_MEM_SIZE)) {
+	  video.setByte(ea - VIDEO_BASE_ADDR, data);
+	  return;
+	}
 
-	//if ((ea >= 0x9000) && (ea <= 0xA000))
-	//  return video.setByte(ea - 0x9000, data);
-			
+	if ((ea >= 0xC000) && (ea <= 0xC00F)) {
+	  uart.setByte(ea, data);
+	  return;
+	}
+
+	if ((ea >= 0xC010) && (ea <= 0xC01F)) {
+	  fdc.setByte(ea, data);
+	  return;
+	}
+
     if ((ea &= memMask) < ramSize)
       pRAM[ea] = data;
   }
@@ -96,7 +103,10 @@ public:
   {
 	video.run();
   }
-  
+
+  static Video& getVideo() { return video; }
+  static WD1793& getFDC() { return fdc; }
+
   protected:
   mem816();
   ~mem816();
@@ -110,5 +120,6 @@ private:
   static R6501 r6501;
   static UART uart;
   static Video video;
+  static WD1793 fdc;
 };
 #endif

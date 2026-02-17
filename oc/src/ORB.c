@@ -56,6 +56,11 @@ static TypePtr typtab[maxTypTab];
 /* Source file directory for output file placement */
 static char source_dir[256] = "";
 
+/* Search paths for symbol files */
+#define MAX_SEARCH_PATHS 16
+static char search_paths[MAX_SEARCH_PATHS][256];
+static int num_search_paths = 0;
+
 /* All file operations now handled by Files.h/Files.c */
 
 
@@ -183,6 +188,49 @@ void MakeFileName(char *FName, const char *name, const char *ext) {
     }
 
     FName[i] = '\0';
+}
+
+void AddSearchPath(const char *path) {
+    if (num_search_paths < MAX_SEARCH_PATHS) {
+        strncpy(search_paths[num_search_paths], path, 255);
+        search_paths[num_search_paths][255] = '\0';
+        /* Ensure trailing slash */
+        int len = strlen(search_paths[num_search_paths]);
+        if (len > 0 && path[len-1] != '/' && path[len-1] != '\\') {
+            if (len < 254) {
+                search_paths[num_search_paths][len] = '/';
+                search_paths[num_search_paths][len+1] = '\0';
+            }
+        }
+        num_search_paths++;
+    }
+}
+
+static Files_File *FindSymbolFile(const char *modname) {
+    char fname[256];
+    Files_File *F;
+    int i;
+
+    /* First try source_dir (current behavior — backward compatible) */
+    MakeFileName(fname, modname, ".smb");
+    F = Files_Old(fname);
+    if (F != NULL) return F;
+
+    /* Then try each search path */
+    for (i = 0; i < num_search_paths; i++) {
+        int j = 0, k = 0;
+        while (search_paths[i][j] != '\0' && j < 215) {
+            fname[j] = search_paths[i][j]; j++;
+        }
+        while (modname[k] != '\0' && j < 250) {
+            fname[j] = modname[k]; j++; k++;
+        }
+        fname[j++] = '.'; fname[j++] = 's'; fname[j++] = 'm'; fname[j++] = 'b';
+        fname[j] = '\0';
+        F = Files_Old(fname);
+        if (F != NULL) return F;
+    }
+    return NULL;
 }
 
 static ObjectPtr ThisORB_Module(const char *name, const char *orgname, bool decl, int32_t key) {
@@ -403,7 +451,7 @@ void Import(char *modid, char *modid1) {
     ObjectPtr obj;
     TypePtr t;
     ObjectPtr thismod;
-    char modname[ORS_IDENT_LEN], fname[256];
+    char modname[ORS_IDENT_LEN];
     Files_File *F;
     Files_Rider R;
     
@@ -414,8 +462,7 @@ void Import(char *modid, char *modid1) {
         thismod->dsc = systemScope;
         thismod->rdo = true;
     } else {
-        MakeFileName(fname, modid1, ".smb");
-        F = Files_Old(fname);
+        F = FindSymbolFile(modid1);
         
         if (F != NULL) {
             Files_Set(&R, F, 0);
@@ -824,6 +871,6 @@ void ORB_Initialize(void) {
     enter("TRB", ORB_SProc, noType, 132);
     enter("INTEN", ORB_SProc, noType, 91);
     enter("COPY", ORB_SProc, noType, 123);
-    enter("PUT", ORB_SProc, noType, 112);
-    enter("GET", ORB_SProc, noType, 102);
+    enter("PUT", ORB_SProc, noType, 113);
+    enter("GET", ORB_SProc, noType, 103);
 }
