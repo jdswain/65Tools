@@ -824,6 +824,6 @@ void ORB_Initialize(void) {
     enter("TRB", ORB_SProc, noType, 132);
     enter("INTEN", ORB_SProc, noType, 91);
     enter("COPY", ORB_SProc, noType, 123);
-    enter("PUT", ORB_SProc, noType, 112);
-    enter("GET", ORB_SProc, noType, 102);
+    enter("PUT", ORB_SProc, noType, 113);
+    enter("GET", ORB_SProc, noType, 103);
 }

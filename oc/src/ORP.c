@@ -848,12 +848,14 @@ static void StandProc(LONGINT pno) {
 	  } else if (pno == 9) {  // INTEN
 		CheckBool(&x);
 		ORG_IntEn(&x);
-	  } else if (pno == 10) {  // GET
+	  } else if (pno == 10) {  // GET(bank, addr, var)
 		CheckInt(&x);
-		ORG_Get(&x, &y);
-	  } else if (pno == 11) {  // PUT
+		CheckInt(&y);
+		ORG_Get(&x, &y, &z);
+	  } else if (pno == 11) {  // PUT(bank, addr, val)
 		CheckInt(&x);
-		ORG_Put(&x, &y);
+		CheckInt(&y);
+		ORG_Put(&x, &y, &z);
 	  } else if (pno == 12) {  // COPY
 		CheckInt(&x);
 		CheckInt(&y);

@@ -9,7 +9,7 @@ MODULE MinimalRegITest;
     CONST
       ACIA_DATA = 0C000H;
   BEGIN
-    SYSTEM.PUT(ACIA_DATA, c);
+    SYSTEM.PUT(0, ACIA_DATA, c);
   END PutChar;
   
 BEGIN

@@ -4,7 +4,7 @@ MODULE L10_SystemBit;
       b: BOOLEAN;
 BEGIN
   addr := 2000H;
-  SYSTEM.PUT(addr, 5);  (* binary 0101 *)
+  SYSTEM.PUT(0, addr, 5);  (* binary 0101 *)
 
   (* Test bit 0 - should be TRUE *)
   b := SYSTEM.BIT(addr, 0);

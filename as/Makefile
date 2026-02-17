@@ -13,6 +13,7 @@ as \
 scanner \
 parser \
 interp \
+value \
 
 objects = \
 $(src_objects) \

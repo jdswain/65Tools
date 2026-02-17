@@ -21,6 +21,14 @@ int codegen_getw(long addr);
 void codegen_updateb(long addr, int b);
 void codegen_updatew(long addr, int w);
 
+/* Relocation tracking for .816 output */
+#define maxReloc 1024
+extern short int relocC;
+extern short int reloc[maxReloc];
+
+/* Pass tracking: -1 = always report, 0 = final pass, >0 = intermediate */
+extern int codegen_current_pass;
+
 /* For 816 */
 bool codegen_longa(void);
 void codegen_setlonga(bool l);

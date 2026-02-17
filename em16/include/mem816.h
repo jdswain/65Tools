@@ -42,15 +42,12 @@ public:
   // Fetch a byte from memory
   INLINE static Byte getByte(Addr ea)
   {
+	if ((ea >= VIDEO_BASE_ADDR) && (ea < VIDEO_BASE_ADDR + VIDEO_MEM_SIZE))
+	  return video.getByte(ea - VIDEO_BASE_ADDR);
+
 	if ((ea >= 0xC000) && (ea <= 0xC004))
 	  return uart.getByte(ea);
 
-	// if ((ea >= 0x0000) && (ea <= 0x0FF))
-	//   return r6501.getByte(ea);
-
-	//if ((ea >= 0x9000) && (ea <= 0xA000))
-	//	return video.getByte(ea - 0x9000);
-		
     if ((ea &= memMask) < ramSize)
       return (pRAM[ea]);
 
@@ -72,15 +69,14 @@ public:
   // Write a byte to memory
   INLINE static void setByte(Addr ea, Byte data)
   {
-	// std::cout << "Set byte at " << ea << std::endl;
+	if ((ea >= VIDEO_BASE_ADDR) && (ea < VIDEO_BASE_ADDR + VIDEO_MEM_SIZE)) {
+	  video.setByte(ea - VIDEO_BASE_ADDR, data);
+	  return;
+	}
+
 	if ((ea >= 0xC000) && (ea <= 0xC004))
 	  uart.setByte(ea, data);
-	// if ((ea >= 0x0000) && (ea <= 0x00FF))
-	//  r6501.setByte(ea, data);
 
-	//if ((ea >= 0x9000) && (ea <= 0xA000))
-	//  return video.setByte(ea - 0x9000, data);
-			
     if ((ea &= memMask) < ramSize)
       pRAM[ea] = data;
   }
@@ -96,6 +92,8 @@ public:
   {
 	video.run();
   }
+
+  static Video& getVideo() { return video; }
   
   protected:
   mem816();

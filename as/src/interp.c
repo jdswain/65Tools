@@ -538,6 +538,7 @@ void set_label_impl(Object *label)
   Object *object = scope_find_object(label->string_val);
   if (object == 0) {
 	object = object_new(Const, type_retain(typeInt));
+	object->is_global = label->is_global;
 	scope_add_object(label->string_val, object);
   }
   if (object->type->form == ProcForm) {
@@ -731,6 +732,7 @@ int interp_run(const char *filename)
       line_start = 0;
       long addr = section->shdr->sh_addr;
       out_addr = addr;
+      codegen_addr(addr);
       pc = 0;
       stack = 0;
       macro_def = false;
@@ -845,8 +847,8 @@ void interp_add_instr(OpCode instr, AddrMode mode, Modifier modifier)
   op->instr.opcode = instr;
   op->instr.mode = mode;
   op->instr.modifier = modifier;
-  op->line_num = file->line_num;
-  op->filename = as_strdup(file->filename);
+  op->line_num = file ? file->line_num : 0;
+  op->filename = file ? as_strdup(file->filename) : as_strdup("");
 
   if (macro_def == true)  
 	list_add((void ***)&macro->instrs, &macro->num_instrs, op); 

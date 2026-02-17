@@ -22,6 +22,7 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <thread>
 
 using namespace std;
 
@@ -869,6 +870,8 @@ int main(int argc, char **argv)
   unsigned int entry;
   int custom_dp = -1;    // -1 = use default (0), else custom DP address
   int custom_sp = -1;    // -1 = use default ($0100), else custom SP address
+  bool video_enabled = false;
+  bool test_pattern = false;
 
   setup();
 
@@ -893,8 +896,20 @@ int main(int argc, char **argv)
       continue;
     }
 
+    if (!strcmp(argv[index], "-video")) {
+      video_enabled = true;
+      ++index;
+      continue;
+    }
+
+    if (!strcmp(argv[index], "-test-pattern")) {
+      test_pattern = true;
+      ++index;
+      continue;
+    }
+
     if (!strcmp(argv[index], "-?")) {
-      cerr << "Usage: em16 [-t] [-dp addr] [-sp addr] ELF-file ..." << endl;
+      cerr << "Usage: em16 [-t] [-dp addr] [-sp addr] [-video] [-test-pattern] file ..." << endl;
       return (1);
     }
 
@@ -952,20 +967,53 @@ int main(int argc, char **argv)
   // Register trap handler for runtime traps (BRK #1..#10)
   emu816::setTrapHandler(trap_handler);
 
-  if (mod_count > 0) {
-    // Run each module's entry point in load order
-    // This initializes modules (runs their BEGIN sections)
-    for (int i = 0; i < mod_count; i++) {
-      if (mod_entries[i] != 0) {
-        cout << "Initialising at " << hex << mod_entries[i] << endl;
-        emu816::jumpLong(mod_entries[i]);
+  // Lambda to run module entry points
+  auto run_modules = [&]() {
+    if (mod_count > 0) {
+      for (int i = 0; i < mod_count; i++) {
+        if (mod_entries[i] != 0) {
+          cout << "Initialising at " << hex << mod_entries[i] << endl;
+          emu816::jumpLong(mod_entries[i]);
+        }
       }
+    } else if (entry != 0) {
+      cout << "Initialising at " << hex << entry << endl;
+      emu816::jumpLong(entry);
+    } else {
+      mem816::run();
     }
-  } else if (entry != 0) {
-    cout << "Initialising at " << hex << entry << endl;
-    emu816::jumpLong(entry);
+  };
+
+  Video &video = mem816::getVideo();
+
+  if (video_enabled) {
+    video.enableDisplay();
+
+    if (test_pattern) {
+      // Fill video RAM with a test pattern (4 horizontal color bands)
+      uint8_t *vmem = video.getMemory();
+      int bpr = VIDEO_BPR;
+      for (int row = 0; row < VIDEO_HEIGHT; row++) {
+        uint8_t val;
+        if (row < VIDEO_HEIGHT / 4)
+          val = 0xFF;  // white: all pixels = 11
+        else if (row < VIDEO_HEIGHT / 2)
+          val = 0xAA;  // light gray: all pixels = 10
+        else if (row < 3 * VIDEO_HEIGHT / 4)
+          val = 0x55;  // dark gray: all pixels = 01
+        else
+          val = 0x00;  // black: all pixels = 00
+        memset(vmem + row * bpr, val, bpr);
+      }
+      video.dirty.store(true);
+    }
+
+    // Run CPU on background thread, Cocoa event loop on main thread
+    std::thread cpu_thread(run_modules);
+    cpu_thread.detach();
+    video.runCocoa(); // Blocks until window closed
   } else {
-    mem816::run();
+    run_modules();
   }
   
 #ifdef __APPLE__

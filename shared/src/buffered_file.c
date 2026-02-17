@@ -37,13 +37,13 @@ int bf_open(const char* filename)
   } else {
     // We want to support relative paths here
     char *path = as_strdup(filename);
-    dirname(path);
+    const char *dir = dirname(path);
     const char *name = strrchr(filename, '/');
     if (name == 0) {
       name = filename; // No path attached
     } else {
       name++; // Move past the '/'
-      if (chdir(path) != 0) {
+      if (chdir(dir) != 0) {
 		perror("Path not found");
       }
     }
@@ -204,9 +204,9 @@ void as_error(const char* message, ...)
 
 void as_gen_warn(const char* filename, int line_num, const char* message, ...) {
   va_list args;
+  va_start(args, message);
   fprintf(stdout, "%s:%d: ", filename, line_num - 1);
   fprintf(stdout, "Warning: ");
-
   vfprintf(stdout, message, args);
   fprintf(stdout, "\n");
   va_end(args);
@@ -242,6 +242,7 @@ FileType as_file_type(const char *filename)
   if (strcmp(dot, ".hex") == 0) return FileIntel;
   if (strcmp(dot, ".tim") == 0) return FileTIM;
   if (strcmp(dot, ".bin") == 0) return FileBinary;
+  if (strcmp(dot, ".816") == 0) return File816;
   if (strcmp(dot, ".map") == 0) return FileLinkMap;
   return FileUnknown;
 }

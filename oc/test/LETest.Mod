@@ -5,7 +5,7 @@ MODULE LETest;
 	  CONST
 		 ACIA_DATA = 0C000H;
    BEGIN
-      SYSTEM.PUT(ACIA_DATA, value);
+      SYSTEM.PUT(0, ACIA_DATA, value);
    END PutChar;
 
    PROCEDURE TestLE(x, y: INTEGER; expected: BOOLEAN);

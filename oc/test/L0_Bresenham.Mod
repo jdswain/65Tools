@@ -19,9 +19,9 @@ MODULE L0_Bresenham;
     Out.Char("("); Out.Int(x, 1); Out.Char(","); Out.Int(y, 1); Out.Char(")"); Out.Ln();
     addr := SCREEN_BUFFER + y * SCREEN_WIDTH_BYTES + x DIV 8;
     mask := BitMask(x MOD 8);
-    SYSTEM.GET(addr, data);
+    SYSTEM.GET(0, addr, data);
     data := ORA(data, mask);
-    SYSTEM.PUT(addr, data)
+    SYSTEM.PUT(0, addr, data)
   END SetPixel;
 
   PROCEDURE DrawLine(x0, y0, x1, y1: INTEGER);

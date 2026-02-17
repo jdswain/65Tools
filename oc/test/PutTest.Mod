@@ -15,12 +15,12 @@ BEGIN
     o := 4FH;
     zero := 0;
     
-    SYSTEM.PUT(ACIA_DATA, h);     (* PUT($C000, 'H') *)
-    SYSTEM.PUT(ACIA_DATA, e);     (* PUT($C000, 'E') *)
-    SYSTEM.PUT(ACIA_DATA, l);     (* PUT($C000, 'L') *)
-    SYSTEM.PUT(ACIA_DATA, l);     (* PUT($C000, 'L') *)
-    SYSTEM.PUT(ACIA_DATA, o);     (* PUT($C000, 'O') *)
-    SYSTEM.PUT(ACIA_RESET, zero); (* PUT($C001, 0) - pause the simulator *)
+    SYSTEM.PUT(0, ACIA_DATA, h);     (* PUT($C000, 'H') *)
+    SYSTEM.PUT(0, ACIA_DATA, e);     (* PUT($C000, 'E') *)
+    SYSTEM.PUT(0, ACIA_DATA, l);     (* PUT($C000, 'L') *)
+    SYSTEM.PUT(0, ACIA_DATA, l);     (* PUT($C000, 'L') *)
+    SYSTEM.PUT(0, ACIA_DATA, o);     (* PUT($C000, 'O') *)
+    SYSTEM.PUT(0, ACIA_RESET, zero); (* PUT($C001, 0) - pause the simulator *)
 END Main;
 
 BEGIN

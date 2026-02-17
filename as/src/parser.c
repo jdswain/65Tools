@@ -105,10 +105,23 @@ void parse_factor(Symbol *sym, bool is_local)
 	v = object_new(Const, typeString);
     v->string_val = as_strdup(id);
 	v->is_local = is_local;
+    scanner_get(sym);
+	/* Handle dot-qualified names like Out.Int */
+	while (*sym == sPERIOD && !is_local) {
+	  scanner_get(sym);
+	  if (*sym == sIDENT) {
+		char buf[128];
+		snprintf(buf, sizeof(buf), "%s.%s", v->string_val, id);
+		as_free(v->string_val);
+		v->string_val = as_strdup(buf);
+		scanner_get(sym);
+	  } else {
+		break;
+	  }
+	}
 	//	printf("OpPush Ident %s\n", v->string_val);
     interp_add(OpPushVar, v);
 	object_release(v);
-    scanner_get(sym);
     break;
 
   case sLPAREN:
@@ -463,7 +476,7 @@ void parse_instr(Symbol *sym)
         if (*sym == sREGY) {
           scanner_get(sym);
           if (*sym == sSTATESEP) {
-	    interp_add_instr(instr, DirectPageIndirectIndexedY, modifier);
+	    interp_add_instr(instr, (longAddr?DirectPageIndirectLongIndexedY:DirectPageIndirectIndexedY), modifier);
           }
         } else if (*sym == sREGX) {
           scanner_get(sym);
@@ -766,7 +779,12 @@ void parse_directive(Symbol *sym)
     }
     break;
   case sIMPORT:
-    // ToDo: Import Directive
+    if (*sym == sIDENT) {
+      as_import(id);
+      scanner_get(sym);
+    } else {
+      as_error("import: expected module name");
+    }
     break;
   case sINSERT:
     // ToDo: Insert Directive
@@ -902,6 +920,75 @@ bool is_macro(Symbol sym) {
   return ((sym == sIDENT) && (as_get_macro(id) != 0));
 }
 
+/* Map type name to Oberon type ref for .smb encoding */
+static int type_name_to_ref(const char *name) {
+  if (strcasecmp(name, "BYTE") == 0) return -1;
+  if (strcasecmp(name, "BOOLEAN") == 0) return -2;
+  if (strcasecmp(name, "CHAR") == 0) return -3;
+  if (strcasecmp(name, "INTEGER") == 0) return -4;
+  if (strcasecmp(name, "REAL") == 0) return -5;
+  if (strcasecmp(name, "SET") == 0) return -6;
+  return -9; /* noType */
+}
+
+/*
+  Parse .proc directive: .proc Name(ParamType, VAR ParamType, ...): ReturnType
+  Stores the procedure signature for .smb generation.
+*/
+void parse_proc_sig(Symbol *sym)
+{
+  if (elf_context == 0) return;
+
+  /* Name should be the current identifier (may be a keyword token) */
+  if (*sym != sIDENT && !is_directive(*sym) && !is_asm_keyword(*sym) && !is_instr(*sym)) {
+    as_error(".proc: expected procedure name, got %s", token_to_string(*sym));
+    return;
+  }
+
+  elf_proc_sig_t *sig = &elf_context->proc_sigs[elf_context->proc_sig_count];
+  memset(sig, 0, sizeof(*sig));
+  strncpy(sig->name, id, sizeof(sig->name) - 1);
+  sig->return_type = -9; /* default: proper procedure (no return) */
+  sig->nparams = 0;
+
+  scanner_get(sym);
+
+  /* Optional parameter list */
+  if (*sym == sLPAREN) {
+    scanner_get(sym);
+    while (*sym != sRPAREN && *sym != sSTATESEP && *sym != sEOF) {
+      int is_var = 0;
+      if (*sym == sVAR) {
+        is_var = 1;
+        scanner_get(sym);
+      }
+      if (*sym == sIDENT || is_asm_keyword(*sym) || is_directive(*sym) || is_instr(*sym)) {
+        if (sig->nparams < 8) {
+          sig->param_types[sig->nparams] = type_name_to_ref(id);
+          sig->param_var[sig->nparams] = is_var;
+          sig->nparams++;
+        }
+        scanner_get(sym);
+      }
+      if (*sym == sCOMMA) scanner_get(sym);
+    }
+    if (*sym == sRPAREN) scanner_get(sym);
+  }
+
+  /* Optional return type */
+  if (*sym == sCOLON) {
+    scanner_get(sym);
+    if (*sym == sIDENT || is_asm_keyword(*sym) || is_directive(*sym) || is_instr(*sym)) {
+      sig->return_type = type_name_to_ref(id);
+      scanner_get(sym);
+    }
+  }
+
+  if (elf_context->proc_sig_count < MAX_PROC_SIGS) {
+    elf_context->proc_sig_count++;
+  }
+}
+
 /*
 statement  =  [ assignment | MacroDefinition | Instruction 
     IfStatement | WhileStatement | RepeatStatement | LoopStatement ]. 
@@ -938,6 +1025,12 @@ void parse_statement(Symbol *sym)
     case sIDENT:
 	  var = parse_ident_def(sym);
 	  var->is_local = is_local;
+	  /* .proc directive: ".proc Name(params): RetType" */
+	  if (is_local && var->string_val && strcasecmp(var->string_val, "proc") == 0) {
+		parse_proc_sig(sym);
+		object_release(var);
+		break;
+	  }
 	  if (*sym == sBECOMES) {
 		parse_assignment(var, sym);
 		scanner_get(sym);

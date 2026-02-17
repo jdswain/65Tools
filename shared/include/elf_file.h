@@ -51,6 +51,25 @@ typedef struct {
   int num_instrs;
 } elf_section_t;
 
+/* Import tracking for .816 module output */
+typedef struct {
+  char name[64];
+  int32_t key;
+} elf_import_t;
+
+#define MAX_IMPORTS 32
+
+/* Procedure signature for .smb output */
+typedef struct {
+  char name[64];
+  int nparams;
+  int param_types[8];   /* Oberon type ref: -4=INTEGER, -2=BOOLEAN, etc. */
+  int param_var[8];     /* 0=value, 1=VAR */
+  int return_type;      /* -9=noType (proper proc), -4=INTEGER, etc. */
+} elf_proc_sig_t;
+
+#define MAX_PROC_SIGS 64
+
 typedef struct {
   char *filename;
   int fd;
@@ -68,6 +87,14 @@ typedef struct {
   elf_section_t* section_tls;
   elf_section_t* section_dp;
   elf_section_t* section_stack;
+
+  // Imports for .816 output
+  elf_import_t imports[MAX_IMPORTS];
+  int import_count;
+
+  // Procedure signatures for .smb output
+  elf_proc_sig_t proc_sigs[MAX_PROC_SIGS];
+  int proc_sig_count;
 } elf_context_t;
 
 elf_context_t *elf_create(const char *filename, ELF_Half e_machine);
@@ -83,6 +110,7 @@ void elf_write_s28(elf_context_t *context);
 void elf_write_s37(elf_context_t *context);
 void elf_write_intel(elf_context_t *context);
 void elf_write_tim(elf_context_t *context);
+void elf_write_816(elf_context_t *context);
 
 /* Section */
 elf_section_t *elf_section_create(elf_context_t *context,

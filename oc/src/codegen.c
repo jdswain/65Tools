@@ -99,8 +99,9 @@ void ofl(uint8_t op, int v) {
 /* 65C816 formats */
 
 void orl(uint8_t op, int v) {
-  int r = v - (ORG_pc + 1);
-  ow(op, r);
+  o(op);
+  int r = v - (ORG_pc + 2);
+  o(r & 0xff); o(r >> 8);
 }
 
 void omove(uint8_t op, int src, int dst) { o(op); o(dst >> 16); o(src >> 16); }

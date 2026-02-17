@@ -41,8 +41,10 @@
 // - use R8 as StaticBase
 
 #define REG_SIZE 2  // 16-bit registers
+#define SB_DP 0x00  // SB lives at DP $00-$01
+
 static LONGINT reg_addr(int reg) {
-    return reg * REG_SIZE;  // $00, $02, $04, $06, $08, $0A, $0C, $0E, $10, $12, $14, $16
+    return reg * REG_SIZE + 2;  // R[0]=$02, R[1]=$04, ... R[14]=$1E
 }
 
 // Internal item modes
@@ -148,11 +150,11 @@ static int fp_fixup_count[FP_OPS];
 static LONGINT fp_sub_addr[FP_OPS];
 
 // Returns DP address of the correct module's var_base.
-// mno >= 0 (own module): returns reg_addr(SB), no code emitted.
+// mno >= 0 (own module): returns SB_DP ($00), no code emitted.
 // mno < 0 (import): emits LDA #(-mno) / STA SB_TEMP with relocation.
 static int GetSB(LONGINT mno) {
   if (mno >= 0) {
-    return reg_addr(SB);
+    return SB_DP;
   }
   Set16(1, 1);
   reloc[relocC++] = ORG_pc;
@@ -865,7 +867,7 @@ static void loadStringAdr(ORG_Item *x) {
     // 65C816: Compute string address = SB + ORG_varsize + x->a
     // We need the ADDRESS itself (for use as a pointer), not the data at that address.
     Set16(1, 1);
-    codegen_gen(sLDA, DirectPage, reg_addr(SB), 0);           // Load SB value
+    codegen_gen(sLDA, DirectPage, SB_DP, 0);           // Load SB value
     codegen_gen(sCLC, Implied, 0, 0);                          // CLC
     codegen_gen(sADC, Immediate, ORG_varsize + x->a, 0);      // Add string offset
     codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);            // Store address
@@ -2224,18 +2226,17 @@ void ORG_Store(ORG_Item *x, ORG_Item *y) {
                     Set16(1, 0);
                 } else if (x->type->size > 1 && y->type->size == 1) {
                     // BYTE to INTEGER store (zero-extend)
-                    Set8(1, 0);
+                    // load() already zero-extends BYTE to 16-bit, so just do 16-bit store
+                    Set16(1, 1);
                     codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);
                     codegen_gen(sLDY, Immediate, x->a, 0);
                     codegen_gen(sSTA, DirectPageIndirectIndexedY, sb, 0);
-                    Set16(1, 0);
                 } else {
                     // INTEGER to INTEGER store (no conversion needed)
                     Set16(1, 1);
                     codegen_gen(sLDA, DirectPage, reg_addr(y->r), 0);
                     codegen_gen(sLDY, Immediate, x->a, 0);
                     codegen_gen(sSTA, DirectPageIndirectIndexedY, sb, 0);
-                    Set16(1, 0);
                 }
             }
         }
@@ -2552,7 +2553,7 @@ void ORG_StringParam(ORG_Item *x) {
 	//    LONGINT string_addr = MODULE_VAR_BASE + ORG_varsize + x->a;
     
     // Load lower 16 bits of address into RH
-    codegen_gen(sLDA, DirectPage, reg_addr(SB), 0);     // LDA #string_address_low
+    codegen_gen(sLDA, DirectPage, SB_DP, 0);     // LDA #string_address_low
 	codegen_gen(sCLC, Implied, 0, 0);
 	codegen_gen(sADC, Immediate, ORG_varsize + x->a, 0);
     codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);            // STA $reg
@@ -2664,7 +2665,7 @@ void ORG_For2(ORG_Item *x, ORG_Item *y, ORG_Item *w) {
     // The value is already in the accumulator, just store it to x
     if (x->mode == ORB_Var) {
 	  codegen_gen(sLDY, Immediate, x->a, 0);
-	  codegen_gen(sSTA, DirectPageIndirectIndexedY, reg_addr(SB), 0);
+	  codegen_gen(sSTA, DirectPageIndirectIndexedY, SB_DP, 0);
     } else {
         codegen_gen(sSTA, DirectPage, reg_addr(x->r), 0);
     }
@@ -2890,11 +2891,11 @@ void ORG_Enter(ORB_Object *params, LONGINT frame_size, BOOLEAN expo, BOOLEAN int
 	Set16(1, 1);
 	if (expo) {
 	  // Save caller's SB and load own module's SB
-	  codegen_gen(sLDA, DirectPage, reg_addr(SB), 0);   // LDA SB
+	  codegen_gen(sLDA, DirectPage, SB_DP, 0);   // LDA SB
 	  codegen_gen(sPHA, Implied, 0, 0);                  // PHA (save on stack)
 	  reloc[relocC++] = ORG_pc;                          // record for relocation
 	  codegen_gen(sLDA, Immediate, 0x0000, 0);           // LDA #var_base (patched)
-	  codegen_gen(sSTA, DirectPage, reg_addr(SB), 0);    // STA SB
+	  codegen_gen(sSTA, DirectPage, SB_DP, 0);    // STA SB
 	}
 
 	if (frame_size > 0) {
@@ -3023,7 +3024,7 @@ void ORG_Return(INTEGER form, ORG_Item *x, LONGINT size, BOOLEAN expo, BOOLEAN i
 	if (expo) {
 	  // Restore caller's SB before returning
 	  codegen_gen(sPLA, Implied, 0, 0);                  // PLA
-	  codegen_gen(sSTA, DirectPage, reg_addr(SB), 0);    // STA SB
+	  codegen_gen(sSTA, DirectPage, SB_DP, 0);    // STA SB
 	  codegen_gen(sRTL, Implied, 0, 0);                  // RTL
 	} else {
 	  codegen_gen(sRTS, Implied, 0, 0);                  // RTS
@@ -3374,30 +3375,24 @@ void ORG_IntEn(ORG_Item *x) {
   (void)x;
 }
 
-void ORG_Get(ORG_Item *x, ORG_Item *y) {
-  // 65C816: GET(address, var) - load value from address into variable
-  // Following original Oberon: load(x); x.type := y.type; x.mode := RegI; x.a := 0; Store(y, x)
-  load(x);
-  // Allocate and zero bank register for RegI (long indirect needs 2 regs)
-  codegen_gen(sSTZ, DirectPage, reg_addr(RH), 0);
-  incR();
-  x->type = y->type;
-  x->mode = RegI;
-  x->a = 0;
-  ORG_Store(y, x);
+void ORG_Get(ORG_Item *bank, ORG_Item *addr, ORG_Item *var) {
+  // 65C816: GET(bank, address, var) - load value from [bank:address] into variable
+  load(addr);
+  load(bank);  // bank in R[RH-1], address in R[RH-2]
+  addr->type = var->type;
+  addr->mode = RegI;
+  addr->a = 0;
+  ORG_Store(var, addr);
 }
 
-void ORG_Put(ORG_Item *x, ORG_Item *y) {
-  // 65C816: PUT(address, value) - store value at address
-  // Following original Oberon: load(x); x.type := y.type; x.mode := RegI; x.a := 0; Store(x, y)
-  load(x);
-  // Allocate and zero bank register for RegI (long indirect needs 2 regs)
-  codegen_gen(sSTZ, DirectPage, reg_addr(RH), 0);
-  incR();
-  x->type = y->type;
-  x->mode = RegI;
-  x->a = 0;
-  ORG_Store(x, y);
+void ORG_Put(ORG_Item *bank, ORG_Item *addr, ORG_Item *val) {
+  // 65C816: PUT(bank, address, value) - store value at [bank:address]
+  load(addr);
+  load(bank);  // bank in R[RH-1], address in R[RH-2]
+  addr->type = val->type;
+  addr->mode = RegI;
+  addr->a = 0;
+  ORG_Store(addr, val);
 }
 
 void ORG_Copy(ORG_Item *x, ORG_Item *y, ORG_Item *z) {
@@ -3758,7 +3753,7 @@ void ORG_Header(void) {
   // SB initialisation — loader patches the $0000 to actual var_base
   reloc[relocC++] = ORG_pc;
   codegen_gen(sLDA, Immediate, 0x0000, 0);
-  codegen_gen(sSTA, DirectPage, reg_addr(SB), 0);
+  codegen_gen(sSTA, DirectPage, SB_DP, 0);
 }
 
 static LONGINT NofPtrs(ORB_Type *typ) {

@@ -7,6 +7,11 @@ long addr;
 bool longa;
 bool longi;
 
+short int relocC = 0;
+short int reloc[maxReloc];
+
+int codegen_current_pass = -1; /* -1 = always report errors, 0 = final pass */
+
 void create_standard_file(void) {
   // Just a marker for stack size requirements
   elf_context->section_stack = elf_section_create(elf_context, "stack",
@@ -53,6 +58,7 @@ void codegen_init(const char *mname, ELF_Half e_machine, long entry) {
 }
 
 void codegen_close(void) {
+  if (elf_context == 0) return;
   elf_write_executable(elf_context);
   elf_release(elf_context);
   elf_context = 0;
@@ -63,7 +69,9 @@ long codegen_here(void) {
 }
 
 void codegen_addr(long a) {
-  addr = addr;
+  addr = a;
+  section->shdr->sh_addr = a;
+  relocC = 0;
 }
 
 bool codegen_longa() {
@@ -154,8 +162,10 @@ void om(uint8_t op, int v, bool b) { o(op); o(v & 0xff); if( b ) o(v >> 8); }
 void or(const char *filename, int line_num, uint8_t op, int v) {
   o(op);
   int r = v - (addr + 1);
-  if ((r > 127) || (r < -128))
-	as_gen_error(filename, line_num, "Relative branch out of range, from $%04x to $%04x", addr, v);
+  if ((r > 127) || (r < -128)) {
+    if (codegen_current_pass <= 0)
+      as_gen_error(filename, line_num, "Relative branch out of range, from $%04x to $%04x", addr, v);
+  }
   //  printf("r: %04x v: %04x\n", addr, v);
   o(r & 0xff);
 }
@@ -163,10 +173,13 @@ void or(const char *filename, int line_num, uint8_t op, int v) {
 /* 65C816 formats */
 
 void orl(const char *filename, int line_num, uint8_t op, int v) {
-  int r = v - (addr + 1);
-  if ((r > 32767) || (r < -32768))
-    as_gen_error(filename, line_num, "Relative branch out of range");
-  ow(op, r);
+  o(op);
+  int r = v - (addr + 2);
+  if ((r > 32767) || (r < -32768)) {
+    if (codegen_current_pass <= 0)
+      as_gen_error(filename, line_num, "Relative branch out of range");
+  }
+  o(r & 0xff); o(r >> 8);
 }
 
 void omove(uint8_t op, int src, int dst) { o(op); o(dst >> 16); o(src >> 16); }
@@ -180,8 +193,10 @@ void obita(const char * filename, int line_num, uint8_t op, int mask, int addr) 
 void obitar(const char *filename, int line_num, uint8_t op, int mem, int mask, int v) {
   o(op); o(mem &0xff); o(mem >> 8); o(mask);
   int r = v - (addr + 1);
-  if ((r > 127) || (r < -128))
-    as_gen_error(filename, line_num, "Relative branch out of range");
+  if ((r > 127) || (r < -128)) {
+    if (codegen_current_pass <= 0)
+      as_gen_error(filename, line_num, "Relative branch out of range");
+  }
   o(r & 0xff);
 }
 
@@ -192,8 +207,10 @@ void oiz(uint8_t op, int imm, int mem) {
 void obitzr(const char *filename, int line_num, uint8_t op, int bit, int mem, int v) {
   o(op | bit << 4); o(mem & 0xff);
   int r = v - (addr + 1);
-  if ((r > 127) || (r < -128))
-    as_gen_error(filename, line_num, "Relative branch out of range: %04x -> %04x = %02x", addr, v, r);
+  if ((r > 127) || (r < -128)) {
+    if (codegen_current_pass <= 0)
+      as_gen_error(filename, line_num, "Relative branch out of range: %04x -> %04x = %02x", addr, v, r);
+  }
   o(r & 0xff);
 }
 
