@@ -57,7 +57,8 @@ stores, and mode switches (REP/SEP pairs).
 
 ### OPT-8: Register File Sizing
 Recode the register file to size based on the type being stored.
-Since this is a stack this should be possible.
+Since this is a stack this should be possible. Possibly pack
+registers so BYTE can be stored more.
 
 ### OPT-9: Numeric Case
 If sufficient range to merrit, generate a jump table for the case rather

@@ -476,7 +476,7 @@ void Import(char *modid, char *modid1) {
             if (class != versionkey) {
                 ORS_Mark("wrong version");
             }
-            
+
             Read(&R, &class);
             while (class != 0) {
                 obj = (ObjectPtr)calloc(1, sizeof(ORB_Object));
@@ -484,7 +484,7 @@ void Import(char *modid, char *modid1) {
                 Files_ReadString(&R, obj->name);
                 InType(&R, thismod, &obj->type);
                 obj->lev = -thismod->lev;
-                
+
                 if (class == ORB_Typ) {
                     t = obj->type;
                     t->typobj = obj;
@@ -697,6 +697,10 @@ void Export(const char *modid, BOOLEAN *newSF, int32_t *key) {
                     Files_WriteNum(&R, obj->exno);
                 } else if (obj->type->form == ORB_Real) {
                     Files_WriteInt(&R, obj->val);
+                } else if (obj->type->form == ORB_Array || obj->type->form == ORB_Record) {
+                    // Structured constant: export offset from SB (varsize + str_offset)
+                    extern LONGINT ORG_varsize;
+                    Files_WriteNum(&R, ORG_varsize + obj->val);
                 } else {
                     Files_WriteNum(&R, obj->val);
                 }
@@ -859,6 +863,7 @@ void ORB_Initialize(void) {
     systemScope = NULL;
     
     /* Functions */
+    enter("BANK", ORB_SFunc, intType, 211);
     enter("H", ORB_SFunc, intType, 201);
     enter("COND", ORB_SFunc, boolType, 191);
     enter("SIZE", ORB_SFunc, intType, 181);

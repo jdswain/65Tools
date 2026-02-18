@@ -479,6 +479,8 @@ static void StandFunc(ORG_Item *x, LONGINT fct, ORB_Type *restyp) {
             CheckConst(x);
             CheckInt(x);
             ORG_HH(x);
+        } else if (fct == 21) {  // BANK
+            ORG_Bank(x);
         }
         x->type = restyp;
     } else {
@@ -1603,19 +1605,146 @@ static void Declarations(LONGINT *varsize, LONGINT parblksize) {
             } else {
                 ORS_Mark("= ?");
             }
-            expression(&x);
-            if ((x.type->form == ORB_String) && (x.b == 2)) {
-                ORG_StrToChar(&x);
-            }
-            NewObj(&obj, id, ORB_Const);
-            obj->expo = expo;
-            if (x.mode == ORB_Const) {
-                obj->val = x.a;
-                obj->lev = x.b;
-                obj->type = x.type;
+            if (sym == ORS_array) {
+                // Structured array constant: ARRAY OF type { val, val, ... }
+                ORB_Object *typobj;
+                ORB_Type *basetyp, *arrtyp;
+                LONGINT start, count, val;
+                ORS_Get(&sym);
+                Check(ORS_of, "OF expected");
+                if (sym == ORS_ident) {
+                    qualident(&typobj);
+                    if (typobj->class == ORB_Typ) {
+                        basetyp = typobj->type;
+                    } else {
+                        ORS_Mark("not a type");
+                        basetyp = intType;
+                    }
+                } else {
+                    ORS_Mark("type expected");
+                    basetyp = intType;
+                }
+                start = ORG_StrOffset();
+                count = 0;
+                if (sym == ORS_lbrace) {
+                    ORS_Get(&sym);
+                    while (sym != ORS_rbrace && sym != ORS_eof) {
+                        expression(&x);
+                        if (x.mode != ORB_Const) {
+                            ORS_Mark("not a constant");
+                            val = 0;
+                        } else {
+                            val = x.a;
+                        }
+                        if (basetyp->size == 1) {
+                            ORG_PutByte(val);
+                        } else if (basetyp->size == 2) {
+                            ORG_PutByte(val & 0xFF);
+                            ORG_PutByte((val >> 8) & 0xFF);
+                        }
+                        count++;
+                        if (sym == ORS_comma) {
+                            ORS_Get(&sym);
+                        } else if (sym != ORS_rbrace) {
+                            ORS_Mark(", or } expected");
+                        }
+                    }
+                    Check(ORS_rbrace, "} expected");
+                } else {
+                    ORS_Mark("{ expected");
+                }
+                arrtyp = malloc(sizeof(ORB_Type));
+                memset(arrtyp, 0, sizeof(ORB_Type));
+                arrtyp->form = ORB_Array;
+                arrtyp->base = basetyp;
+                arrtyp->len = count;
+                arrtyp->size = count * basetyp->size;
+                NewObj(&obj, id, ORB_Const);
+                obj->expo = expo;
+                obj->val = start;
+                obj->lev = count * basetyp->size;
+                obj->type = arrtyp;
+                if (expo) {
+                    obj->exno = exno;
+                    exno++;
+                }
+            } else if (sym == ORS_record) {
+                // Structured record constant: RECORD ( TypeName ) { val, val, ... }
+                ORB_Object *typobj, *fld;
+                ORB_Type *rectyp;
+                LONGINT start, val;
+                ORS_Get(&sym);
+                Check(ORS_lparen, "( expected");
+                if (sym == ORS_ident) {
+                    qualident(&typobj);
+                    if (typobj->class == ORB_Typ && typobj->type->form == ORB_Record) {
+                        rectyp = typobj->type;
+                    } else {
+                        ORS_Mark("not a record type");
+                        rectyp = intType;
+                    }
+                } else {
+                    ORS_Mark("type expected");
+                    rectyp = intType;
+                }
+                Check(ORS_rparen, ") expected");
+                start = ORG_StrOffset();
+                if (sym == ORS_lbrace) {
+                    ORS_Get(&sym);
+                    fld = rectyp->dsc;
+                    while (sym != ORS_rbrace && sym != ORS_eof) {
+                        expression(&x);
+                        if (x.mode != ORB_Const) {
+                            ORS_Mark("not a constant");
+                            val = 0;
+                        } else {
+                            val = x.a;
+                        }
+                        if (fld != NULL) {
+                            if (fld->type->size == 1) {
+                                ORG_PutByte(val);
+                            } else if (fld->type->size == 2) {
+                                ORG_PutByte(val & 0xFF);
+                                ORG_PutByte((val >> 8) & 0xFF);
+                            }
+                            fld = fld->next;
+                        } else {
+                            ORS_Mark("too many values");
+                        }
+                        if (sym == ORS_comma) {
+                            ORS_Get(&sym);
+                        } else if (sym != ORS_rbrace) {
+                            ORS_Mark(", or } expected");
+                        }
+                    }
+                    Check(ORS_rbrace, "} expected");
+                } else {
+                    ORS_Mark("{ expected");
+                }
+                NewObj(&obj, id, ORB_Const);
+                obj->expo = expo;
+                obj->val = start;
+                obj->lev = rectyp->size;
+                obj->type = rectyp;
+                if (expo) {
+                    obj->exno = exno;
+                    exno++;
+                }
             } else {
-                ORS_Mark("expression not constant");
-                obj->type = intType;
+                expression(&x);
+                if ((x.type->form == ORB_String) && (x.b == 2)) {
+                    ORG_StrToChar(&x);
+                }
+                NewObj(&obj, id, ORB_Const);
+                obj->expo = expo;
+                if (x.mode == ORB_Const) {
+                    obj->val = x.a;
+                    obj->lev = x.b;
+                    obj->type = x.type;
+                } else {
+                    ORS_Mark("expression not constant");
+                    obj->type = intType;
+                }
             }
             Check(ORS_semicolon, "; missing");
         }
@@ -1995,10 +2124,8 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    filename = argv[1];
-
-    // Check for options
-    for (i = 2; i < argc; i++) {
+    // Check for options (flags can appear before or after the filename)
+    for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "/s") == 0) {
             forceNewSF = true;
         } else if (strncmp(argv[i], "-I", 2) == 0) {
@@ -2007,7 +2134,14 @@ int main(int argc, char **argv) {
             } else if (i + 1 < argc) {
                 AddSearchPath(argv[++i]);
             }
+        } else if (filename == NULL) {
+            filename = argv[i];
         }
+    }
+
+    if (filename == NULL) {
+        printf("Usage: %s <module.Mod> [-s] [-I<dir>] [-I <dir>]\n", argv[0]);
+        return 1;
     }
     
     // Initialize the compiler

@@ -7,8 +7,8 @@
 
 // Video display parameters
 #define VIDEO_WIDTH      640
-#define VIDEO_HEIGHT     480
-#define VIDEO_BPP        2
+#define VIDEO_HEIGHT     400
+#define VIDEO_BPP        4
 #define VIDEO_SCALE      2
 #define VIDEO_BPR        (VIDEO_WIDTH * VIDEO_BPP / 8)  // 160 bytes per row
 #define VIDEO_MEM_SIZE   (VIDEO_BPR * VIDEO_HEIGHT)      // 76800 bytes
