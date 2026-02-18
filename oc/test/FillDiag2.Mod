@@ -1,8 +1,8 @@
 MODULE FillDiag2;
-  IMPORT SYSTEM, Graphics, Out;
+  IMPORT SYSTEM, UIGraphics, Out;
 VAR w, bank, addr: INTEGER;
 BEGIN
-  Graphics.FillRect(0, 0, 640, 480, 1);
+  UIGraphics.FillRect(0, 0, 640, 480, 1);
 
   (* Row 409: flat offset 65440=$FFA0 in bank 2, wraps after 96 bytes *)
 

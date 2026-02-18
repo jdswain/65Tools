@@ -48,6 +48,9 @@ extern LONGINT ORG_pc;
 void ORG_MakeConstItem(ORG_Item *x, ORB_Type *typ, LONGINT val);
 void ORG_MakeRealItem(ORG_Item *x, REAL val);
 void ORG_MakeStringItem(ORG_Item *x, LONGINT len);
+void ORG_MakeDataItem(ORG_Item *x, ORB_Type *typ, LONGINT offset, LONGINT size);
+LONGINT ORG_StrOffset(void);
+void ORG_PutByte(int b);
 void ORG_MakeItem(ORG_Item *x, ORB_Object *y, LONGINT curlev);
 
 // Selector operations
@@ -148,6 +151,7 @@ void ORG_UML(ORG_Item *x, ORG_Item *y);
 void ORG_Bit(ORG_Item *x, ORG_Item *y);
 void ORG_HH(ORG_Item *x);
 void ORG_Adr(ORG_Item *x);
+void ORG_Bank(ORG_Item *x);
 void ORG_Condition(ORG_Item *x);
 
 // Module management functions

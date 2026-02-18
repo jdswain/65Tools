@@ -12,7 +12,7 @@ MODULE Out;
     SYSTEM.PUT(0, ACIA_DATA, 0AX)
   END Ln;
 
-  PROCEDURE String*(VAR s: ARRAY OF CHAR);
+  PROCEDURE String*(s: ARRAY OF CHAR);
     VAR i: INTEGER;
   BEGIN
     i := 0;

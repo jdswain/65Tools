@@ -33,7 +33,7 @@
 #define CODE_ORG 0x0000         // Code starts at $0000 (must match codegen.c)
 #define MT 15                   // Max 15 general regs (R0-R14)
 #define SB 15                   // Static Base is R15
-#define maxStrx 2400
+#define maxStrx 16000
 #define maxTD 160
 
 // 65C816 register scheme
@@ -116,6 +116,8 @@ static void incR(void) {
 }
 
 #define SB_TEMP 0x20  // Temp DP location for imported module's var_base (above SB at $1E)
+#define SB_TEMP_BANK 0x22  // Temp DP location for imported module's bank byte
+#define BANK_DP 0x44  // Own module's data bank byte (set at module entry)
 
 // FP workspace DP addresses ($22-$41)
 #define FP_A_LO  0x22  // operand A / result low word
@@ -157,9 +159,14 @@ static int GetSB(LONGINT mno) {
     return SB_DP;
   }
   Set16(1, 1);
+  // Load imported module's var_base address
   reloc[relocC++] = ORG_pc;
   codegen_gen(sLDA, Immediate, (int)(-mno), 0);  // operand = mno for loader
   codegen_gen(sSTA, DirectPage, SB_TEMP, 0);
+  // Load imported module's data bank
+  reloc[relocC++] = ORG_pc | 0x8000;              // bank reloc flag (bit 15)
+  codegen_gen(sLDA, Immediate, (int)(-mno), 0);   // operand = mno for loader
+  codegen_gen(sSTA, DirectPage, SB_TEMP_BANK, 0);
   return SB_TEMP;
 }
 
@@ -788,11 +795,12 @@ static void loadAdr(ORG_Item *x) {
             codegen_gen(sCLC, Implied, 0, 0);                                   // CLC
             codegen_gen(sADC, DirectPage, sb, 0);                               // ADC SB/SB_TEMP
             codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);                     // STA $reg
-            codegen_gen(sLDA, Immediate, 0, 0);                                 // Clear high byte of A
-            Set8(1,0);
-            codegen_gen(sPHB, Implied, 0, 0);                                   // Bank - DBR
-            codegen_gen(sPLA, Implied, 0, 0);                                   // DBR is now in A
-            Set16(1, 0);
+            // Bank: use BANK_DP for own module, SB_TEMP_BANK for imports
+            if (x->r >= 0) {
+              codegen_gen(sLDA, DirectPage, BANK_DP, 0);                        // own module bank
+            } else {
+              codegen_gen(sLDA, DirectPage, SB_TEMP_BANK, 0);                   // import bank
+            }
             codegen_gen(sSTA, DirectPage, reg_addr(RH + 1), 0);                 // STA $reg
         }
         x->r = RH;
@@ -912,6 +920,25 @@ void ORG_MakeStringItem(ORG_Item *x, LONGINT len) {
     }
 }
 
+void ORG_MakeDataItem(ORG_Item *x, ORB_Type *typ, LONGINT offset, LONGINT size) {
+    x->mode = ORB_Const;
+    x->type = typ;
+    x->a = offset;  // offset into str[]
+    x->b = size;    // total byte count
+}
+
+LONGINT ORG_StrOffset(void) {
+    return strx;
+}
+
+void ORG_PutByte(int b) {
+    if (strx < maxStrx) {
+        str[strx++] = b & 0xFF;
+    } else {
+        ORS_Mark("string space overflow");
+    }
+}
+
 void ORG_MakeItem(ORG_Item *x, ORB_Object *y, LONGINT curlev) {
     x->mode = y->class;
     x->type = y->type;
@@ -923,6 +950,15 @@ void ORG_MakeItem(ORG_Item *x, ORB_Object *y, LONGINT curlev) {
         x->b = 0;
     } else if ((y->class == ORB_Const) && (y->type->form == ORB_String)) {
         x->b = y->lev;
+    } else if ((y->class == ORB_Const) &&
+               (y->type->form == ORB_Array || y->type->form == ORB_Record)) {
+        if (y->lev < 0) {
+            // Imported structured constant: treat as imported read-only variable
+            x->mode = ORB_Var;
+            x->r = y->lev;  // -mno
+            x->rdo = 1;
+        }
+        x->b = y->type->size;  // byte size from type
     } else if ((y->class == ORB_Const) && (y->type->form == ORB_Proc)) {
         x->r = y->lev;
         x->b = y->expo ? 1 : 0;  // Store export flag for procedure calls
@@ -949,6 +985,11 @@ void ORG_Field(ORG_Item *x, ORB_Object *y) {
         x->a = x->a + y->val;
     } else if (x->mode == ORB_Par) {
         x->b = x->b + y->val;
+    } else if (x->mode == ORB_Const) {
+        // Structured constant: adjust str offset, convert to global Var
+        x->a = ORG_varsize + x->a + y->val;
+        x->mode = ORB_Var;
+        x->r = 0;  // module level
     }
 }
 
@@ -974,6 +1015,12 @@ void ORG_Index(ORG_Item *x, ORG_Item *y) {
             x->a = y->a * s + x->a;
         } else if (x->mode == ORB_Par) {
             x->b = y->a * s + x->b;
+        } else if (x->mode == ORB_Const) {
+            // Structured constant: adjust str offset, convert to global Var
+            // Data lives at SB + varsize + x->a in the string section
+            x->a = ORG_varsize + y->a * s + x->a;
+            x->mode = ORB_Var;
+            x->r = 0;  // module level
         }
     } else {
         runtime_index:
@@ -1051,6 +1098,19 @@ void ORG_Index(ORG_Item *x, ORG_Item *y) {
             x->mode = RegI;    // Register indirect mode for both read/write
             x->r = y->r;       // Register containing element address
             x->a = x->b;       // Preserve original offset
+        } else if (x->mode == ORB_Const) {
+            // Structured constant: compute address = SB + varsize + str_offset + scaled_index
+            Set16(1, 1);
+            codegen_gen(sLDA, DirectPage, SB_DP, 0);                    // LDA SB
+            codegen_gen(sCLC, Implied, 0, 0);                           // CLC
+            codegen_gen(sADC, Immediate, ORG_varsize + x->a, 0);        // ADC #(varsize+str_offset)
+            codegen_gen(sADC, DirectPage, reg_addr(y->r), 0);           // ADC scaled_index
+            codegen_gen(sSTA, DirectPage, reg_addr(y->r), 0);           // STA element_addr
+            codegen_gen(sSTZ, DirectPage, reg_addr(RH), 0);             // zero bank register
+            x->a = 0;
+            x->r = y->r;
+            x->mode = RegI;
+            incR();  // reserve bank register
         } else if (x->mode == RegI) {
             // 65C816: Add index offset to existing address
             Set16(1, 1);
@@ -1061,7 +1121,7 @@ void ORG_Index(ORG_Item *x, ORG_Item *y) {
             RH--;  // Deallocate y->r register
         }
     }
-    
+
     // Restore the read-only flag - indexed elements inherit the read-only status of the array
     //x->rdo = original_rdo;
 }
@@ -2887,12 +2947,17 @@ void ORG_Enter(ORB_Object *params, LONGINT frame_size, BOOLEAN expo, BOOLEAN int
 
 	Set16(1, 1);
 	if (expo) {
-	  // Save caller's SB and load own module's SB
+	  // Save caller's SB and bank, load own module's SB and bank
 	  codegen_gen(sLDA, DirectPage, SB_DP, 0);   // LDA SB
-	  codegen_gen(sPHA, Implied, 0, 0);                  // PHA (save on stack)
+	  codegen_gen(sPHA, Implied, 0, 0);                  // PHA (save SB on stack)
+	  codegen_gen(sLDA, DirectPage, BANK_DP, 0);  // LDA bank
+	  codegen_gen(sPHA, Implied, 0, 0);                  // PHA (save bank on stack)
 	  reloc[relocC++] = ORG_pc;                          // record for relocation
 	  codegen_gen(sLDA, Immediate, 0x0000, 0);           // LDA #var_base (patched)
 	  codegen_gen(sSTA, DirectPage, SB_DP, 0);    // STA SB
+	  reloc[relocC++] = ORG_pc | 0x8000;                 // bank reloc flag
+	  codegen_gen(sLDA, Immediate, 0x0000, 0);           // LDA #bank (patched)
+	  codegen_gen(sSTA, DirectPage, BANK_DP, 0);  // STA bank
 	}
 
 	if (frame_size > 0) {
@@ -3019,8 +3084,10 @@ void ORG_Return(INTEGER form, ORG_Item *x, LONGINT size, BOOLEAN expo, BOOLEAN i
 	  codegen_gen(sTCS, Implied, 0, 0);           // TCS (Transfer A to Stack)
 	}
 	if (expo) {
-	  // Restore caller's SB before returning
-	  codegen_gen(sPLA, Implied, 0, 0);                  // PLA
+	  // Restore caller's bank and SB before returning (reverse push order)
+	  codegen_gen(sPLA, Implied, 0, 0);                  // PLA (bank)
+	  codegen_gen(sSTA, DirectPage, BANK_DP, 0);  // STA bank
+	  codegen_gen(sPLA, Implied, 0, 0);                  // PLA (SB)
 	  codegen_gen(sSTA, DirectPage, SB_DP, 0);    // STA SB
 	  codegen_gen(sRTL, Implied, 0, 0);                  // RTL
 	} else {
@@ -3700,9 +3767,35 @@ void ORG_Adr(ORG_Item *x) {
 	  load(x);
     } else if ((x->mode == ORB_Const) && (x->type->form == ORB_String)) {
 	  loadStringAdr(x);
+    } else if ((x->mode == ORB_Const) &&
+               (x->type->form == ORB_Array || x->type->form == ORB_Record)) {
+	  loadStringAdr(x);
     } else {
 	  ORS_Mark("not addressable");
     }
+}
+
+void ORG_Bank(ORG_Item *x) {
+  if (x->mode == ORB_Var || x->mode == ORB_Par || x->mode == RegI) {
+    loadAdr(x);
+    // loadAdr allocated 2 regs: [addr, bank]. Keep bank, drop addr.
+    Set16(1, 1);
+    codegen_gen(sLDA, DirectPage, reg_addr(x->r + 1), 0);
+    codegen_gen(sSTA, DirectPage, reg_addr(x->r), 0);
+    RH--;
+  } else if (x->mode == ORB_Const &&
+             (x->type->form == ORB_Array || x->type->form == ORB_Record ||
+              x->type->form == ORB_String)) {
+    // Same-module structured constant/string: own module's bank
+    Set16(1, 1);
+    codegen_gen(sLDA, DirectPage, BANK_DP, 0);
+    codegen_gen(sSTA, DirectPage, reg_addr(RH), 0);
+    x->mode = Reg;
+    x->r = RH;
+    incR();
+  } else {
+    ORS_Mark("not addressable");
+  }
 }
 
 void ORG_Condition(ORG_Item *x) {
@@ -3751,6 +3844,11 @@ void ORG_Header(void) {
   reloc[relocC++] = ORG_pc;
   codegen_gen(sLDA, Immediate, 0x0000, 0);
   codegen_gen(sSTA, DirectPage, SB_DP, 0);
+
+  // Bank initialisation — loader patches to actual data bank (0)
+  reloc[relocC++] = ORG_pc | 0x8000;  // bank reloc flag
+  codegen_gen(sLDA, Immediate, 0x0000, 0);
+  codegen_gen(sSTA, DirectPage, BANK_DP, 0);
 }
 
 static LONGINT NofPtrs(ORB_Type *typ) {
@@ -4641,9 +4739,12 @@ void ORG_Close(ORS_Ident modid, LONGINT key, LONGINT nofent) {
   obj = topScope->next;
   while (obj != NULL) {
 	if (obj->exno != 0) {
-	  if (((obj->class == ORB_Const) && (obj->type->form == ORB_Proc)) || 
+	  if (((obj->class == ORB_Const) && (obj->type->form == ORB_Proc)) ||
 		  (obj->class == ORB_Var)) {
 		Files_WriteInt(&R, obj->val);
+	  } else if ((obj->class == ORB_Const) &&
+				 (obj->type->form == ORB_Array || obj->type->form == ORB_Record)) {
+		Files_WriteInt(&R, ORG_varsize + obj->val);  // offset from SB
 	  } else if (obj->class == ORB_Typ) {
 		if (obj->type->form == ORB_Record) {
 		  Files_WriteInt(&R, obj->type->len % 0x10000);

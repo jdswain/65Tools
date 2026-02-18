@@ -7,16 +7,28 @@
 #ifdef __APPLE__
 #import <Cocoa/Cocoa.h>
 
-// 2-bit per pixel palette: black, dark gray, light gray, white
-static const uint8_t palette[4][3] = {
-  {0,   0,   0},     // 00 = black
-  {85,  85,  85},    // 01 = dark gray
-  {170, 170, 170},   // 10 = light gray
-  {255, 255, 255}    // 11 = white
+// 4-bit per pixel palette: standard VGA 16 colors
+static const uint8_t palette[16][3] = {
+  {  0,   0,   0},   //  0 = Black
+  {  0,   0, 170},   //  1 = Dark Blue
+  {  0, 170,   0},   //  2 = Dark Green
+  {  0, 170, 170},   //  3 = Dark Cyan
+  {170,   0,   0},   //  4 = Dark Red
+  {170,   0, 170},   //  5 = Dark Magenta
+  {170,  85,   0},   //  6 = Brown
+  {170, 170, 170},   //  7 = Light Gray
+  { 85,  85,  85},   //  8 = Dark Gray
+  { 85,  85, 255},   //  9 = Light Blue
+  { 85, 255,  85},   // 10 = Light Green
+  { 85, 255, 255},   // 11 = Light Cyan
+  {255,  85,  85},   // 12 = Light Red
+  {255,  85, 255},   // 13 = Light Magenta
+  {255, 255,  85},   // 14 = Yellow
+  {255, 255, 255}    // 15 = White
 };
 
 // ---------------------------------------------------------------------------
-// VideoView — custom NSView that renders the 2bpp framebuffer at 2x scale
+// VideoView — custom NSView that renders the 4bpp framebuffer at 2x scale
 // ---------------------------------------------------------------------------
 
 @interface VideoView : NSView {
@@ -56,20 +68,25 @@ static const uint8_t palette[4][3] = {
 - (void)drawRect:(NSRect)dirtyRect {
   (void)dirtyRect;
   uint8_t *mem = video->getMemory();
-  int bpr = videoWidth / 4; // bytes per video row (160)
+  int bpr = videoWidth / 2; // bytes per video row (320)
 
-  // Convert 2bpp packed pixels to RGBA
+  // Convert 4bpp packed pixels to RGBA
   for (int y = 0; y < videoHeight; y++) {
     for (int x = 0; x < bpr; x++) {
       uint8_t byte = mem[y * bpr + x];
-      for (int p = 0; p < 4; p++) {
-        int ci = (byte >> (6 - p * 2)) & 0x03;
-        int off = (y * videoWidth + x * 4 + p) * 4;
-        rgbaBuffer[off + 0] = palette[ci][0]; // R
-        rgbaBuffer[off + 1] = palette[ci][1]; // G
-        rgbaBuffer[off + 2] = palette[ci][2]; // B
-        rgbaBuffer[off + 3] = 255;            // A
-      }
+      // High nibble = left pixel (even x), low nibble = right pixel (odd x)
+      int ci0 = (byte >> 4) & 0x0F;
+      int ci1 = byte & 0x0F;
+      int off0 = (y * videoWidth + x * 2) * 4;
+      int off1 = off0 + 4;
+      rgbaBuffer[off0 + 0] = palette[ci0][0]; // R
+      rgbaBuffer[off0 + 1] = palette[ci0][1]; // G
+      rgbaBuffer[off0 + 2] = palette[ci0][2]; // B
+      rgbaBuffer[off0 + 3] = 255;             // A
+      rgbaBuffer[off1 + 0] = palette[ci1][0]; // R
+      rgbaBuffer[off1 + 1] = palette[ci1][1]; // G
+      rgbaBuffer[off1 + 2] = palette[ci1][2]; // B
+      rgbaBuffer[off1 + 3] = 255;             // A
     }
   }
 

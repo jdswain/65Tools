@@ -10,6 +10,7 @@
 
 	.proc FillRect(INTEGER, INTEGER, INTEGER, INTEGER, INTEGER)
 	.proc DrawLine(INTEGER, INTEGER, INTEGER, INTEGER, BYTE, BYTE)
+	.proc DrawGlyph(INTEGER, INTEGER, INTEGER, INTEGER, INTEGER, INTEGER): INTEGER
 
 ; SetPixel(x, y, c) - R[0]=x, R[1]=y, R[2]=c
 ; Video: bank 2, 160 bytes/row, 4 pixels/byte (2-bit color)
@@ -974,6 +975,413 @@ FillRect*:
     beq .fr_done
     brl .fr_rowloop
 .fr_done:
+    rtl
+
+; ============================================================
+; DrawGlyph(fontAddr, fontBank, ch, x, y, color): INTEGER
+; R[0]=$02=fontAddr, R[1]=$04=fontBank, R[2]=$06=ch,
+; R[3]=$08=x, R[4]=$0A=y (baseline), R[5]=$0C=color
+; Returns advance width (dx) in R[0]=$02
+;
+; Font layout:
+;   T[0..255] = ARRAY OF INTEGER at fontAddr (512 bytes)
+;   raster at fontAddr+512: per-glyph [dx,xoff,yoff,w,h] + bitmap
+;
+; DP workspace ($20-$40):
+;   $20-$22  font_ptr (3-byte: addr_lo, addr_hi, bank)
+;   $24      ch
+;   $26      draw_x
+;   $28      draw_y (baseline)
+;   $2A      color
+;   $2C      T[ch] raster offset
+;   $2E-$30  raster_ptr (3-byte)
+;   $32      dx (advance width)
+;   $34      xoff (sign-extended)
+;   $36      yoff (sign-extended)
+;   $38      glyph_w
+;   $3A      glyph_h
+;   $3C      bytes_per_row
+;   $3E      base_screen_y
+;   $40      cur_row
+; Per-pixel temps:
+;   $02-$04  video ptr (3-byte)
+;   $06      cur_screen_y
+;   $08      bitmap_byte
+;   $0A      bit_x
+;   $0C      cur_screen_x
+;   $0E      video_addr / row_base
+;   $10      row_base (persistent within row)
+;   $12      pixel temp / pos
+;   $14      bit_mask (persistent within byte)
+;   $16      byte_counter
+;   $18      raster_y_offset
+; ============================================================
+DrawGlyph*:
+    ; 1. Save params to safe DP area
+    lda $02
+    sta $20             ; font_ptr low (fontAddr)
+    lda $04
+    sta $22             ; font_ptr bank (fontBank)
+    lda $06
+    sta $24             ; ch
+    lda $08
+    sta $26             ; draw_x
+    lda $0A
+    sta $28             ; draw_y (baseline)
+    lda $0C
+    and #$0003
+    sta $2A             ; color (2-bit)
+
+    ; 2. Read T[ch]: Y = ch * 2, LDA [$20],Y
+    lda $24             ; ch
+    asl                 ; ch * 2 (word index)
+    tay
+    lda [$20],y         ; T[ch] - read 16-bit from font_ptr + ch*2
+    sta $2C             ; T[ch] = raster offset
+
+    ; 3. If T[ch] == 0: null glyph, return dx=0
+    bne .dg_valid
+    stz $02             ; return 0
+    rtl
+
+.dg_valid:
+    ; 4. Compute raster_ptr = fontAddr + 512 + T[ch]
+    lda $20             ; fontAddr
+    clc
+    adc #512            ; + 512 (past T table)
+    clc
+    adc $2C             ; + T[ch]
+    sta $2E             ; raster_ptr low
+    lda $22             ; fontBank
+    sta $30             ; raster_ptr bank
+
+    ; 5. Read 5 metric bytes via [$2E],Y (8-bit)
+    ldy #0
+    longa=off
+    sep #$20            ; 8-bit accumulator
+
+    lda [$2E],y         ; byte 0: dx
+    rep #$20
+    longa=on
+    and #$00FF
+    sta $32             ; dx
+
+    longa=off
+    sep #$20
+    iny
+    lda [$2E],y         ; byte 1: xoff (signed)
+    rep #$20
+    longa=on
+    and #$00FF
+    cmp #$0080          ; sign-extend if >= 128
+    bcc .dg_xpos
+    ora #$FF00
+.dg_xpos:
+    sta $34             ; xoff (sign-extended)
+
+    longa=off
+    sep #$20
+    iny
+    lda [$2E],y         ; byte 2: yoff (signed)
+    rep #$20
+    longa=on
+    and #$00FF
+    cmp #$0080
+    bcc .dg_ypos
+    ora #$FF00
+.dg_ypos:
+    sta $36             ; yoff (sign-extended)
+
+    longa=off
+    sep #$20
+    iny
+    lda [$2E],y         ; byte 3: w
+    rep #$20
+    longa=on
+    and #$00FF
+    sta $38             ; glyph_w
+
+    longa=off
+    sep #$20
+    iny
+    lda [$2E],y         ; byte 4: h
+    rep #$20
+    longa=on
+    and #$00FF
+    sta $3A             ; glyph_h
+
+    ; 6. bytes_per_row = (w + 7) >> 3
+    lda $38             ; w
+    clc
+    adc #7
+    lsr
+    lsr
+    lsr                 ; / 8
+    sta $3C             ; bytes_per_row
+
+    ; 7. Advance raster_ptr += 5 (past metrics)
+    lda $2E
+    clc
+    adc #5
+    sta $2E             ; raster_ptr now points to bitmap data
+
+    ; 8. base_screen_y = y + yoff
+    ;    (bottom of glyph; font data is stored bottom-to-top)
+    lda $28             ; y (baseline)
+    clc
+    adc $36             ; + yoff (signed: 0=at baseline, neg=below)
+    sta $3E             ; base_screen_y
+
+    ; 9. If glyph_h == 0: return dx
+    lda $3A
+    bne .dg_start
+    brl .dg_done        ; long branch to exit
+.dg_start:
+
+    ; 10. cur_row = 0
+    stz $40
+
+; ---- Row loop ----
+.dg_rowloop:
+    ; screen_y = base_screen_y + cur_row
+    lda $3E
+    clc
+    adc $40
+    sta $06             ; cur_screen_y
+
+    ; Skip if screen_y < 0 or >= 480
+    bpl .dg_ynotminus
+    brl .dg_nextrow     ; negative -> skip row
+.dg_ynotminus:
+    cmp #480
+    bcc .dg_yinrange
+    brl .dg_nextrow     ; >= 480 -> skip row
+.dg_yinrange:
+
+    ; row_base = screen_y * 160
+    lda $06
+    asl
+    asl
+    asl
+    asl
+    asl                 ; * 32
+    sta $10             ; temp
+    asl
+    asl                 ; * 128
+    clc
+    adc $10             ; * 160
+    sta $10             ; row_base
+
+    ; Compute raster byte offset for this row = cur_row * bytes_per_row
+    lda $40             ; cur_row
+    ldx $3C             ; bytes_per_row
+    cpx #1
+    beq .dg_bpr_done
+    cpx #2
+    beq .dg_bpr2
+    ; General: repeated addition
+    sta $12             ; temp = cur_row
+    lda #0
+.dg_bpr_mul:
+    clc
+    adc $12
+    dex
+    bne .dg_bpr_mul
+    bra .dg_bpr_done
+.dg_bpr2:
+    asl                 ; cur_row * 2
+.dg_bpr_done:
+    sta $18             ; raster_y_offset
+
+    ; bit_x = 0
+    stz $0A
+    ; byte_counter = bytes_per_row
+    lda $3C
+    sta $16
+
+; ---- Byte loop ----
+.dg_byteloop:
+    ; Read bitmap byte at raster_ptr + raster_y_offset
+    ldy $18             ; Y = raster offset (16-bit index ok)
+    longa=off
+    sep #$20
+    lda [$2E],y         ; read bitmap byte
+    rep #$20
+    longa=on
+    and #$00FF
+    sta $08             ; bitmap_byte
+
+    ; Advance raster_y_offset for next byte
+    inc $18
+
+    ; If byte == 0: skip 8 bits
+    lda $08
+    bne .dg_hasbits
+    brl .dg_skipbyte
+.dg_hasbits:
+
+    ; Bit loop: process 8 bits MSB-first
+    lda #$0080
+    sta $14             ; bit_mask = $80
+
+.dg_bitloop:
+    ; Check if bit_x >= glyph_w: done with bits
+    lda $0A             ; bit_x
+    cmp $38             ; glyph_w
+    bcc .dg_bitinrange
+    brl .dg_bytenext
+.dg_bitinrange:
+
+    ; Test if bit is set
+    lda $08             ; bitmap_byte
+    and $14             ; & bit_mask
+    bne .dg_bitset
+    brl .dg_nextbit     ; bit not set
+.dg_bitset:
+
+    ; Compute screen_x = draw_x + xoff + bit_x
+    lda $26             ; draw_x
+    clc
+    adc $34             ; + xoff
+    clc
+    adc $0A             ; + bit_x
+    sta $0C             ; cur_screen_x
+
+    ; Bounds check: 0 <= screen_x < 640
+    bpl .dg_xnotminus
+    brl .dg_nextbit     ; negative
+.dg_xnotminus:
+    cmp #640
+    bcc .dg_xinrange
+    brl .dg_nextbit     ; >= 640
+.dg_xinrange:
+
+    ; ---- Inline pixel write at ($0C, $06) ----
+    ; video_addr = row_base + screen_x / 4
+    lda $0C             ; screen_x
+    lsr
+    lsr                 ; / 4
+    clc
+    adc $10             ; + row_base
+    sta $02             ; video ptr addr
+
+    ; Bank: 2 if screen_y < 410, else 3
+    lda $06             ; screen_y
+    cmp #410
+    lda #$02
+    bcc .dg_bok
+    lda #$03
+.dg_bok:
+    sta $04             ; video ptr bank
+
+    ; pixel pos = screen_x MOD 4
+    lda $0C
+    and #$0003
+    sta $12             ; pos
+
+    ; Read current video byte
+    ldy #0
+    longa=off
+    sep #$20
+    lda [$02],y         ; read pixel byte
+    rep #$20
+    longa=on
+    and #$00FF
+    ; A = current pixel byte
+
+    ldx $12             ; pos
+    cpx #0
+    beq .dg_pp0
+    cpx #1
+    beq .dg_pp1
+    cpx #2
+    beq .dg_pp2
+    bra .dg_pp3
+
+.dg_pp0:
+    ; pos 0: bits 7-6, clear mask=$3F
+    and #$003F
+    sta $12
+    lda $2A             ; color
+    asl
+    asl
+    asl
+    asl
+    asl
+    asl                 ; << 6
+    ora $12
+    bra .dg_pwrite
+
+.dg_pp1:
+    ; pos 1: bits 5-4, clear mask=$CF
+    and #$00CF
+    sta $12
+    lda $2A             ; color
+    asl
+    asl
+    asl
+    asl                 ; << 4
+    ora $12
+    bra .dg_pwrite
+
+.dg_pp2:
+    ; pos 2: bits 3-2, clear mask=$F3
+    and #$00F3
+    sta $12
+    lda $2A             ; color
+    asl
+    asl                 ; << 2
+    ora $12
+    bra .dg_pwrite
+
+.dg_pp3:
+    ; pos 3: bits 1-0, clear mask=$FC
+    and #$00FC
+    ora $2A             ; | color
+    ; fall through
+
+.dg_pwrite:
+    ldy #0
+    longa=off
+    sep #$20
+    sta [$02],y         ; write pixel byte
+    rep #$20
+    longa=on
+    ; ---- End pixel write ----
+
+.dg_nextbit:
+    ; Advance bit_x, shift bit_mask
+    inc $0A             ; bit_x++
+    lsr $14             ; bit_mask >>= 1
+    lda $14
+    beq .dg_bytenext    ; byte exhausted (mask went to 0)
+    brl .dg_bitloop     ; more bits in this byte
+
+.dg_skipbyte:
+    ; Skip 8 bits
+    lda $0A
+    clc
+    adc #8
+    sta $0A
+
+.dg_bytenext:
+    ; Next byte
+    dec $16             ; byte_counter--
+    beq .dg_nextrow     ; no more bytes
+    brl .dg_byteloop    ; next byte
+
+.dg_nextrow:
+    lda $40
+    inc a
+    sta $40
+    cmp $3A             ; glyph_h
+    bcs .dg_done        ; cur_row >= glyph_h
+    brl .dg_rowloop
+
+.dg_done:
+    ; Return dx in R[0]
+    lda $32
+    sta $02
     rtl
 
 InitGraphics*:

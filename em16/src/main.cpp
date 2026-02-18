@@ -309,8 +309,27 @@ static ModuleInfo *loaded_modules = NULL;
 static int mod_count = 0;
 static unsigned int mod_entries[64];
 
-// Search directory for auto-loading dependencies
+// Search directories for auto-loading dependencies
 static char search_dir[256] = "";
+#define MAX_SEARCH_PATHS 16
+static char search_paths[MAX_SEARCH_PATHS][256];
+static int num_search_paths = 0;
+
+static void add_search_path(const char *path) {
+  if (num_search_paths < MAX_SEARCH_PATHS) {
+    strncpy(search_paths[num_search_paths], path, 255);
+    search_paths[num_search_paths][255] = '\0';
+    // Ensure trailing slash
+    int len = strlen(search_paths[num_search_paths]);
+    if (len > 0 && path[len-1] != '/') {
+      if (len < 254) {
+        search_paths[num_search_paths][len] = '/';
+        search_paths[num_search_paths][len+1] = '\0';
+      }
+    }
+    num_search_paths++;
+  }
+}
 
 // Construct a .816 path from a module name relative to a reference file's directory
 // e.g., reference_file="test/Foo.816", module_name="Out" -> "test/Out.816"
@@ -548,22 +567,35 @@ unsigned int loadMod(char * filename) {
       strcpy(import_names[import_count], imp_name);
       import_map[import_count] = find_module_by_name(imp_name);
 
-      // Auto-load missing dependency
+      // Auto-load missing dependency — try search_dir first, then -I paths
       if (!import_map[import_count]) {
         char dep_path[256];
+        bool found = false;
+        // Try the module's own directory first
         if (construct_module_path(search_dir, imp_name, dep_path, sizeof(dep_path))) {
           FILE *dep_test = fopen(dep_path, "rb");
-          if (dep_test) {
-            fclose(dep_test);
-            printf("  Auto-loading dependency: %s\n", dep_path);
-            unsigned int dep_entry = loadMod(dep_path);
-            if (dep_entry != 0 && mod_count < 64) {
-              mod_entries[mod_count++] = dep_entry;
-            }
-            import_map[import_count] = find_module_by_name(imp_name);
-          } else {
-            printf("  Error: Module '%s' not found (looked for %s)\n", imp_name, dep_path);
+          if (dep_test) { fclose(dep_test); found = true; }
+        }
+        // Try each -I search path
+        for (int si = 0; !found && si < num_search_paths; si++) {
+          if (construct_module_path(search_paths[si], imp_name, dep_path, sizeof(dep_path))) {
+            FILE *dep_test = fopen(dep_path, "rb");
+            if (dep_test) { fclose(dep_test); found = true; }
           }
+        }
+        if (found) {
+          printf("  Auto-loading dependency: %s\n", dep_path);
+          unsigned int dep_entry = loadMod(dep_path);
+          if (dep_entry != 0 && mod_count < 64) {
+            mod_entries[mod_count++] = dep_entry;
+          }
+          import_map[import_count] = find_module_by_name(imp_name);
+        } else {
+          printf("  Error: Module '%s' not found", imp_name);
+          if (search_dir[0]) printf(" (looked in %s", search_dir);
+          for (int si = 0; si < num_search_paths; si++)
+            printf("%s%s", (si == 0 && !search_dir[0]) ? " (looked in " : ", ", search_paths[si]);
+          printf(")\n");
         }
       }
 
@@ -792,8 +824,37 @@ unsigned int loadMod(char * filename) {
       for (int i = 0; i < reloc_count; i++) {
         int32_t reloc_addr;
         if (fread(&reloc_addr, 4, 1, file) == 1) {
-          uint32_t bank_reloc_addr = bank_address + module_base + reloc_addr;
-          apply_relocation(bank_reloc_addr, module_base, module_var_base, import_map, import_count);
+          // Check for bank relocation flag (bit 15 set in 16-bit reloc value,
+          // sign-extended to negative int32_t by compiler's short int -> LONGINT)
+          bool is_bank_reloc = (reloc_addr < 0);
+          int32_t actual_addr = is_bank_reloc ? (reloc_addr & 0x7FFF) : reloc_addr;
+          uint32_t bank_reloc_addr = bank_address + module_base + actual_addr;
+
+          if (is_bank_reloc) {
+            // Bank relocation: patch LDA #imm with data bank (always 0 for now)
+            uint8_t opcode = emu816::getByte(bank_reloc_addr);
+            if (opcode == 0xA9) {  // LDA #imm16
+              uint16_t operand = emu816::getByte(bank_reloc_addr + 1) |
+                                (emu816::getByte(bank_reloc_addr + 2) << 8);
+              uint16_t var_bank = 0;  // data is always in bank 0
+              if (operand != 0x0000) {
+                // Import: operand is mno
+                int mno = operand;
+                if (mno <= import_count && import_map[mno]) {
+                  var_bank = 0;  // all module data in bank 0
+                }
+              }
+              emu816::setByte(bank_reloc_addr + 1, var_bank & 0xFF);
+              emu816::setByte(bank_reloc_addr + 2, (var_bank >> 8) & 0xFF);
+              printf("  BANK relocation at $%06X: operand=$%04X -> bank $%04X\n",
+                     bank_reloc_addr, operand, var_bank);
+            } else {
+              printf("Warning: Bank relocation at $%06X points to unknown opcode $%02X\n",
+                     bank_reloc_addr, opcode);
+            }
+          } else {
+            apply_relocation(bank_reloc_addr, module_base, module_var_base, import_map, import_count);
+          }
         }
       }
       if (reloc_count > 0) printf("\n");
@@ -920,8 +981,20 @@ int main(int argc, char **argv)
       continue;
     }
 
+    if (!strcmp(argv[index], "-I") && index + 1 < argc) {
+      add_search_path(argv[index + 1]);
+      index += 2;
+      continue;
+    }
+
+    if (!strncmp(argv[index], "-I", 2) && argv[index][2] != '\0') {
+      add_search_path(&argv[index][2]);
+      ++index;
+      continue;
+    }
+
     if (!strcmp(argv[index], "-?")) {
-      cerr << "Usage: em16 [-t] [-dp addr] [-sp addr] [-video] [-test-pattern] [-disk0 file] [-disk1 file] file ..." << endl;
+      cerr << "Usage: em16 [-t] [-dp addr] [-sp addr] [-video] [-test-pattern] [-I dir] [-disk0 file] [-disk1 file] file ..." << endl;
       return (1);
     }
 
