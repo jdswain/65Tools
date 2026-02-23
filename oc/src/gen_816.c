@@ -239,7 +239,27 @@ void gen_816(OpCode opcode, AddrMode mode, int value1, int value2)
     case DirectPageIndexedIndirectX:     ob(0xc1, value1); return;
     case DirectPageIndirectIndexedY:     ob(0xd1, value1); return;
     case DirectPageIndirectLongIndexedY: ob(0xd7, value1); return;
-    case StackRelative:                  ob(0xc3, value1); return;
+    case StackRelative:
+      if (value1 > 255) {
+        // Large stack-relative offset: save both values to DP temps, compare via DP
+        ob(0x85, 0x22);                                    // STA $22 (save compare value)
+        bool cmp_save = longa;
+        if (!longa) { o(0xC2); o(0x20); longa = 1; }      // REP #$20
+        o(0xDA);                                            // PHX
+        o(0x3B);                                            // TSC
+        o(0x18);                                            // CLC
+        o(0x69); o((value1+2)&0xff); o((value1+2)>>8);    // ADC #(offset+2)
+        o(0xAA);                                            // TAX
+        o(0xBF); o(0x00); o(0x00); o(0x00);               // LDA $000000,X
+        ob(0x85, 0x24);                                     // STA $24 (save stack value)
+        o(0xFA);                                            // PLX
+        if (!cmp_save) { o(0xE2); o(0x20); longa = 0; }   // SEP #$20
+        ob(0xA5, 0x22);                                     // LDA $22 (restore compare value)
+        ob(0xC5, 0x24);                                     // CMP $24
+      } else {
+        ob(0xc3, value1);
+      }
+      return;
     case StackRelativeIndirectIndexedY:  ob(0xd3, value1); return;
     default:                             break;
     }
@@ -389,7 +409,23 @@ void gen_816(OpCode opcode, AddrMode mode, int value1, int value2)
     case DirectPageIndexedIndirectX:     ob(0xa1, value1); return;
     case DirectPageIndirectIndexedY:     ob(0xb1, value1); return;
     case DirectPageIndirectLongIndexedY: ob(0xb7, value1); return;
-    case StackRelative:                  ob(0xa3, value1); return;
+    case StackRelative:
+      if (value1 > 255) {
+        // Large stack-relative offset: PHX; TSC; CLC; ADC #(off+2); TAX; LDA $000000,X; PLX
+        bool lda_save = longa;
+        if (!longa) { o(0xC2); o(0x20); longa = 1; }  // REP #$20
+        o(0xDA);                                         // PHX (SP -= 2)
+        o(0x3B);                                         // TSC
+        o(0x18);                                         // CLC
+        o(0x69); o((value1+2)&0xff); o((value1+2)>>8);  // ADC #(offset+2)
+        o(0xAA);                                         // TAX
+        if (!lda_save) { o(0xE2); o(0x20); longa = 0; } // SEP #$20
+        o(0xBF); o(0x00); o(0x00); o(0x00);             // LDA $000000,X
+        o(0xFA);                                         // PLX
+      } else {
+        ob(0xa3, value1);
+      }
+      return;
     case StackRelativeIndirectIndexedY:  ob(0xb3, value1); return;
     default:                             return;
     }
@@ -666,7 +702,25 @@ void gen_816(OpCode opcode, AddrMode mode, int value1, int value2)
     case DirectPageIndexedIndirectX:     ob(0x81, value1); return;
     case DirectPageIndirectIndexedY:     ob(0x91, value1); return;
     case DirectPageIndirectLongIndexedY: ob(0x97, value1); return;
-    case StackRelative:                  ob(0x83, value1); return;
+    case StackRelative:
+      if (value1 > 255) {
+        // Large stack-relative offset: save A to DP temp, compute addr, restore, store
+        ob(0x85, 0x42);                                   // STA $42 (save value)
+        bool sta_save = longa;
+        if (!longa) { o(0xC2); o(0x20); longa = 1; }     // REP #$20
+        o(0xDA);                                           // PHX (SP -= 2)
+        o(0x3B);                                           // TSC
+        o(0x18);                                           // CLC
+        o(0x69); o((value1+2)&0xff); o((value1+2)>>8);   // ADC #(offset+2)
+        o(0xAA);                                           // TAX
+        if (!sta_save) { o(0xE2); o(0x20); longa = 0; }  // SEP #$20
+        ob(0xA5, 0x42);                                    // LDA $42 (restore value)
+        o(0x9F); o(0x00); o(0x00); o(0x00);              // STA $000000,X
+        o(0xFA);                                           // PLX
+      } else {
+        ob(0x83, value1);
+      }
+      return;
     case StackRelativeIndirectIndexedY:  ob(0x93, value1); return;
     default:                              break;
     }
