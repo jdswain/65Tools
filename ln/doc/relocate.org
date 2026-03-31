@@ -1,0 +1,66 @@
+A code module must be 64k or smaller in size. If it is larger the compiler will break it
+up into multiple banks. All banks in an executable share the same data segment.
+
+* Process
+
+** JMP
+A jump uses BRL and therefore doesn't need relocation.
+
+** JSR
+JSR's need relocation, this is done as needed, not immediately. It makes use of a 
+relocation table to do this.
+
+The relocation table consists of:
+  from_addr
+  to_addr
+
+The code is generated with a JSR to the relocation resolver. This subroutine does the 
+following:
+
+1. Find the target_offset using the return address on the stack as the index.
+2. Add the PBA and the target_offset to get dst_addr, write this to the instruction.
+3. JMP to the dst_addr.
+
+resolve:  LDY 0,s
+
+	  LDX #reloc_table_addr   
+	  CLC
+	  ADC $pba
+	  LDA #reloc_table_len-1
+	  ASR
+	  CPY X,A
+
+Set m (the position of the middle element) to the floor of (L + R) / 2, which is the greatest integer less than or equal to (L + R) / 2.
+If Am < T, set L to m + 1 and go to step 2.
+If Am > T, set R to m − 1 and go to step 2.
+Now Am = T, the search is done; return m.
+
+  	  CLC
+	  ADC $PBR
+    	  STA (0,s)
+    	  JMP #0,A
+
+** JSL    
+Similar to JSR but this is a call to a shared library, so the first call requires 
+resolving both the library base address and the library data base.
+
+The library relocation table consists of:
+  from_addr
+  library_index
+  to_addr
+
+The library_index is used to look up the library base address.
+
+* Shared Library
+
+** Direct Page
+A shared library uses the applications direct page.
+
+** Stack
+A shared library uses the applications stack.
+
+** .data and .bss
+Each process has it's own copy of the libraries .data and .bss segments. Each thread has
+it's own copy of the libraries tls.
+
+

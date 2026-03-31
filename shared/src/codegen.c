@@ -191,7 +191,7 @@ void obita(const char * filename, int line_num, uint8_t op, int mask, int addr) 
 }
 
 void obitar(const char *filename, int line_num, uint8_t op, int mem, int mask, int v) {
-  o(op); o(mem &0xff); o(mem >> 8); o(mask);
+  o(op); o(mask); o(mem &0xff); o(mem >> 8);
   int r = v - (addr + 1);
   if ((r > 127) || (r < -128)) {
     if (codegen_current_pass <= 0)

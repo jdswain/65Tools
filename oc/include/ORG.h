@@ -26,7 +26,7 @@
 #include "ORS.h"  // For ORS_Ident
 #include "Oberon.h"
 
-#define maxCode 32000  // Increased for 65C816 byte-per-element usage
+#define maxCode 48000  // Supports large modules (e.g. Files.Mod with 4.5K FAT cache)
 #define WordSize 2     // 65C816 word size in bytes
 extern LONGINT ORG_pc;
 extern LONGINT ORG_varsize; // Size of module variables
@@ -137,6 +137,7 @@ void ORG_Put(ORG_Item *bank, ORG_Item *addr, ORG_Item *val);
 void ORG_Copy(ORG_Item *x, ORG_Item *y, ORG_Item *z);
 void ORG_TRB(ORG_Item *x, ORG_Item *y);
 void ORG_TSB(ORG_Item *x, ORG_Item *y);
+void ORG_Exec(ORG_Item *addr, ORG_Item *bank);
 
 // Inline functions
 void ORG_Abs(ORG_Item *x);

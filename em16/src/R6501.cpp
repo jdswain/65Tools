@@ -61,54 +61,10 @@ void R6501::reset()
 
 R6501::R6501()
 {
-    // Skip PTY setup when stdin is piped (non-interactive mode)
-    if (!isatty(STDIN_FILENO)) {
-        pty_fd = -1;
-        return;
-    }
-
-    int slave_fd;
-    char pty_name[128];
-    struct termios tty;
-
-    // Initialize termios structure for raw mode
-    memset(&tty, 0, sizeof(tty));
-    tty.c_cflag = CS8;
-
-    // Create PTY pair
-    int result = openpty(&pty_fd, &slave_fd, pty_name, &tty, nullptr);
-    if (result < 0) {
-        std::fprintf(stderr, "Failed to create PTY: %s\n", strerror(errno));
-        return;
-    }
-
-    std::printf("Slave PTY: %s\n", pty_name);
-
-    // Wait for user input (consider removing this in production)
-    std::cout << "Press Enter to continue...";
-    std::cin.ignore();
-
-    // Configure master PTY for raw mode
-    if (tcgetattr(pty_fd, &tty) < 0) {
-        std::fprintf(stderr, "Failed to get PTY attributes: %s\n", strerror(errno));
-        close(pty_fd);
-        close(slave_fd);
-        return;
-    }
-
-    cfmakeraw(&tty);
-
-    if (tcsetattr(pty_fd, TCSANOW, &tty) < 0) {
-        std::fprintf(stderr, "Failed to set PTY attributes: %s\n", strerror(errno));
-        close(pty_fd);
-        close(slave_fd);
-        return;
-    }
-    
-    // Close slave fd as we only need the master
-    close(slave_fd);
-    
-    statusReg = 0x10;
+    // PTY is not created here — it's set up lazily in reset()
+    // to avoid creating unused PTYs for other CPU types.
+    pty_fd = -1;
+    statusReg = 0x40;
 }
 
 void R6501::status() {
@@ -188,9 +144,7 @@ void R6501::status() {
 }
 */
 void R6501::send(wdc816::Byte data) {
-  printf("Send $%02x to %d\n", data, pty_fd);
-  // std::cout << "send '" << std::hex << data << "'" << std::endl;
-  int bytes = write(3, &data, 1);
+  int bytes = write(pty_fd, &data, 1);
   if (bytes != 1) {
     fprintf(stderr, "Couldn't write to serial port");
   }

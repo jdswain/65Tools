@@ -1,0 +1,64 @@
+# compile
+#
+# Rules for compiling
+
+.PHONY: all debug release
+
+all: $(DEFAULT_TARGET)
+
+#
+# Create directories if necessary
+#
+.PHONY: objdirs bindirs
+objdirs: $(OBJPATH)
+bindirs: objdirs $(BINPATH)
+
+$(OBJPATH) $(BINPATH):
+	@$(MKDIR) $@
+
+#
+# Rules for compiling
+#
+$(OBJPATH)/%d.o: $(SRCDIR)/%.c $(DEPPATH)/%.d
+	@echo "** Compiling" $< "(debug)"
+	@$(CC) $(INCLUDE) $(CFLAGS) $(DEBUGFLAGS) -c $< -o $@
+
+$(OBJPATH)/%.o: $(SRCDIR)/%.c $(DEPPATH)/%.d
+	@echo "** Compiling" $< "(release)"
+	@$(CC) $(INCLUDE) $(CFLAGS) $(RELEASEFLAGS) -c $< -o $@
+
+$(OBJPATH)/%d.o: $(SRCDIR)/%.cpp $(DEPPATH)/%.d
+	@echo "** Compiling" $< "(debug)"
+	@$(CPP) $(INCLUDE) $(CPPFLAGS) $(DEBUGFLAGS) -c $< -o $@
+
+$(OBJPATH)/%.o: $(SRCDIR)/%.cpp $(DEPPATH)/%.d
+	@echo "** Compiling" $< "(release)"
+	@$(CPP) $(INCLUDE) $(CPPFLAGS) $(RELEASEFLAGS) -c $< -o $@
+
+$(OBJPATH)/%d.o: $(SRCDIR)/%.mm $(DEPPATH)/%.d
+	@echo "** Compiling" $< "(debug)"
+	@$(CPP) $(INCLUDE) $(CPPFLAGS) $(DEBUGFLAGS) -c $< -o $@
+
+$(OBJPATH)/%.o: $(SRCDIR)/%.mm $(DEPPATH)/%.d
+	@echo "** Compiling" $< "(release)"
+	@$(CPP) $(INCLUDE) $(CPPFLAGS) $(RELEASEFLAGS) -c $< -o $@
+
+#
+# Rules for creating dependency information
+#
+$(DEPPATH)/%.d: $(SRCDIR)/%.c
+	@echo "** Creating dependency info for" $^
+	@$(MKDIR) $(DEPPATH)
+	@$(DEP) $(SRCDIR)/$(patsubst %.d,%.c,$(notdir $@)) $@ $(OBJPATH) $(INCLUDE) $(CFLAGS)
+
+$(DEPPATH)/%.d: $(SRCDIR)/%.cpp
+	@echo "** Creating dependency info for" $^
+	@$(MKDIR) $(DEPPATH)
+	@$(DEP) $(SRCDIR)/$(patsubst %.d,%.cpp,$(notdir $@)) $@ $(OBJPATH) $(INCLUDE) $(CFLAGS)
+
+$(DEPPATH)/%.d: $(SRCDIR)/%.mm
+	@echo "** Creating dependency info for" $^
+	@$(MKDIR) $(DEPPATH)
+	@$(DEP) $(SRCDIR)/$(patsubst %.d,%.mm,$(notdir $@)) $@ $(OBJPATH) $(INCLUDE) $(CPPFLAGS)
+
+depend: $(addprefix $(DEPPATH)/,$(addsuffix .d,$(OBJECTS)))

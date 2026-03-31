@@ -337,7 +337,7 @@ static void Parameter(ORB_Object *par) {
                 CheckReadOnly(&x);
             }
             ORG_OpenArrayParam(&x);
-        } else if ((x.type->form == ORB_String) && varpar && par->rdo &&
+        } else if ((x.type->form == ORB_String) &&
                    (par->type->form == ORB_Array) && (par->type->base->form == ORB_Char) &&
                    (par->type->len < 0)) {
             ORG_StringParam(&x);
@@ -871,6 +871,10 @@ static void StandProc(LONGINT pno) {
 		CheckInt(&x);
 		CheckInt(&y);
 		ORG_TSB(&x, &y);
+	  } else if (pno == 15) {  // EXEC(addr, bank)
+		CheckInt(&x);
+		CheckInt(&y);
+		ORG_Exec(&x, &y);
 	  }
 	} else {
 	  ORS_Mark("wrong nof parameters");

@@ -28,8 +28,8 @@ bool longi = true;
 int dpage = 0;
 int pbreg = 0;
 
-short int relocC;
-short int reloc[maxReloc];
+int relocC;
+int reloc[maxReloc];
 
 void o(uint8_t byte)
 {

@@ -42,8 +42,9 @@ $3A-$3B   FP_PROD2     FP workspace: product word 2
 $3C-$3D   FP_TEMP      FP workspace: scratch
 $3E-$3F   FP_TEMP2     FP workspace: scratch
 $40-$41   FP_CNT       FP workspace: loop counter
-$42-$FF   (unused)     Available
-$100-$1FF              Hardware stack
+$42-$45   BANK_DP      Own module's data bank byte
+$46-$FF   (unused)     Available for future DP use
+$0100-$0845            Hardware stack (2K, SP init to $0845)
 ```
 
 All registers and workspace entries are 16-bit (2 bytes), stored

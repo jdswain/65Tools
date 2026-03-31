@@ -197,8 +197,13 @@ unsigned int loadELF(char * filename) {
 		emu816::setStackPage(0x0100);
 		break;
 	  case EM_RC19:
-		cout << "Configured for Rockwell C19." << endl;
+		cout << "Configured for L28 (R65C19)." << endl;
+		emu816::setCpuType(emu816::CPU_L28);
 		emu816::setStackPage(0x0100);
+		mem816::enableL28MCU();
+		mem816::setUartBase(0x1FFFFF);  // Disable 6551 UART for L28
+		mem816::setFdcBase(0x0640);
+		mem816::setViaBase(0x0000);  // No VIA on L28
 		break;
 	  case EM_RC01:
 		cout << "Configured for R6501Q." << endl;
@@ -206,26 +211,34 @@ unsigned int loadELF(char * filename) {
 		break;
 	  }
 	  
-      // Load the segments
-      lseek(fd, ehdr->e_phoff, SEEK_SET);
-      for (int i = 0; i < ehdr->e_phnum; i++) {
+      // Read all loadable segments, then sort by address so that
+      // higher-address segments (e.g. kernel at $E000) load last and
+      // overwrite any overflow from lower segments (e.g. development at $C000).
+      struct SegInfo { ELF_Addr addr; ELF_Word len; ELF_Off offset; };
+      SegInfo segs[16];
+      int nseg = 0;
+      for (int i = 0; i < ehdr->e_phnum && nseg < 16; i++) {
 		lseek(fd, ehdr->e_phoff + i * sizeof(ELF_Phdr), SEEK_SET);
 		r = read(fd, phdr, sizeof(ELF_Phdr));
 		if (r != sizeof(ELF_Phdr)) as_error("Malformed ELF file");
-		if (phdr->p_type == PT_LOAD) {
-		  ELF_Addr addr = phdr->p_paddr;
-		  ELF_Word len = phdr->p_filesz;
-		  if ((addr > 0) && (len > 0)) {
-			lseek(fd, phdr->p_offset, SEEK_SET);
-			int r = read(fd, buffer, len);
-			if (r == (int)len) { 
-			  int count = 0;
-			  cout << "Read segment into " << hex << addr << ", length " << len << endl;
-			  for (count = 0; count<(int)len; count++) {
-				emu816::setByte(addr++, buffer[count]);
-			  }
-			}
+		if (phdr->p_type == PT_LOAD && phdr->p_paddr > 0 && phdr->p_filesz > 0) {
+		  segs[nseg++] = { phdr->p_paddr, phdr->p_filesz, phdr->p_offset };
+		}
+	  }
+	  // Sort by address ascending
+	  for (int i = 0; i < nseg - 1; i++)
+		for (int j = i + 1; j < nseg; j++)
+		  if (segs[j].addr < segs[i].addr) {
+			SegInfo tmp = segs[i]; segs[i] = segs[j]; segs[j] = tmp;
 		  }
+	  for (int s = 0; s < nseg; s++) {
+		lseek(fd, segs[s].offset, SEEK_SET);
+		int r = read(fd, buffer, segs[s].len);
+		if (r == (int)segs[s].len) {
+		  ELF_Addr addr = segs[s].addr;
+		  cout << "Read segment into " << hex << addr << ", length " << segs[s].len << endl;
+		  for (int count = 0; count < (int)segs[s].len; count++)
+			emu816::setByte(addr++, buffer[count]);
 		}
 	  }
 	}
@@ -542,6 +555,7 @@ unsigned int loadMod(char * filename) {
   char import_names[MAX_IMPORTS][64];
   int import_count = 0;
   memset(import_map, 0, sizeof(import_map));
+  int missing_imports = 0;
 
   while (1) {
     char ch;
@@ -604,8 +618,16 @@ unsigned int loadMod(char * filename) {
                import_count, imp_name, import_map[import_count]->base_address);
       } else {
         printf("  Import mno %d: %s -> NOT FOUND\n", import_count, imp_name);
+        missing_imports++;
       }
     }
+  }
+
+  if (missing_imports > 0) {
+    fprintf(stderr, "Error: %d import(s) could not be resolved for module '%s'.\n", missing_imports, module_name);
+    fprintf(stderr, "  Use -I <dir> to specify search paths for module dependencies.\n");
+    fclose(file);
+    return 0;
   }
 
   // Set base addresses now, after auto-loading may have advanced them
@@ -824,10 +846,9 @@ unsigned int loadMod(char * filename) {
       for (int i = 0; i < reloc_count; i++) {
         int32_t reloc_addr;
         if (fread(&reloc_addr, 4, 1, file) == 1) {
-          // Check for bank relocation flag (bit 15 set in 16-bit reloc value,
-          // sign-extended to negative int32_t by compiler's short int -> LONGINT)
+          // Check for bank relocation flag (bit 31 set)
           bool is_bank_reloc = (reloc_addr < 0);
-          int32_t actual_addr = is_bank_reloc ? (reloc_addr & 0x7FFF) : reloc_addr;
+          int32_t actual_addr = is_bank_reloc ? (reloc_addr & 0x7FFFFFFF) : reloc_addr;
           uint32_t bank_reloc_addr = bank_address + module_base + actual_addr;
 
           if (is_bank_reloc) {
@@ -933,6 +954,7 @@ int main(int argc, char **argv)
   int custom_sp = -1;    // -1 = use default ($0100), else custom SP address
   bool video_enabled = false;
   bool test_pattern = false;
+  bool console_mode = false;
 
   setup();
 
@@ -953,6 +975,28 @@ int main(int argc, char **argv)
 
     if (!strcmp(argv[index], "-sp") && index + 1 < argc) {
       custom_sp = (int)strtol(argv[index + 1], NULL, 0);
+      index += 2;
+      continue;
+    }
+
+    if (!strcmp(argv[index], "-cpu") && index + 1 < argc) {
+      const char *cpu = argv[index + 1];
+      if (!strcmp(cpu, "l28") || !strcmp(cpu, "L28") || !strcmp(cpu, "c19") || !strcmp(cpu, "C19")) {
+        emu816::setCpuType(emu816::CPU_L28);
+        mem816::enableL28MCU();
+        mem816::setUartBase(0x1FFFFF);  // Disable 6551 UART for L28
+        mem816::setFdcBase(0x0640);
+        cout << "CPU type: L28 (R65C19)" << endl;
+      } else if (!strcmp(cpu, "rockwell") || !strcmp(cpu, "r02")) {
+        emu816::setCpuType(emu816::CPU_ROCKWELL);
+        cout << "CPU type: Rockwell R65C02" << endl;
+      } else if (!strcmp(cpu, "wdc") || !strcmp(cpu, "816")) {
+        emu816::setCpuType(emu816::CPU_WDC);
+        cout << "CPU type: WDC 65C816" << endl;
+      } else {
+        cerr << "Unknown CPU type: " << cpu << endl;
+        return 1;
+      }
       index += 2;
       continue;
     }
@@ -993,8 +1037,14 @@ int main(int argc, char **argv)
       continue;
     }
 
+    if (!strcmp(argv[index], "-console")) {
+      console_mode = true;
+      ++index;
+      continue;
+    }
+
     if (!strcmp(argv[index], "-?")) {
-      cerr << "Usage: em16 [-t] [-dp addr] [-sp addr] [-video] [-test-pattern] [-I dir] [-disk0 file] [-disk1 file] file ..." << endl;
+      cerr << "Usage: em16 [-t] [-cpu l28|rockwell|wdc|816] [-dp addr] [-sp addr] [-video] [-test-pattern] [-console] [-I dir] [-disk0 file] [-disk1 file] file ..." << endl;
       return (1);
     }
 
@@ -1025,6 +1075,77 @@ int main(int argc, char **argv)
     return (1);
   }
 
+  // Write boot manifest at $0D00 for Modules.Mod to discover pre-loaded modules
+  {
+    #define MANIFEST_BASE 0x0D00
+    uint32_t maddr = MANIFEST_BASE;
+    // Count loaded modules
+    int manifest_count = 0;
+    ModuleInfo *mod = loaded_modules;
+    // Build array in load order (linked list is in reverse order)
+    ModuleInfo *mod_array[64];
+    while (mod && manifest_count < 64) {
+      mod_array[manifest_count++] = mod;
+      mod = mod->next;
+    }
+    // Write count
+    emu816::setByte(maddr, manifest_count & 0xFF);
+    emu816::setByte(maddr + 1, (manifest_count >> 8) & 0xFF);
+    maddr += 2;
+    // Write modules in load order (reverse of linked list)
+    for (int i = manifest_count - 1; i >= 0; i--) {
+      ModuleInfo *m = mod_array[i];
+      // Write name (null-terminated)
+      for (int j = 0; m->name[j] != 0; j++) {
+        emu816::setByte(maddr++, m->name[j]);
+      }
+      emu816::setByte(maddr++, 0);
+      // Write bank (2 bytes)
+      emu816::setByte(maddr, m->bank & 0xFF);
+      emu816::setByte(maddr + 1, (m->bank >> 8) & 0xFF);
+      maddr += 2;
+      // Write base_addr (2 bytes)
+      emu816::setByte(maddr, m->base_address & 0xFF);
+      emu816::setByte(maddr + 1, (m->base_address >> 8) & 0xFF);
+      maddr += 2;
+      // Write var_addr (2 bytes)
+      emu816::setByte(maddr, m->var_address & 0xFF);
+      emu816::setByte(maddr + 1, (m->var_address >> 8) & 0xFF);
+      maddr += 2;
+      // Write export_count (2 bytes) - export_count includes index 0
+      int exp_count = m->export_count > 0 ? m->export_count - 1 : 0;
+      emu816::setByte(maddr, exp_count & 0xFF);
+      emu816::setByte(maddr + 1, (exp_count >> 8) & 0xFF);
+      maddr += 2;
+      // Write export values (2 bytes each)
+      for (int j = 1; j < m->export_count && j <= MAX_EXPORTS; j++) {
+        uint16_t val = m->exports[j] & 0xFFFF;
+        emu816::setByte(maddr, val & 0xFF);
+        emu816::setByte(maddr + 1, (val >> 8) & 0xFF);
+        maddr += 2;
+      }
+    }
+    // Write current load addresses (so Modules.Mod knows where to place new modules)
+    emu816::setByte(maddr, current_load_address & 0xFF);
+    emu816::setByte(maddr + 1, (current_load_address >> 8) & 0xFF);
+    maddr += 2;
+    emu816::setByte(maddr, current_var_address & 0xFF);
+    emu816::setByte(maddr + 1, (current_var_address >> 8) & 0xFF);
+    maddr += 2;
+    printf("Boot manifest: %d modules, %d bytes at $%04X-$%04X (nextCode=$%04X nextVar=$%04X)\n",
+           manifest_count, (int)(maddr - MANIFEST_BASE), MANIFEST_BASE, maddr - 1,
+           current_load_address, current_var_address);
+  }
+
+  // Enable console mode (keyboard matrix input) if requested
+  if (console_mode) {
+    mem816::getL28MCU().enableKeyboard();
+    mem816::getL28MCU().setConsoleMode(true);
+    mem816::getL28MCU().setCocoaInput(true);
+    mem816::getLCD().enableDisplay();
+    cout << "Console mode: keyboard input via LCD window, LCD enabled" << endl;
+  }
+
   timespec start, end;
 
 #ifdef __APPLE__
@@ -1037,7 +1158,16 @@ int main(int argc, char **argv)
     emu816::setStackPage(custom_sp);
   }
 
+  mem816::initFlash();
+
   emu816::reset(trace);
+
+  // Set up 65C816 native mode, 16-bit registers, and stack pointer
+  // so that individual modules don't need a preamble
+  if (emu816::getCpuType() != emu816::CPU_L28) {
+    emu816::setNativeMode();
+    emu816::setSP(0x0845);
+  }
 
   if (custom_dp >= 0) {
     emu816::setDP(custom_dp);
@@ -1049,7 +1179,7 @@ int main(int argc, char **argv)
   heap_bank = 0;  // heap in bank 0
   printf("Heap initialized at $%04X (bank %d)\n", heap_top, heap_bank);
 
-  // Register trap handler for runtime traps (BRK #1..#10)
+  // Register trap handler for runtime traps (BRK #0..#15)
   emu816::setTrapHandler(trap_handler);
 
   // Lambda to run module entry points
@@ -1071,7 +1201,14 @@ int main(int argc, char **argv)
 
   Video &video = mem816::getVideo();
 
-  if (video_enabled) {
+  LCD_ST7586S &lcd = mem816::getLCD();
+
+  if (lcd.isDisplayEnabled()) {
+    // LCD console mode: CPU on background thread, Cocoa on main thread
+    std::thread cpu_thread(run_modules);
+    cpu_thread.detach();
+    lcd.runCocoa(); // Blocks until window closed
+  } else if (video_enabled) {
     video.enableDisplay();
 
     if (test_pattern) {

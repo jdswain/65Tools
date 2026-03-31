@@ -872,6 +872,7 @@ void ORB_Initialize(void) {
     enter("BIT", ORB_SFunc, boolType, 142);
     
     /* Procedures */
+    enter("EXEC", ORB_SProc, noType, 152);
     enter("TSB", ORB_SProc, noType, 142);
     enter("TRB", ORB_SProc, noType, 132);
     enter("INTEN", ORB_SProc, noType, 91);

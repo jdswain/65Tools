@@ -1,27 +1,25 @@
 MODULE TestMinimal;
-  IMPORT Driver, FloppyDriver, Out;
+  IMPORT Driver, FloppyDriver, Files, Out;
 
-  VAR
-    drv: Driver.BlockDriver;
-    buf: ARRAY 512 OF BYTE;
-    i, res: INTEGER;
-    a, b: ARRAY 4 OF CHAR;
-
-  PROCEDURE DoWrite(d: Driver.BlockDriver);
-    VAR r: INTEGER;
+  PROCEDURE Run;
+    VAR
+      drv: Driver.BlockDriver;
+      f: Files.File;
+      fname: ARRAY 16 OF CHAR;
   BEGIN
-    Out.String(a); Out.Ln;
-    r := d.write(d, 0, buf);
-    Out.Int(r, 1); Out.Ln;
-    Out.String(b); Out.Ln
-  END DoWrite;
+    Out.String("A"); Out.Ln;
+    FloppyDriver.Init(0, drv);
+    Out.String("B"); Out.Ln;
+    Files.Format(drv);
+    Out.String("C"); Out.Ln;
+    Files.Init(drv);
+    Out.String("D"); Out.Ln;
+    fname := "TEST.TXT";
+    f := Files.New(fname);
+    IF f # NIL THEN Out.String("E") ELSE Out.String("F") END;
+    Out.Ln
+  END Run;
 
 BEGIN
-  a := "X"; b := "Y";
-  FloppyDriver.Init(0, drv);
-  i := 0;
-  WHILE i < 512 DO buf[i] := 0; INC(i) END;
-
-  DoWrite(drv);
-  Out.String(a); Out.Ln
+  Run
 END TestMinimal.

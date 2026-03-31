@@ -119,6 +119,14 @@ wdc816::Byte WD1793::getByte(wdc816::Addr ea)
       return dataReg;
 
     case 0x06: // Drive status
+      // Advance delay simulation: Forth code polls this register
+      // (BIT DSK_CTL) rather than status reg 0 during transfers
+      if (pendingOp != NONE && delayCounter > 0) {
+        delayCounter--;
+        if (delayCounter == 0) {
+          completePendingOp();
+        }
+      }
       return driveStatusRead();
 
     default:

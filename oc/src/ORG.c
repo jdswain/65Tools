@@ -164,7 +164,7 @@ static int GetSB(LONGINT mno) {
   codegen_gen(sLDA, Immediate, (int)(-mno), 0);  // operand = mno for loader
   codegen_gen(sSTA, DirectPage, SB_TEMP, 0);
   // Load imported module's data bank
-  reloc[relocC++] = ORG_pc | 0x8000;              // bank reloc flag (bit 15)
+  reloc[relocC++] = ORG_pc | 0x80000000;              // bank reloc flag (bit 15)
   codegen_gen(sLDA, Immediate, (int)(-mno), 0);   // operand = mno for loader
   codegen_gen(sSTA, DirectPage, SB_TEMP_BANK, 0);
   return SB_TEMP;
@@ -1049,13 +1049,38 @@ void ORG_Index(ORG_Item *x, ORG_Item *y) {
         }
         
         // 65C816: Multiply index by element size
-		Set16(1, 1);
-        if (s >= 4) {
-            codegen_gen(sASL, DirectPage, reg_addr(y->r), 0);
-		}
-		if (s >= 2) {
-		  codegen_gen(sASL, DirectPage, reg_addr(y->r), 0);  // ASL $reg (multiply by 2)
-		}
+        Set16(1, 1);
+        if (s > 1) {
+          // Count trailing zeros to find power-of-2 component
+          int shifts = 0;
+          LONGINT ts = s;
+          while (ts > 1 && !(ts & 1)) { ts >>= 1; shifts++; }
+          if (ts == 1) {
+            // Pure power of 2: just shift
+            for (int i = 0; i < shifts; i++) {
+              codegen_gen(sASL, DirectPage, reg_addr(y->r), 0);
+            }
+          } else {
+            // General multiply by compile-time constant using shift-and-add
+            int idx_reg = reg_addr(y->r);
+            // Apply trailing zero shifts first
+            for (int i = 0; i < shifts; i++) {
+              codegen_gen(sASL, DirectPage, idx_reg, 0);
+            }
+            // ts is odd > 1: multiply by ts using A as accumulator
+            codegen_gen(sLDA, DirectPage, idx_reg, 0);  // A = index * 2^shifts (bit 0 of ts)
+            LONGINT remaining = ts >> 1;
+            while (remaining > 0) {
+              codegen_gen(sASL, DirectPage, idx_reg, 0);  // shift base value
+              if (remaining & 1) {
+                codegen_gen(sCLC, Implied, 0, 0);
+                codegen_gen(sADC, DirectPage, idx_reg, 0);  // add to accumulator
+              }
+              remaining >>= 1;
+            }
+            codegen_gen(sSTA, DirectPage, idx_reg, 0);  // store result
+          }
+        }
         
         if (x->mode == ORB_Var) {
             if (x->r > 0) {
@@ -2955,7 +2980,7 @@ void ORG_Enter(ORB_Object *params, LONGINT frame_size, BOOLEAN expo, BOOLEAN int
 	  reloc[relocC++] = ORG_pc;                          // record for relocation
 	  codegen_gen(sLDA, Immediate, 0x0000, 0);           // LDA #var_base (patched)
 	  codegen_gen(sSTA, DirectPage, SB_DP, 0);    // STA SB
-	  reloc[relocC++] = ORG_pc | 0x8000;                 // bank reloc flag
+	  reloc[relocC++] = ORG_pc | 0x80000000;                 // bank reloc flag
 	  codegen_gen(sLDA, Immediate, 0x0000, 0);           // LDA #bank (patched)
 	  codegen_gen(sSTA, DirectPage, BANK_DP, 0);  // STA bank
 	}
@@ -3534,6 +3559,38 @@ void ORG_TSB(ORG_Item *x, ORG_Item *y) {
   }
 }
 
+void ORG_Exec(ORG_Item *addr, ORG_Item *bank) {
+  // SYSTEM.EXEC(addr, bank) — indirect JSL to module entry point
+  // Uses RTL trampoline: PHK; PER; SEP; LDA bank; PHA; REP; LDA addr; DEC; PHA; RTL
+  // PER operand = $0B: 16 bytes from PHK to return point
+  load(addr);
+  load(bank);
+  int addr_reg = reg_addr(addr->r);
+  int bank_reg = reg_addr(bank->r);
+  // Save caller's SB and BANK_DP (called module's init will overwrite them)
+  codegen_gen(sLDA, DirectPage, SB_DP, 0);       // LDA SB
+  codegen_gen(sPHA, Implied, 0, 0);               // PHA
+  codegen_gen(sLDA, DirectPage, BANK_DP, 0);      // LDA BANK_DP
+  codegen_gen(sPHA, Implied, 0, 0);               // PHA
+  // Indirect JSL via RTL trampoline
+  codegen_gen(sPHK, Implied, 0, 0);               // PHK (push return bank)
+  codegen_gen(sPER, Immediate, 0x000B, 0);        // PER +11 (push return addr)
+  Set8(1, 0);                                     // SEP #$20
+  codegen_gen(sLDA, DirectPage, bank_reg, 0);     // LDA bank (8-bit)
+  codegen_gen(sPHA, Implied, 0, 0);               // PHA (target bank)
+  Set16(1, 0);                                    // REP #$20
+  codegen_gen(sLDA, DirectPage, addr_reg, 0);     // LDA addr
+  codegen_gen(sDEC, Accumulator, 0, 0);           // DEC (RTL adds 1)
+  codegen_gen(sPHA, Implied, 0, 0);               // PHA (target addr)
+  codegen_gen(sRTL, Implied, 0, 0);               // RTL → jumps to target
+  // Return point: restore caller's BANK_DP and SB
+  codegen_gen(sPLA, Implied, 0, 0);               // PLA
+  codegen_gen(sSTA, DirectPage, BANK_DP, 0);      // STA BANK_DP
+  codegen_gen(sPLA, Implied, 0, 0);               // PLA
+  codegen_gen(sSTA, DirectPage, SB_DP, 0);        // STA SB
+  RH -= 2;
+}
+
 // Inline functions
 void ORG_Abs(ORG_Item *x) {
   if (x->mode == ORB_Const) {
@@ -3833,12 +3890,10 @@ void ORG_SetDataSize(LONGINT dc) {
 
 void ORG_Header(void) {
   entry = ORG_pc;  // 65C816 uses byte addresses, no multiplication needed
-  
-  // 65C816: Initialize native mode (16-bit accumulator and index registers)
-  codegen_gen(sCLC, Implied, 0, 0);        // Clear carry for XCE
-  codegen_gen(sXCE, Implied, 0, 0);        // Switch to native mode
-  longa = false; longi = false;            // Force the REP
-  Set16(1, 1);
+
+  // Native mode, 16-bit registers, and SP are set by the emulator/boot loader.
+  // Compiler assumes 16-bit A and X on entry.
+  longa = true; longi = true;
 
   // SB initialisation — loader patches the $0000 to actual var_base
   reloc[relocC++] = ORG_pc;
@@ -3846,7 +3901,7 @@ void ORG_Header(void) {
   codegen_gen(sSTA, DirectPage, SB_DP, 0);
 
   // Bank initialisation — loader patches to actual data bank (0)
-  reloc[relocC++] = ORG_pc | 0x8000;  // bank reloc flag
+  reloc[relocC++] = ORG_pc | 0x80000000;  // bank reloc flag
   codegen_gen(sLDA, Immediate, 0x0000, 0);
   codegen_gen(sSTA, DirectPage, BANK_DP, 0);
 }

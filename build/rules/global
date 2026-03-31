@@ -1,0 +1,48 @@
+# global
+
+#
+# Check for BUILD_BASE
+#
+
+ifndef BUILD_BASE
+$(error BUILD_BASE is not defined.)
+endif
+
+#
+# Determine OS
+#
+HOST_OSNAME = $(shell uname)
+include $(BUILD_BASE)/build/config/$(HOST_OSNAME)
+
+#
+# Define standard directories
+#
+
+SRCDIR = src
+INCDIR = include
+DEPDIR = .dep
+OBJDIR = obj
+BINDIR = bin
+
+SHAREDDIR = ../shared
+
+INCLUDEPATH = $(BUILD_BASE)/$(project)/$(INCDIR)
+OBJPATH = $(BUILD_BASE)/$(project)/$(OBJDIR)
+BINPATH = $(BUILD_BASE)/$(BINDIR)
+DEPPATH = $(BUILD_BASE)/$(project)/$(DEPDIR)
+
+#
+# Build Include directory List
+#
+INCLUDE = -I$(INCLUDEPATH) -I$(SHAREDDIR)/include
+
+DEFAULT_TARGET=build
+
+#
+# Make environment variables for scripts
+#
+
+export CC
+export CPP
+export LINK
+

@@ -49,10 +49,10 @@ t_adc:	adc #$0f		;69 0f
 t_asr:	asr			;3a
 
 	;; BAR
-t_bar:	bar start,$0f,t_asr	;e2 00 03 0f fe
+t_bar:	bar start,$0f,t_asr	;e2 0f 00 03 fe
 
 	;; BAS
-	bas start,$f0,t_asr	;f2 00 03 f0 f9
+	bas start,$f0,t_asr	;f2 f0 00 03 f9
 
 	;; BBR
 	bbr 0,01,t_bbs		;0f 01 15

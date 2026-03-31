@@ -2,19 +2,10 @@ MODULE Files;
   IMPORT Driver;
 
   CONST
-    MaxNameLen = 32;
+    MaxNameLen = 128;
     SectorSize = 512;
 
-    (* FAT16 geometry for 720K floppy *)
-    FATStart = 1;        (* first FAT sector *)
-    FATSectors = 3;      (* sectors per FAT copy *)
-    FAT2Start = 4;       (* second FAT copy *)
-    DirStart = 7;        (* root directory start sector *)
-    DirSectors = 7;      (* root directory sectors *)
-    DirEntries = 112;    (* root directory entry count *)
-    DataStart = 14;      (* first data sector *)
-    SecsPerCluster = 2;
-    MaxCluster = 714;    (* last valid cluster number *)
+    MaxFATSectors = 9;   (* supports up to 1.44MB floppy *)
 
     (* Directory entry offsets within 32-byte entry *)
     deNAME = 0;          (* 8 bytes *)
@@ -27,6 +18,21 @@ MODULE Files;
 
     (* Directory entry attribute *)
     attrDirectory* = 10H;
+
+    (* VFAT Long Filename entry attribute *)
+    attrLFN = 0FH;
+
+    (* LFN entry offsets *)
+    lfnSEQ = 0;          (* sequence number, bit 6 = last *)
+    lfnNAME1 = 1;        (* chars 1-5 as UCS-2, 10 bytes *)
+    lfnATTR = 11;        (* always 0x0F *)
+    lfnTYPE = 12;        (* always 0x00 *)
+    lfnCHKSUM = 13;      (* checksum of 8.3 name *)
+    lfnNAME2 = 14;       (* chars 6-11 as UCS-2, 12 bytes *)
+    lfnCLUSTER = 26;     (* always 0x0000 *)
+    lfnNAME3 = 28;       (* chars 12-13 as UCS-2, 4 bytes *)
+    lfnLAST = 40H;       (* bit 6: last LFN entry marker *)
+    CharsPerLFN = 13;    (* characters per LFN entry *)
 
     (* Special directory entry markers *)
     DirEmpty = 0;
@@ -80,10 +86,14 @@ MODULE Files;
 
   VAR
     dev: Driver.BlockDriver;
-    fat: ARRAY 1536 OF BYTE;
+    fat: ARRAY 4608 OF BYTE;   (* MaxFATSectors * SectorSize *)
     dirBuf: ARRAY 512 OF BYTE;
     initialized: BOOLEAN;
     fatDirty: BOOLEAN;
+    fatStart, fatSectors, fat2Start: INTEGER;
+    dirStart, dirSectors, dirEntries: INTEGER;
+    dataStart, secsPerCluster, maxCluster: INTEGER;
+    isFAT12: BOOLEAN;
 
   (* ---- Utility ---- *)
 
@@ -123,6 +133,42 @@ MODULE Files;
   RETURN dev.write(dev, sector, buf)
   END WriteSector;
 
+  (* ---- BPB and geometry ---- *)
+
+  PROCEDURE ReadBPB(): BOOLEAN;
+    VAR res, bps, spc, nfat, root, tot, fpf, dataSecs, totalClusters: INTEGER;
+        ok: BOOLEAN;
+  BEGIN
+    ok := FALSE;
+    res := ReadSector(0, dirBuf);
+    IF res = 0 THEN
+      bps := GetWord(dirBuf, bpbBPS);
+      IF bps = SectorSize THEN
+        spc := dirBuf[bpbSPC];
+        fatStart := GetWord(dirBuf, bpbRES);
+        nfat := dirBuf[bpbNFAT];
+        root := GetWord(dirBuf, bpbROOT);
+        tot := GetWord(dirBuf, bpbTOT);
+        fpf := GetWord(dirBuf, bpbFPF);
+        fatSectors := fpf;
+        fat2Start := fatStart + fpf;
+        dirEntries := root;
+        dirStart := fatStart + nfat * fpf;
+        dirSectors := (root * DirEntrySize + SectorSize - 1) DIV SectorSize;
+        dataStart := dirStart + dirSectors;
+        secsPerCluster := spc;
+        dataSecs := tot - dataStart;
+        totalClusters := dataSecs DIV spc;
+        maxCluster := totalClusters + 1;  (* clusters numbered 2..maxCluster *)
+        isFAT12 := totalClusters < 4085;
+        IF fatSectors <= MaxFATSectors THEN
+          ok := TRUE
+        END
+      END
+    END
+  RETURN ok
+  END ReadBPB;
+
   (* ---- FAT cache operations ---- *)
 
   PROCEDURE CopyFATSector(idx: INTEGER; VAR sec: ARRAY OF BYTE);
@@ -141,8 +187,8 @@ MODULE Files;
         ok: BOOLEAN;
   BEGIN
     ok := TRUE; i := 0;
-    WHILE (i < FATSectors) & ok DO
-      res := ReadSector(FATStart + i, dirBuf);
+    WHILE (i < fatSectors) & ok DO
+      res := ReadSector(fatStart + i, dirBuf);
       IF res # 0 THEN ok := FALSE
       ELSE CopyFATSector(i, dirBuf)
       END;
@@ -152,26 +198,57 @@ MODULE Files;
   END LoadFAT;
 
   PROCEDURE GetFAT*(cluster: INTEGER): INTEGER;
-    VAR ofs, lo, hi: INTEGER;
+    VAR ofs, lo, hi, val: INTEGER;
   BEGIN
-    ofs := cluster * 2;
-    lo := fat[ofs];
-    hi := fat[ofs + 1]
-  RETURN ORA(lo, ASL(hi, 8))
+    IF isFAT12 THEN
+      ofs := cluster + cluster DIV 2;  (* cluster * 1.5 *)
+      lo := fat[ofs];
+      hi := fat[ofs + 1];
+      val := ORA(lo, ASL(hi, 8));
+      IF ODD(cluster) THEN
+        val := LSR(val, 4)
+      ELSE
+        val := AND(val, 0FFFH)
+      END
+    ELSE
+      ofs := cluster * 2;
+      lo := fat[ofs];
+      hi := fat[ofs + 1];
+      val := ORA(lo, ASL(hi, 8))
+    END
+  RETURN val
   END GetFAT;
 
   PROCEDURE SetFAT(cluster, val: INTEGER);
-    VAR ofs: INTEGER;
+    VAR ofs, existing, lo, hi: INTEGER;
   BEGIN
-    ofs := cluster * 2;
-    fat[ofs] := AND(val, 0FFH);
-    fat[ofs + 1] := AND(LSR(val, 8), 0FFH);
+    IF isFAT12 THEN
+      ofs := cluster + cluster DIV 2;
+      lo := fat[ofs];
+      hi := fat[ofs + 1];
+      existing := ORA(lo, ASL(hi, 8));
+      IF ODD(cluster) THEN
+        existing := ORA(AND(existing, 0FH), ASL(AND(val, 0FFFH), 4))
+      ELSE
+        existing := ORA(AND(existing, 0F000H), AND(val, 0FFFH))
+      END;
+      fat[ofs] := AND(existing, 0FFH);
+      fat[ofs + 1] := AND(LSR(existing, 8), 0FFH)
+    ELSE
+      ofs := cluster * 2;
+      fat[ofs] := AND(val, 0FFH);
+      fat[ofs + 1] := AND(LSR(val, 8), 0FFH)
+    END;
     fatDirty := TRUE
   END SetFAT;
 
   PROCEDURE SetFATEOC(cluster: INTEGER);
   BEGIN
-    SetFAT(cluster, -1)  (* -1 = 0xFFFF in 16-bit *)
+    IF isFAT12 THEN
+      SetFAT(cluster, 0FFFH)
+    ELSE
+      SetFAT(cluster, -1)  (* -1 = 0xFFFF in 16-bit *)
+    END
   END SetFATEOC;
 
   PROCEDURE FlushFAT*(): BOOLEAN;
@@ -181,17 +258,17 @@ MODULE Files;
     ok := TRUE;
     IF fatDirty THEN
       i := 0;
-      WHILE (i < FATSectors) & ok DO
+      WHILE (i < fatSectors) & ok DO
         base := i * SectorSize;
         j := 0;
         WHILE j < SectorSize DO
           dirBuf[j] := fat[base + j];
           INC(j)
         END;
-        res := WriteSector(FATStart + i, dirBuf);
+        res := WriteSector(fatStart + i, dirBuf);
         IF res # 0 THEN ok := FALSE END;
         IF ok THEN
-          res := WriteSector(FAT2Start + i, dirBuf);
+          res := WriteSector(fat2Start + i, dirBuf);
           IF res # 0 THEN ok := FALSE END
         END;
         INC(i)
@@ -206,7 +283,7 @@ MODULE Files;
         found: BOOLEAN;
   BEGIN
     c := 2; found := FALSE;
-    WHILE (c <= MaxCluster) & ~found DO
+    WHILE (c <= maxCluster) & ~found DO
       v := GetFAT(c);
       IF v = FATFree THEN found := TRUE
       ELSE INC(c)
@@ -219,7 +296,7 @@ MODULE Files;
   PROCEDURE FreeChain(start: INTEGER);
     VAR next: INTEGER;
   BEGIN
-    WHILE (start >= 2) & (start <= MaxCluster) DO
+    WHILE (start >= 2) & (start <= maxCluster) DO
       next := GetFAT(start);
       SetFAT(start, FATFree);
       start := next
@@ -228,14 +305,14 @@ MODULE Files;
 
   PROCEDURE ClusterToSector(cluster: INTEGER): INTEGER;
   BEGIN
-  RETURN DataStart + (cluster - 2) * SecsPerCluster
+  RETURN dataStart + (cluster - 2) * secsPerCluster
   END ClusterToSector;
 
   PROCEDURE FollowChain(start, hops: INTEGER): INTEGER;
     VAR c: INTEGER;
   BEGIN
     c := start;
-    WHILE (hops > 0) & (c >= 2) & (c <= MaxCluster) DO
+    WHILE (hops > 0) & (c >= 2) & (c <= maxCluster) DO
       c := GetFAT(c);
       DEC(hops)
     END
@@ -248,12 +325,12 @@ MODULE Files;
     VAR c, hops, secOfs, sec, res: INTEGER;
   BEGIN
     IF dirCluster < 0 THEN
-      res := ReadSector(DirStart + secIdx, dirBuf)
+      res := ReadSector(dirStart + secIdx, dirBuf)
     ELSE
-      hops := secIdx DIV SecsPerCluster;
-      secOfs := secIdx MOD SecsPerCluster;
+      hops := secIdx DIV secsPerCluster;
+      secOfs := secIdx MOD secsPerCluster;
       c := FollowChain(dirCluster, hops);
-      IF (c >= 2) & (c <= MaxCluster) THEN
+      IF (c >= 2) & (c <= maxCluster) THEN
         sec := ClusterToSector(c) + secOfs;
         res := ReadSector(sec, dirBuf)
       ELSE
@@ -267,12 +344,12 @@ MODULE Files;
     VAR c, hops, secOfs, sec, res: INTEGER;
   BEGIN
     IF dirCluster < 0 THEN
-      res := WriteSector(DirStart + secIdx, dirBuf)
+      res := WriteSector(dirStart + secIdx, dirBuf)
     ELSE
-      hops := secIdx DIV SecsPerCluster;
-      secOfs := secIdx MOD SecsPerCluster;
+      hops := secIdx DIV secsPerCluster;
+      secOfs := secIdx MOD secsPerCluster;
       c := FollowChain(dirCluster, hops);
-      IF (c >= 2) & (c <= MaxCluster) THEN
+      IF (c >= 2) & (c <= maxCluster) THEN
         sec := ClusterToSector(c) + secOfs;
         res := WriteSector(sec, dirBuf)
       ELSE
@@ -286,11 +363,11 @@ MODULE Files;
     VAR c, n: INTEGER;
   BEGIN
     IF dirCluster < 0 THEN
-      n := DirSectors
+      n := dirSectors
     ELSE
       n := 0; c := dirCluster;
-      WHILE (c >= 2) & (c <= MaxCluster) DO
-        n := n + SecsPerCluster;
+      WHILE (c >= 2) & (c <= maxCluster) DO
+        n := n + secsPerCluster;
         c := GetFAT(c)
       END
     END
@@ -346,6 +423,184 @@ MODULE Files;
     dst[j] := 0X
   END FromFATName;
 
+  (* ---- LFN support ---- *)
+
+  PROCEDURE StrLength(VAR s: ARRAY OF CHAR): INTEGER;
+    VAR i: INTEGER;
+  BEGIN
+    i := 0;
+    WHILE (i < LEN(s)) & (s[i] # 0X) DO INC(i) END
+  RETURN i
+  END StrLength;
+
+  PROCEDURE LFNChecksum(VAR fatName: ARRAY OF CHAR): INTEGER;
+    VAR i, sum: INTEGER;
+  BEGIN
+    sum := 0;
+    i := 0;
+    WHILE i < 11 DO
+      (* Right-rotate 1 bit then add *)
+      IF ODD(sum) THEN
+        sum := LSR(sum, 1) + 80H
+      ELSE
+        sum := LSR(sum, 1)
+      END;
+      sum := AND(sum + ORD(fatName[i]), 0FFH);
+      INC(i)
+    END
+  RETURN sum
+  END LFNChecksum;
+
+  PROCEDURE NeedsLFN(VAR name: ARRAY OF CHAR): BOOLEAN;
+    VAR i, baseLen, extLen: INTEGER;
+        hasDot, needsLfn: BOOLEAN;
+        ch: CHAR;
+  BEGIN
+    needsLfn := FALSE;
+    baseLen := 0; extLen := 0;
+    hasDot := FALSE;
+    i := 0;
+    WHILE (i < LEN(name)) & (name[i] # 0X) DO
+      ch := name[i];
+      IF ch = "." THEN
+        IF hasDot THEN needsLfn := TRUE END;  (* multiple dots *)
+        hasDot := TRUE
+      ELSIF hasDot THEN
+        INC(extLen)
+      ELSE
+        INC(baseLen)
+      END;
+      (* Check for lowercase *)
+      IF (ch >= "a") & (ch <= "z") THEN needsLfn := TRUE END;
+      INC(i)
+    END;
+    IF ~hasDot THEN
+      IF baseLen > 8 THEN needsLfn := TRUE END
+    ELSE
+      IF (baseLen > 8) OR (extLen > 3) THEN needsLfn := TRUE END
+    END
+  RETURN needsLfn
+  END NeedsLFN;
+
+  PROCEDURE WriteLFNEntry(dirCluster, entIdx, seq: INTEGER;
+                          VAR name: ARRAY OF CHAR;
+                          nameOfs, chksum: INTEGER; last: BOOLEAN);
+    VAR sec, ofs, i, k, ch, nameLen, pos: INTEGER;
+        res: INTEGER;
+  BEGIN
+    sec := entIdx DIV EntriesPerSector;
+    ofs := (entIdx MOD EntriesPerSector) * DirEntrySize;
+    res := ReadDirSectorAt(dirCluster, sec);
+    (* Zero-fill the entry *)
+    i := 0;
+    WHILE i < DirEntrySize DO dirBuf[ofs + i] := 0; INC(i) END;
+    (* Set sequence number *)
+    IF last THEN
+      dirBuf[ofs + lfnSEQ] := ORA(seq, lfnLAST)
+    ELSE
+      dirBuf[ofs + lfnSEQ] := seq
+    END;
+    dirBuf[ofs + lfnATTR] := attrLFN;
+    dirBuf[ofs + lfnTYPE] := 0;
+    dirBuf[ofs + lfnCHKSUM] := chksum;
+    PutWord(dirBuf, ofs + lfnCLUSTER, 0);
+    (* Fill name chars as UCS-2 (ASCII byte + 0x00) *)
+    nameLen := StrLength(name);
+    pos := nameOfs;
+    (* NAME1: 5 chars at offset 1 *)
+    k := 0;
+    WHILE k < 5 DO
+      IF pos < nameLen THEN
+        ch := ORD(name[pos]); INC(pos)
+      ELSIF pos = nameLen THEN
+        ch := 0; INC(pos)  (* null terminator *)
+      ELSE
+        ch := 0FFH  (* padding *)
+      END;
+      dirBuf[ofs + lfnNAME1 + k * 2] := AND(ch, 0FFH);
+      IF ch = 0FFH THEN
+        dirBuf[ofs + lfnNAME1 + k * 2 + 1] := 0FFH
+      ELSE
+        dirBuf[ofs + lfnNAME1 + k * 2 + 1] := 0
+      END;
+      INC(k)
+    END;
+    (* NAME2: 6 chars at offset 14 *)
+    k := 0;
+    WHILE k < 6 DO
+      IF pos < nameLen THEN
+        ch := ORD(name[pos]); INC(pos)
+      ELSIF pos = nameLen THEN
+        ch := 0; INC(pos)
+      ELSE
+        ch := 0FFH
+      END;
+      dirBuf[ofs + lfnNAME2 + k * 2] := AND(ch, 0FFH);
+      IF ch = 0FFH THEN
+        dirBuf[ofs + lfnNAME2 + k * 2 + 1] := 0FFH
+      ELSE
+        dirBuf[ofs + lfnNAME2 + k * 2 + 1] := 0
+      END;
+      INC(k)
+    END;
+    (* NAME3: 2 chars at offset 28 *)
+    k := 0;
+    WHILE k < 2 DO
+      IF pos < nameLen THEN
+        ch := ORD(name[pos]); INC(pos)
+      ELSIF pos = nameLen THEN
+        ch := 0; INC(pos)
+      ELSE
+        ch := 0FFH
+      END;
+      dirBuf[ofs + lfnNAME3 + k * 2] := AND(ch, 0FFH);
+      IF ch = 0FFH THEN
+        dirBuf[ofs + lfnNAME3 + k * 2 + 1] := 0FFH
+      ELSE
+        dirBuf[ofs + lfnNAME3 + k * 2 + 1] := 0
+      END;
+      INC(k)
+    END;
+    res := WriteDirSectorAt(dirCluster, sec)
+  END WriteLFNEntry;
+
+  PROCEDURE WriteLFNEntries(dirCluster, startIdx, numLFN: INTEGER;
+                            VAR longName, shortName: ARRAY OF CHAR);
+    VAR i, seq, nameOfs, chksum: INTEGER;
+  BEGIN
+    chksum := LFNChecksum(shortName);
+    (* Write LFN entries in reverse order: highest seq first *)
+    i := 0;
+    WHILE i < numLFN DO
+      seq := numLFN - i;
+      nameOfs := (seq - 1) * CharsPerLFN;
+      WriteLFNEntry(dirCluster, startIdx + i, seq,
+                    longName, nameOfs, chksum, i = 0)
+      ;
+      INC(i)
+    END
+  END WriteLFNEntries;
+
+  PROCEDURE DeleteLFNEntries(dirCluster, shortIdx: INTEGER);
+    VAR i, sec, ofs, res, b: INTEGER;
+  BEGIN
+    (* Walk backwards from shortIdx-1, deleting LFN entries *)
+    i := shortIdx - 1;
+    WHILE i >= 0 DO
+      sec := i DIV EntriesPerSector;
+      ofs := (i MOD EntriesPerSector) * DirEntrySize;
+      res := ReadDirSectorAt(dirCluster, sec);
+      b := dirBuf[ofs + deATTR];
+      IF b = attrLFN THEN
+        dirBuf[ofs] := DirDeleted;
+        res := WriteDirSectorAt(dirCluster, sec);
+        DEC(i)
+      ELSE
+        i := -1  (* stop — not an LFN entry *)
+      END
+    END
+  END DeleteLFNEntries;
+
   (* ---- Directory operations ---- *)
 
   PROCEDURE ReadDirSector(idx: INTEGER): INTEGER;
@@ -362,12 +617,18 @@ MODULE Files;
                        VAR idx: INTEGER): BOOLEAN;
     VAR i, nsec, secIdx, entOfs, res: INTEGER;
         fatNm: ARRAY 12 OF CHAR;
-        found, done: BOOLEAN;
-        b: INTEGER;
+        longBuf: ARRAY MaxNameLen OF CHAR;
+        found, done, lfnMatch, shortMatch: BOOLEAN;
+        b, attr, seq, lpos, k, ch, nameLen: INTEGER;
+        hasLFN: BOOLEAN;
   BEGIN
     ToFATName(name, fatNm);
+    nameLen := StrLength(name);
     nsec := DirSectorCount(dirCluster);
     found := FALSE; done := FALSE;
+    hasLFN := FALSE; lpos := 0;
+    i := 0;
+    WHILE i < MaxNameLen DO longBuf[i] := 0X; INC(i) END;
     i := 0;
     WHILE (i < nsec) & ~done DO
       res := ReadDirSectorAt(dirCluster, i);
@@ -376,17 +637,84 @@ MODULE Files;
         WHILE (entOfs < SectorSize) & ~done DO
           b := dirBuf[entOfs];
           IF b = DirEmpty THEN done := TRUE
-          ELSIF b # DirDeleted THEN
-            secIdx := 0;
-            found := TRUE;
-            WHILE (secIdx < 11) & found DO
-              b := dirBuf[entOfs + secIdx];
-              IF CHR(b) # fatNm[secIdx] THEN found := FALSE END;
-              INC(secIdx)
-            END;
-            IF found THEN
-              idx := i * EntriesPerSector + entOfs DIV DirEntrySize;
-              done := TRUE
+          ELSIF b = DirDeleted THEN
+            hasLFN := FALSE; lpos := 0
+          ELSE
+            attr := dirBuf[entOfs + deATTR];
+            IF attr = attrLFN THEN
+              (* Collect LFN chars *)
+              seq := AND(b, 3FH);  (* mask off bit 6 *)
+              IF AND(b, lfnLAST) # 0 THEN
+                (* First LFN entry we see (highest seq) — reset *)
+                hasLFN := TRUE;
+                k := 0;
+                WHILE k < MaxNameLen DO longBuf[k] := 0X; INC(k) END
+              END;
+              (* Place chars at (seq-1)*13 *)
+              lpos := (seq - 1) * CharsPerLFN;
+              (* NAME1: 5 chars *)
+              k := 0;
+              WHILE (k < 5) & (lpos + k < MaxNameLen - 1) DO
+                ch := dirBuf[entOfs + lfnNAME1 + k * 2];
+                IF (ch # 0FFH) & (ch # 0) THEN
+                  longBuf[lpos + k] := CHR(ch)
+                ELSIF ch = 0 THEN
+                  longBuf[lpos + k] := 0X
+                END;
+                INC(k)
+              END;
+              (* NAME2: 6 chars *)
+              k := 0;
+              WHILE (k < 6) & (lpos + 5 + k < MaxNameLen - 1) DO
+                ch := dirBuf[entOfs + lfnNAME2 + k * 2];
+                IF (ch # 0FFH) & (ch # 0) THEN
+                  longBuf[lpos + 5 + k] := CHR(ch)
+                ELSIF ch = 0 THEN
+                  longBuf[lpos + 5 + k] := 0X
+                END;
+                INC(k)
+              END;
+              (* NAME3: 2 chars *)
+              k := 0;
+              WHILE (k < 2) & (lpos + 11 + k < MaxNameLen - 1) DO
+                ch := dirBuf[entOfs + lfnNAME3 + k * 2];
+                IF (ch # 0FFH) & (ch # 0) THEN
+                  longBuf[lpos + 11 + k] := CHR(ch)
+                ELSIF ch = 0 THEN
+                  longBuf[lpos + 11 + k] := 0X
+                END;
+                INC(k)
+              END
+            ELSE
+              (* Non-LFN entry: check long name match, then 8.3 match *)
+              lfnMatch := FALSE;
+              IF hasLFN THEN
+                (* Compare longBuf against name (case-sensitive) *)
+                k := 0;
+                lfnMatch := TRUE;
+                WHILE (k < nameLen) & lfnMatch DO
+                  IF longBuf[k] # name[k] THEN lfnMatch := FALSE END;
+                  INC(k)
+                END;
+                IF lfnMatch & (longBuf[nameLen] # 0X) THEN
+                  lfnMatch := FALSE
+                END
+              END;
+              shortMatch := FALSE;
+              IF ~lfnMatch THEN
+                secIdx := 0;
+                shortMatch := TRUE;
+                WHILE (secIdx < 11) & shortMatch DO
+                  b := dirBuf[entOfs + secIdx];
+                  IF CHR(b) # fatNm[secIdx] THEN shortMatch := FALSE END;
+                  INC(secIdx)
+                END
+              END;
+              IF lfnMatch OR shortMatch THEN
+                idx := i * EntriesPerSector + entOfs DIV DirEntrySize;
+                found := TRUE; done := TRUE
+              END;
+              hasLFN := FALSE; lpos := 0
             END
           END;
           entOfs := entOfs + DirEntrySize
@@ -504,6 +832,9 @@ MODULE Files;
   PROCEDURE DeleteEntryIn(dirCluster, idx: INTEGER);
     VAR sec, ofs, res: INTEGER;
   BEGIN
+    (* Delete any preceding LFN entries *)
+    DeleteLFNEntries(dirCluster, idx);
+    (* Delete the 8.3 entry itself *)
     sec := idx DIV EntriesPerSector;
     ofs := (idx MOD EntriesPerSector) * DirEntrySize;
     res := ReadDirSectorAt(dirCluster, sec);
@@ -531,7 +862,7 @@ MODULE Files;
         (* Find last cluster in chain *)
         c := dirCluster;
         next := GetFAT(c);
-        WHILE (next >= 2) & (next <= MaxCluster) DO
+        WHILE (next >= 2) & (next <= maxCluster) DO
           c := next;
           next := GetFAT(c)
         END;
@@ -540,7 +871,7 @@ MODULE Files;
         i := 0;
         WHILE i < SectorSize DO dirBuf[i] := 0; INC(i) END;
         j := 0;
-        WHILE j < SecsPerCluster DO
+        WHILE j < secsPerCluster DO
           res := WriteSector(ClusterToSector(newc) + j, dirBuf);
           INC(j)
         END;
@@ -550,10 +881,88 @@ MODULE Files;
   RETURN ok
   END GrowDir;
 
+  PROCEDURE GenerateShortName(VAR longName: ARRAY OF CHAR;
+                              dirCluster: INTEGER;
+                              VAR shortName: ARRAY OF CHAR);
+    VAR i, j, slen, tail, idx: INTEGER;
+        ch: CHAR;
+  BEGIN
+    (* Initialize to spaces *)
+    i := 0;
+    WHILE i < 11 DO shortName[i] := " "; INC(i) END;
+    shortName[11] := 0X;
+    (* Copy up to 6 uppercase chars for base *)
+    slen := StrLength(longName);
+    i := 0; j := 0;
+    WHILE (i < slen) & (j < 6) DO
+      ch := longName[i];
+      IF ch = "." THEN (* skip dots *)
+      ELSIF ch = " " THEN (* skip spaces *)
+      ELSIF (ch >= "a") & (ch <= "z") THEN
+        shortName[j] := CHR(ORD(ch) - 32); INC(j)
+      ELSE
+        shortName[j] := ch; INC(j)
+      END;
+      INC(i)
+    END;
+    (* Pad with _ if base is very short *)
+    IF j = 0 THEN shortName[0] := "_"; j := 1 END;
+    (* Add ~1 suffix *)
+    shortName[j] := "~";
+    shortName[j + 1] := "1";
+    (* Try ~1 through ~9, checking for collision *)
+    tail := 1;
+    WHILE (tail <= 9) & FindFileIn(shortName, dirCluster, idx) DO
+      INC(tail);
+      shortName[j + 1] := CHR(ORD("0") + tail)
+    END
+  END GenerateShortName;
+
+  PROCEDURE FindContiguousFreeEntries(dirCluster, count: INTEGER;
+                                      VAR startIdx: INTEGER): BOOLEAN;
+    VAR i, nsec, entOfs, res, b: INTEGER;
+        runStart, runLen, entIdx: INTEGER;
+        found, done: BOOLEAN;
+  BEGIN
+    found := FALSE; done := FALSE;
+    runStart := 0; runLen := 0;
+    i := 0;
+    nsec := DirSectorCount(dirCluster);
+    WHILE (i < nsec) & ~done DO
+      res := ReadDirSectorAt(dirCluster, i);
+      IF res = 0 THEN
+        entOfs := 0;
+        WHILE (entOfs < SectorSize) & ~done DO
+          b := dirBuf[entOfs];
+          entIdx := i * EntriesPerSector + entOfs DIV DirEntrySize;
+          IF (b = DirEmpty) OR (b = DirDeleted) THEN
+            IF runLen = 0 THEN runStart := entIdx END;
+            INC(runLen);
+            IF runLen >= count THEN
+              startIdx := runStart;
+              found := TRUE; done := TRUE
+            END
+          ELSE
+            runLen := 0
+          END;
+          entOfs := entOfs + DirEntrySize
+        END
+      ELSE
+        done := TRUE
+      END;
+      INC(i)
+    END;
+    (* If not found in existing space, try growing *)
+    IF ~found & (dirCluster >= 2) & GrowDir(dirCluster) THEN
+      found := FindContiguousFreeEntries(dirCluster, count, startIdx)
+    END
+  RETURN found
+  END FindContiguousFreeEntries;
+
   PROCEDURE SplitPath(VAR path: ARRAY OF CHAR; VAR dirCluster: INTEGER;
                       VAR baseName: ARRAY OF CHAR): BOOLEAN;
     VAR i, j, start, idx, attr: INTEGER;
-        comp: ARRAY 13 OF CHAR;
+        comp: ARRAY MaxNameLen OF CHAR;
         ok: BOOLEAN;
   BEGIN
     dirCluster := -1;
@@ -582,7 +991,7 @@ MODULE Files;
         IF i > start THEN
           (* Copy component *)
           idx := 0;
-          WHILE (start < i) & (idx < 12) DO
+          WHILE (start < i) & (idx < MaxNameLen - 1) DO
             comp[idx] := path[start];
             INC(start); INC(idx)
           END;
@@ -623,7 +1032,7 @@ MODULE Files;
     i := 0;
     WHILE i < SectorSize DO dirBuf[i] := 0; INC(i) END;
     j := 0;
-    WHILE j < SecsPerCluster DO
+    WHILE j < secsPerCluster DO
       res := WriteSector(ClusterToSector(cluster) + j, dirBuf);
       INC(j)
     END;
@@ -644,7 +1053,7 @@ MODULE Files;
   PROCEDURE IsDirEmpty(dirCluster: INTEGER): BOOLEAN;
     VAR i, nsec, entOfs, res: INTEGER;
         empty: BOOLEAN;
-        b: INTEGER;
+        b, attr: INTEGER;
   BEGIN
     nsec := DirSectorCount(dirCluster);
     empty := TRUE;
@@ -659,8 +1068,10 @@ MODULE Files;
             (* No more entries *)
             i := nsec  (* break outer loop *)
           ELSIF b # DirDeleted THEN
-            (* Check if it's "." or ".." *)
-            IF (dirBuf[entOfs] = ORD(".")) & (dirBuf[entOfs + 1] = ORD(" ")) THEN
+            attr := dirBuf[entOfs + deATTR];
+            IF attr = attrLFN THEN
+              (* LFN entry — skip *)
+            ELSIF (dirBuf[entOfs] = ORD(".")) & (dirBuf[entOfs + 1] = ORD(" ")) THEN
               (* "." entry — skip *)
             ELSIF (dirBuf[entOfs] = ORD(".")) & (dirBuf[entOfs + 1] = ORD("."))
                 & (dirBuf[entOfs + 2] = ORD(" ")) THEN
@@ -724,7 +1135,7 @@ MODULE Files;
   BEGIN
     IF (r.file # NIL) & (r.pos >= 0) THEN
       bytePos := r.pos;
-      clusterByte := SectorSize * SecsPerCluster;
+      clusterByte := SectorSize * secsPerCluster;
       targetIdx := bytePos DIV clusterByte;
       IF targetIdx < r.clusterIdx THEN
         r.cluster := r.file.startCluster;
@@ -757,7 +1168,7 @@ MODULE Files;
       ELSE
         c := f.startCluster;
         cnt := 0;
-        WHILE (GetFAT(c) >= 2) & (GetFAT(c) <= MaxCluster) DO
+        WHILE (GetFAT(c) >= 2) & (GetFAT(c) <= maxCluster) DO
           c := GetFAT(c);
           INC(cnt)
         END;
@@ -776,7 +1187,8 @@ MODULE Files;
   PROCEDURE InitFS(): BOOLEAN;
     VAR ok: BOOLEAN;
   BEGIN
-    ok := LoadFAT();
+    ok := ReadBPB();
+    IF ok THEN ok := LoadFAT() END;
     IF ok THEN
       fatDirty := FALSE;
       initialized := TRUE
@@ -789,11 +1201,11 @@ MODULE Files;
   PROCEDURE Old*(name: ARRAY OF CHAR): File;
     VAR f: File;
         idx, i, dc: INTEGER;
-        nm, bn: ARRAY 32 OF CHAR;
+        nm, bn: ARRAY MaxNameLen OF CHAR;
   BEGIN
     f := NIL;
     i := 0;
-    WHILE (i < LEN(name)) & (i < 31) & (name[i] # 0X) DO
+    WHILE (i < LEN(name)) & (i < MaxNameLen - 1) & (name[i] # 0X) DO
       nm[i] := name[i]; INC(i)
     END;
     nm[i] := 0X;
@@ -820,11 +1232,11 @@ MODULE Files;
   PROCEDURE New*(name: ARRAY OF CHAR): File;
     VAR f: File;
         i, dc: INTEGER;
-        nm, bn: ARRAY 32 OF CHAR;
+        nm, bn: ARRAY MaxNameLen OF CHAR;
   BEGIN
     f := NIL;
     i := 0;
-    WHILE (i < LEN(name)) & (i < 31) & (name[i] # 0X) DO
+    WHILE (i < LEN(name)) & (i < MaxNameLen - 1) & (name[i] # 0X) DO
       nm[i] := name[i]; INC(i)
     END;
     nm[i] := 0X;
@@ -849,24 +1261,47 @@ MODULE Files;
   END New;
 
   PROCEDURE Register*(f: File);
-    VAR idx: INTEGER;
-        ok: BOOLEAN;
+    VAR idx, numLFN, startIdx, nameLen: INTEGER;
+        ok, useLFN: BOOLEAN;
+        shortNm: ARRAY 12 OF CHAR;
   BEGIN
     IF (f # NIL) & ~f.registered THEN
       ok := FlushFile(f);
-      IF ok & FindFreeEntryIn(f.dirCluster, idx) THEN
-        WriteEntryIn(f.dirCluster, idx, f.fatName, f.startCluster, f.len, 0);
-        ok := FlushFAT();
-        f.dirEntry := idx;
-        f.registered := TRUE;
-        f.modified := FALSE
-      ELSIF ok & (f.dirCluster >= 2) & GrowDir(f.dirCluster) THEN
-        IF FindFreeEntryIn(f.dirCluster, idx) THEN
-          WriteEntryIn(f.dirCluster, idx, f.fatName, f.startCluster, f.len, 0);
-          ok := FlushFAT();
-          f.dirEntry := idx;
-          f.registered := TRUE;
-          f.modified := FALSE
+      IF ok THEN
+        useLFN := NeedsLFN(f.name);
+        IF useLFN THEN
+          GenerateShortName(f.name, f.dirCluster, shortNm);
+          nameLen := StrLength(f.name);
+          numLFN := (nameLen + CharsPerLFN - 1) DIV CharsPerLFN;
+          ok := FindContiguousFreeEntries(f.dirCluster, numLFN + 1, startIdx);
+          IF ok THEN
+            WriteLFNEntries(f.dirCluster, startIdx, numLFN, f.name, shortNm);
+            idx := startIdx + numLFN;
+            WriteEntryIn(f.dirCluster, idx, shortNm,
+                         f.startCluster, f.len, 0);
+            ok := FlushFAT();
+            f.dirEntry := idx;
+            f.registered := TRUE;
+            f.modified := FALSE
+          END
+        ELSE
+          IF FindFreeEntryIn(f.dirCluster, idx) THEN
+            WriteEntryIn(f.dirCluster, idx, f.fatName,
+                         f.startCluster, f.len, 0);
+            ok := FlushFAT();
+            f.dirEntry := idx;
+            f.registered := TRUE;
+            f.modified := FALSE
+          ELSIF (f.dirCluster >= 2) & GrowDir(f.dirCluster) THEN
+            IF FindFreeEntryIn(f.dirCluster, idx) THEN
+              WriteEntryIn(f.dirCluster, idx, f.fatName,
+                           f.startCluster, f.len, 0);
+              ok := FlushFAT();
+              f.dirEntry := idx;
+              f.registered := TRUE;
+              f.modified := FALSE
+            END
+          END
         END
       END
     END
@@ -889,11 +1324,11 @@ MODULE Files;
   PROCEDURE Delete*(name: ARRAY OF CHAR; VAR res: INTEGER);
     VAR idx, cluster, attr, dc, i: INTEGER;
         ok: BOOLEAN;
-        nm, bn: ARRAY 32 OF CHAR;
+        nm, bn: ARRAY MaxNameLen OF CHAR;
   BEGIN
     res := -1;
     i := 0;
-    WHILE (i < LEN(name)) & (i < 31) & (name[i] # 0X) DO
+    WHILE (i < LEN(name)) & (i < MaxNameLen - 1) & (name[i] # 0X) DO
       nm[i] := name[i]; INC(i)
     END;
     nm[i] := 0X;
@@ -917,17 +1352,19 @@ MODULE Files;
 
   PROCEDURE Rename*(old, new: ARRAY OF CHAR; VAR res: INTEGER);
     VAR idx, dummy, i, dc1, dc2: INTEGER;
-        fatNm: ARRAY 12 OF CHAR;
-        oldNm, newNm, bn1, bn2: ARRAY 32 OF CHAR;
+        numLFN, startIdx, nameLen, cluster, size, attr: INTEGER;
+        fatNm, shortNm: ARRAY 12 OF CHAR;
+        oldNm, newNm, bn1, bn2: ARRAY MaxNameLen OF CHAR;
+        ok, useLFN: BOOLEAN;
   BEGIN
     res := -1;
     i := 0;
-    WHILE (i < LEN(old)) & (i < 31) & (old[i] # 0X) DO
+    WHILE (i < LEN(old)) & (i < MaxNameLen - 1) & (old[i] # 0X) DO
       oldNm[i] := old[i]; INC(i)
     END;
     oldNm[i] := 0X;
     i := 0;
-    WHILE (i < LEN(new)) & (i < 31) & (new[i] # 0X) DO
+    WHILE (i < LEN(new)) & (i < MaxNameLen - 1) & (new[i] # 0X) DO
       newNm[i] := new[i]; INC(i)
     END;
     newNm[i] := 0X;
@@ -938,11 +1375,32 @@ MODULE Files;
         ELSIF FindFileIn(bn2, dc1, dummy) THEN
           res := -2  (* target already exists *)
         ELSIF FindFileIn(bn1, dc1, idx) THEN
-          ToFATName(bn2, fatNm);
-          WriteEntryIn(dc1, idx, fatNm,
-                       ReadEntryClusterIn(dc1, idx),
-                       ReadEntrySizeIn(dc1, idx), 0);
-          res := 0
+          cluster := ReadEntryClusterIn(dc1, idx);
+          size := ReadEntrySizeIn(dc1, idx);
+          attr := ReadEntryAttrIn(dc1, idx);
+          (* Delete old entry and LFN entries *)
+          DeleteEntryIn(dc1, idx);
+          (* Write new entry, possibly with LFN *)
+          useLFN := NeedsLFN(bn2);
+          IF useLFN THEN
+            GenerateShortName(bn2, dc1, shortNm);
+            nameLen := StrLength(bn2);
+            numLFN := (nameLen + CharsPerLFN - 1) DIV CharsPerLFN;
+            ok := FindContiguousFreeEntries(dc1, numLFN + 1, startIdx);
+            IF ok THEN
+              WriteLFNEntries(dc1, startIdx, numLFN, bn2, shortNm);
+              WriteEntryIn(dc1, startIdx + numLFN, shortNm,
+                           cluster, size, attr);
+              res := 0
+            END
+          ELSE
+            ToFATName(bn2, fatNm);
+            ok := FindFreeEntryIn(dc1, dummy);
+            IF ok THEN
+              WriteEntryIn(dc1, dummy, fatNm, cluster, size, attr);
+              res := 0
+            END
+          END
         END
       END
     END
@@ -963,20 +1421,19 @@ MODULE Files;
   (* --- Directory operations --- *)
 
   PROCEDURE CreateDir*(path: ARRAY OF CHAR; VAR res: INTEGER);
-    VAR dc, idx, cluster, i: INTEGER;
-        nm, bn: ARRAY 32 OF CHAR;
-        fatNm: ARRAY 12 OF CHAR;
-        ok: BOOLEAN;
+    VAR dc, idx, cluster, i, numLFN, startIdx, nameLen: INTEGER;
+        nm, bn: ARRAY MaxNameLen OF CHAR;
+        fatNm, shortNm: ARRAY 12 OF CHAR;
+        ok, useLFN: BOOLEAN;
   BEGIN
     res := -1;
     i := 0;
-    WHILE (i < LEN(path)) & (i < 31) & (path[i] # 0X) DO
+    WHILE (i < LEN(path)) & (i < MaxNameLen - 1) & (path[i] # 0X) DO
       nm[i] := path[i]; INC(i)
     END;
     nm[i] := 0X;
     IF (dev # NIL) & initialized THEN
       IF SplitPath(nm, dc, bn) THEN
-        (* Check name doesn't already exist *)
         IF FindFileIn(bn, dc, idx) THEN
           res := -2  (* already exists *)
         ELSE
@@ -984,21 +1441,37 @@ MODULE Files;
           IF cluster >= 2 THEN
             SetFATEOC(cluster);
             InitDirCluster(cluster, dc);
-            (* Find free entry in parent, growing if needed *)
-            ok := FindFreeEntryIn(dc, idx);
-            IF ~ok & (dc >= 2) THEN
-              ok := GrowDir(dc);
-              IF ok THEN ok := FindFreeEntryIn(dc, idx) END
-            END;
-            IF ok THEN
-              ToFATName(bn, fatNm);
-              WriteEntryIn(dc, idx, fatNm, cluster, 0, attrDirectory);
-              ok := FlushFAT();
-              IF ok THEN res := 0 END
+            useLFN := NeedsLFN(bn);
+            IF useLFN THEN
+              GenerateShortName(bn, dc, shortNm);
+              nameLen := StrLength(bn);
+              numLFN := (nameLen + CharsPerLFN - 1) DIV CharsPerLFN;
+              ok := FindContiguousFreeEntries(dc, numLFN + 1, startIdx);
+              IF ok THEN
+                WriteLFNEntries(dc, startIdx, numLFN, bn, shortNm);
+                WriteEntryIn(dc, startIdx + numLFN, shortNm,
+                             cluster, 0, attrDirectory);
+                ok := FlushFAT();
+                IF ok THEN res := 0 END
+              ELSE
+                SetFAT(cluster, FATFree);
+                ok := FlushFAT()
+              END
             ELSE
-              (* Undo: free the cluster *)
-              SetFAT(cluster, FATFree);
-              ok := FlushFAT()
+              ok := FindFreeEntryIn(dc, idx);
+              IF ~ok & (dc >= 2) THEN
+                ok := GrowDir(dc);
+                IF ok THEN ok := FindFreeEntryIn(dc, idx) END
+              END;
+              IF ok THEN
+                ToFATName(bn, fatNm);
+                WriteEntryIn(dc, idx, fatNm, cluster, 0, attrDirectory);
+                ok := FlushFAT();
+                IF ok THEN res := 0 END
+              ELSE
+                SetFAT(cluster, FATFree);
+                ok := FlushFAT()
+              END
             END
           END
         END
@@ -1008,12 +1481,12 @@ MODULE Files;
 
   PROCEDURE RemoveDir*(path: ARRAY OF CHAR; VAR res: INTEGER);
     VAR dc, idx, attr, cluster, i: INTEGER;
-        nm, bn: ARRAY 32 OF CHAR;
+        nm, bn: ARRAY MaxNameLen OF CHAR;
         ok: BOOLEAN;
   BEGIN
     res := -1;
     i := 0;
-    WHILE (i < LEN(path)) & (i < 31) & (path[i] # 0X) DO
+    WHILE (i < LEN(path)) & (i < MaxNameLen - 1) & (path[i] # 0X) DO
       nm[i] := path[i]; INC(i)
     END;
     nm[i] := 0X;
@@ -1081,7 +1554,7 @@ MODULE Files;
       SyncRider(r);
       ok := EnsureSector(r.file, r.cluster, r.secOfs);
       IF ok THEN
-        clusterByte := SectorSize * SecsPerCluster;
+        clusterByte := SectorSize * secsPerCluster;
         bufIdx := r.pos - r.clusterIdx * clusterByte - r.secOfs * SectorSize;
         x := r.file.buf[bufIdx];
         INC(r.pos)
@@ -1131,14 +1604,14 @@ MODULE Files;
         needExtend: BOOLEAN;
   BEGIN
     IF r.file # NIL THEN
-      clusterByte := SectorSize * SecsPerCluster;
+      clusterByte := SectorSize * secsPerCluster;
       needExtend := FALSE;
       ok := TRUE;
       IF r.file.startCluster < 2 THEN
         needExtend := TRUE
       ELSE
         SyncRider(r);
-        IF (r.cluster < 2) OR (r.cluster > MaxCluster) THEN
+        IF (r.cluster < 2) OR (r.cluster > maxCluster) THEN
           needExtend := TRUE
         END
       END;
@@ -1154,7 +1627,7 @@ MODULE Files;
       IF ok THEN
         bufIdx := r.pos - r.clusterIdx * clusterByte - r.secOfs * SectorSize;
         IF bufIdx >= SectorSize THEN
-          IF r.secOfs + 1 < SecsPerCluster THEN
+          IF r.secOfs + 1 < secsPerCluster THEN
             r.secOfs := r.secOfs + 1
           ELSE
             ok := ExtendFile(r.file, r)
@@ -1211,6 +1684,8 @@ MODULE Files;
   PROCEDURE Format*(d: Driver.BlockDriver);
     VAR i, res: INTEGER;
   BEGIN
+    (* 720K FAT12: SPC=2, RES=1, NFAT=2, ROOT=112, TOT=1440, FPF=3 *)
+    (* Layout: BPB(1) + FAT1(3) + FAT2(3) + RootDir(7) + Data(1426) *)
     i := 0;
     WHILE i < SectorSize DO dirBuf[i] := 0; INC(i) END;
 
@@ -1222,46 +1697,46 @@ MODULE Files;
     dirBuf[bpbOEM+4] := 20H; dirBuf[bpbOEM+5] := 20H;
     dirBuf[bpbOEM+6] := 20H; dirBuf[bpbOEM+7] := 20H;
     PutWord(dirBuf, bpbBPS, 512);
-    dirBuf[bpbSPC] := SecsPerCluster;
+    dirBuf[bpbSPC] := 2;
     PutWord(dirBuf, bpbRES, 1);
     dirBuf[bpbNFAT] := 2;
-    PutWord(dirBuf, bpbROOT, DirEntries);
+    PutWord(dirBuf, bpbROOT, 112);
     PutWord(dirBuf, bpbTOT, 1440);
     dirBuf[bpbMEDIA] := 0F9H;
-    PutWord(dirBuf, bpbFPF, FATSectors);
+    PutWord(dirBuf, bpbFPF, 3);
     PutWord(dirBuf, bpbSPT, 9);
     PutWord(dirBuf, bpbHEADS, 2);
     dirBuf[510] := 055H;
     dirBuf[511] := 0AAH;
     res := d.write(d, 0, dirBuf);
 
-    (* Write FAT1 *)
+    (* Write FAT1 — FAT12: entries 0-1 = F9 FF FF (3 bytes) *)
     i := 0;
     WHILE i < SectorSize DO dirBuf[i] := 0; INC(i) END;
     dirBuf[0] := 0F9H; dirBuf[1] := 0FFH;
-    dirBuf[2] := 0FFH; dirBuf[3] := 0FFH;
-    res := d.write(d, FATStart, dirBuf);
-    dirBuf[0] := 0; dirBuf[1] := 0; dirBuf[2] := 0; dirBuf[3] := 0;
+    dirBuf[2] := 0FFH;
+    res := d.write(d, 1, dirBuf);
+    dirBuf[0] := 0; dirBuf[1] := 0; dirBuf[2] := 0;
     i := 1;
-    WHILE i < FATSectors DO
-      res := d.write(d, FATStart + i, dirBuf);
+    WHILE i < 3 DO
+      res := d.write(d, 1 + i, dirBuf);
       INC(i)
     END;
 
     (* Write FAT2 *)
-    dirBuf[0] := 0F9H; dirBuf[1] := 0FFH; dirBuf[2] := 0FFH; dirBuf[3] := 0FFH;
-    res := d.write(d, FAT2Start, dirBuf);
-    dirBuf[0] := 0; dirBuf[1] := 0; dirBuf[2] := 0; dirBuf[3] := 0;
+    dirBuf[0] := 0F9H; dirBuf[1] := 0FFH; dirBuf[2] := 0FFH;
+    res := d.write(d, 4, dirBuf);
+    dirBuf[0] := 0; dirBuf[1] := 0; dirBuf[2] := 0;
     i := 1;
-    WHILE i < FATSectors DO
-      res := d.write(d, FAT2Start + i, dirBuf);
+    WHILE i < 3 DO
+      res := d.write(d, 4 + i, dirBuf);
       INC(i)
     END;
 
-    (* Zero root directory *)
+    (* Zero root directory — 7 sectors starting at sector 7 *)
     i := 0;
-    WHILE i < DirSectors DO
-      res := d.write(d, DirStart + i, dirBuf);
+    WHILE i < 7 DO
+      res := d.write(d, 7 + i, dirBuf);
       INC(i)
     END
   END Format;

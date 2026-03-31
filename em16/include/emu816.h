@@ -30,7 +30,7 @@
 # define TRACE(MNEM)	{ if (trace) dump(MNEM, ea); }
 # define BYTES(N)		{ if (trace) bytes(N); pc += N; }
 # define SHOWPC()		{ if (trace) show(); }
-# define ENDL()			{ if (trace) std::cout << std::endl; }
+# define ENDL()			{ if (trace) std::cerr << std::endl; }
 #else
 # define TRACE(MNEM)
 # define BYTES(N)		{ pc += N; }
@@ -44,10 +44,18 @@ struct Symbol {
   unsigned int label;
 };
 
-// Defines the WDC 65C816 emulator. 
+// Defines the WDC 65C816 emulator.
 class emu816 : public mem816
 {
 public:
+
+  enum CpuType { CPU_WDC = 0, CPU_ROCKWELL = 1, CPU_L28 = 2 };
+
+  static void setCpuType(CpuType t) { cpu_type = t; }
+  static CpuType getCpuType() { return cpu_type; }
+  static Word getRegI() { return i_reg; }
+  static Byte getWH() { return wh; }
+  static Byte getWL() { return wl; }
 
   static void setStackPage(unsigned int addr)
   {
@@ -120,6 +128,25 @@ public:
   static Word getPC() { return pc; }
   static Word getDP() { return dp.w; }
   static void setDP(Word v) { dp.w = v; }
+  static void setSP(Word v) { sp.w = v; }
+
+  // Enter native mode with 16-bit A and X, clear decimal
+  static void setNativeMode() {
+    e = 0;        // native mode
+    p.f_m = 0;    // 16-bit accumulator
+    p.f_x = 0;    // 16-bit index registers
+    p.f_d = 0;    // binary mode
+  }
+
+  // Simulate JSL to target address: pushes return address on stack,
+  // sets PBR/PC to target. Used by SYSTEM.EXEC trap so that RTL
+  // in the called module returns to the instruction after the BRK.
+  static void execModule(Addr ea) {
+    pushByte(pbr);
+    pushWord(pc - 1);
+    pbr = lo(ea >> 16);
+    pc = (Word)ea;
+  }
 
 private:
 
@@ -153,6 +180,11 @@ private:
   static bool		interrupted;
   static unsigned long cycles;
   static bool		trace;
+
+  static CpuType	cpu_type;
+  static Word		i_reg;
+  static Byte		wh;
+  static Byte		wl;
 
   // For debugging
   static struct Symbol* symtab;
@@ -640,16 +672,16 @@ private:
     (void)ea;
 
     if (e || p.f_m) {
+      Byte sign = a.b & 0x80;
       setc(a.b & 0x01);
-      int temp = a.b >>= 1;
-      temp |= a.b & 0x80;
-      setnz_b(temp);
+      a.b = (a.b >> 1) | sign;
+      setnz_b(a.b);
     }
     else {
-      setc(a.b & 0x01);
-      int temp = a.b >>= 1;
-      temp |= a.b & 0x8000;
-      setnz_b(temp);
+      Word sign = a.w & 0x8000;
+      setc(a.w & 0x0001);
+      a.w = (a.w >> 1) | sign;
+      setnz_w(a.w);
     }
     cycles += 2;
   }
@@ -788,7 +820,7 @@ private:
     // Read the trap number from the immediate byte
     Byte trap_num = getByte(ea);
 
-    if (trap_num >= 1 && trap_num <= 10 && trap_handler != NULL) {
+    if (trap_num >= 0 && trap_num <= 15 && trap_handler != NULL) {
       // Compiler runtime trap — dispatch to handler
       trap_handler(trap_num);
       cycles += 2;
@@ -1552,7 +1584,6 @@ private:
       pbr = pullByte();
       cycles += 7;
     }
-    p.f_i = 0;
   }
 
   INLINE static void op_rtl(Addr ea)
@@ -1945,7 +1976,7 @@ private:
   {
     TRACE("BBS");
 
-  	if ((getByte(n) & bit)) {
+    if ((getByte(n) & (1 << bit))) {
       if (e && ((pc ^ ea) & 0xff00)) ++cycles;
       pc = (Word)ea;
       cycles += 3;
@@ -1958,7 +1989,7 @@ private:
   {
     TRACE("BBR");
 
-	if (!(getByte(n) & bit)) {
+    if (!(getByte(n) & (1 << bit))) {
       if (e && ((pc ^ ea) & 0xff00)) ++cycles;
       pc = (Word)ea;
       cycles += 3;
@@ -1970,95 +2001,185 @@ private:
   INLINE static void op_rmb(int bit, Addr ea)
   {
     TRACE("RMB");
+    setByte(ea, getByte(ea) & ~(1 << bit));
+    cycles += 5;
   }
 
   INLINE static void op_smb(int bit, Addr ea)
   {
     TRACE("SMB");
+    setByte(ea, getByte(ea) | (1 << bit));
+    cycles += 5;
   }
 
   INLINE static void op_mpy(Addr ea)
   {
     TRACE("MPY");
+    (void)ea;
+    int8_t a_val = (int8_t)a.b;
+    int8_t y_val = (int8_t)y.b;
+    int16_t product = (int16_t)(a_val * y_val);
+    a.b = (product >> 8) & 0xFF;
+    y.b = product & 0xFF;
+    setn(product & 0x8000);
+    setz(product == 0);
+    cycles += 6;
+  }
+
+  INLINE static void op_mpa(Addr ea)
+  {
+    TRACE("MPA");
+    (void)ea;
+    int16_t w_val = (int16_t)((wh << 8) | wl);
+    int8_t a_val = (int8_t)a.b;
+    int8_t y_val = (int8_t)y.b;
+    int product = a_val * y_val;
+    int result = w_val + product;
+    if (result > 32767) { result = 32767; p.f_v = 1; }
+    else if (result < -32768) { result = -32768; p.f_v = 1; }
+    wh = (result >> 8) & 0xFF;
+    wl = result & 0xFF;
+    y.b = 0;
+    cycles += 6;
   }
 
   INLINE static void op_tip(Addr ea)
   {
     TRACE("TIP");
+    (void)ea;
+    pc = i_reg;
+    cycles += 2;
   }
 
   INLINE static void op_jsb(int vector, Addr ea)
   {
     TRACE("JSB");
+    (void)ea;
+    pushWord(pc);
+    pc = getWord(0xFFE0 + vector * 2);
+    cycles += 6;
   }
 
   INLINE static void op_jpi(Addr ea)
   {
     TRACE("JPI");
+    (void)ea;
+    i_reg = pc;
+    Word indirect = getWord(i_reg);
+    i_reg += 2;
+    pc = getWord(indirect);
+    cycles += 5;
   }
 
   INLINE static void op_lab(Addr ea)
   {
     TRACE("LAB");
+    (void)ea;
+    if ((a.b & 0x80) && a.b != 0x80) {
+      a.b = (~a.b) + 1;
+    }
+    setnz_b(a.b);
+    cycles += 3;
   }
 
-    INLINE static void op_neg(Addr ea)
+  INLINE static void op_neg(Addr ea)
   {
     TRACE("NEG");
+    (void)ea;
+    if (a.b != 0x80) {
+      a.b = (~a.b) + 1;
+    }
+    setnz_b(a.b);
+    cycles += 2;
   }
 
   INLINE static void op_psh(Addr ea)
   {
     TRACE("PSH");
+    (void)ea;
+    pushByte(a.b);
+    pushByte(x.b);
+    pushByte(y.b);
+    cycles += 5;
   }
-  
+
   INLINE static void op_phw(Addr ea)
   {
     TRACE("PHW");
+    (void)ea;
+    pushByte(wh);
+    pushByte(wl);
+    cycles += 4;
   }
 
   INLINE static void op_pul(Addr ea)
   {
     TRACE("PUL");
+    (void)ea;
+    y.b = pullByte();
+    x.b = pullByte();
+    a.b = pullByte();
+    setnz_b(a.b);
+    cycles += 6;
   }
-  
+
   INLINE static void op_plw(Addr ea)
   {
     TRACE("PLW");
+    (void)ea;
+    wl = pullByte();
+    wh = pullByte();
+    cycles += 5;
   }
 
   INLINE static void op_rnd(Addr ea)
   {
     TRACE("RND");
+    (void)ea;
+    int16_t w_val = (int16_t)((wh << 8) | wl);
+    int result = (w_val + 0x80) >> 8;
+    if (result > 0x7F) result = 0x7F;
+    else if (result < -0x80) result = -0x80;
+    a.b = (Byte)(result & 0xFF);
+    setnz_b(a.b);
+    cycles += 2;
   }
 
-    INLINE static void op_clw(Addr ea)
+  INLINE static void op_clw(Addr ea)
   {
     TRACE("CLW");
+    (void)ea;
+    wh = 0;
+    wl = 0;
+    p.f_v = 0;
+    cycles += 2;
   }
 
   INLINE static void op_taw(Addr ea)
   {
     TRACE("TAW");
+    (void)ea;
+    wh = a.b;
+    wl = 0;
+    cycles += 2;
   }
 
   INLINE static void op_twa(Addr ea)
   {
     TRACE("TWA");
+    (void)ea;
+    a.b = wh;
+    setnz_b(a.b);
+    cycles += 2;
   }
   
-    INLINE static void op_add(Addr ea)
+  INLINE static void op_add(Addr ea)
   {
     TRACE("ADD");
 
     if (e || p.f_m) {
       Byte	data = getByte(ea);
       Word	temp = a.b + data;
-			
-      if (p.f_d) {
-		if ((temp & 0x0f) > 0x09) temp += 0x06;
-		if ((temp & 0xf0) > 0x90) temp += 0x60;
-      }
 
       setc(temp & 0x100);
       setv((~(a.b ^ data)) & (a.b ^ temp) & 0x80);
@@ -2069,13 +2190,6 @@ private:
       Word	data = getWord(ea);
       int	temp = a.w + data;
 
-      if (p.f_d) {
-		if ((temp & 0x000f) > 0x0009) temp += 0x0006;
-		if ((temp & 0x00f0) > 0x0090) temp += 0x0060;
-		if ((temp & 0x0f00) > 0x0900) temp += 0x0600;
-		if ((temp & 0xf000) > 0x9000) temp += 0x6000;
-      }
-			
       setc(temp & 0x10000);
       setv((~(a.w ^ data)) & (a.w ^ temp) & 0x8000);
       setnz_w(a.w = (Word)temp);
@@ -2086,72 +2200,176 @@ private:
   INLINE static void op_nxt(Addr ea)
   {
     TRACE("NXT");
+    (void)ea;
+    pc = getWord(i_reg);
+    i_reg += 2;
+    cycles += 4;
   }
-  
+
   INLINE static void op_lii(Addr ea)
   {
     TRACE("LII");
+    (void)ea;
+    i_reg = getWord(i_reg);
+    cycles += 5;
   }
-  
+
   INLINE static void op_lan(Addr ea)
   {
     TRACE("LAN");
+    (void)ea;
+    a.b = getByte(i_reg);
+    i_reg++;
+    setnz_b(a.b);
+    cycles += 3;
   }
-  
+
   INLINE static void op_sti(Addr ea)
   {
     TRACE("STI");
+    Byte value = getByte(ea);
+    Byte zp = getByte(join(pbr, pc));
+    pc++;
+    setByte(bank(0) | (Word)(dp.w + zp), value);
+    cycles += 4;
   }
-  
+
   INLINE static void op_ini(Addr ea)
   {
     TRACE("INI");
+    (void)ea;
+    i_reg++;
+    cycles += 3;
   }
 
   INLINE static void op_rba(Addr ea)
   {
     TRACE("RBA");
+    Byte mask = getByte(ea);
+    Word addr = getWord(join(pbr, pc));
+    pc += 2;
+    Addr target = join(dbr, addr);
+    setByte(target, getByte(target) & ~mask);
+    cycles += 6;
   }
-  
+
   INLINE static void op_phi(Addr ea)
   {
     TRACE("PHI");
+    (void)ea;
+    pushWord(i_reg);
+    cycles += 4;
   }
-  
-  
+
   INLINE static void op_sba(Addr ea)
   {
     TRACE("SBA");
+    Byte mask = getByte(ea);
+    Word addr = getWord(join(pbr, pc));
+    pc += 2;
+    Addr target = join(dbr, addr);
+    setByte(target, getByte(target) | mask);
+    cycles += 6;
   }
-  
+
   INLINE static void op_exc(Addr ea)
   {
     TRACE("EXC");
+    Byte temp = getByte(ea);
+    setByte(ea, a.b);
+    a.b = temp;
+    setnz_b(a.b);
+    cycles += 5;
   }
-  
-    INLINE static void op_pli(Addr ea)
+
+  INLINE static void op_pli(Addr ea)
   {
     TRACE("PLI");
+    (void)ea;
+    i_reg = pullWord();
+    cycles += 6;
   }
-  
+
   INLINE static void op_bar(Addr ea)
   {
     TRACE("BAR");
+    Byte mask = getByte(ea);
+    Word addr = getWord(join(pbr, pc));
+    pc += 2;
+    Byte offset = getByte(join(pbr, pc));
+    pc++;
+    if ((getByte(join(dbr, addr)) & mask) == 0) {
+      pc = (Word)(pc + (signed char)offset);
+      cycles += 6;
+    } else {
+      cycles += 5;
+    }
   }
-  
+
   INLINE static void op_lai(Addr ea)
   {
     TRACE("LAI");
+    (void)ea;
+    a.b = getByte(i_reg);
+    setnz_b(a.b);
+    cycles += 3;
   }
-  
+
   INLINE static void op_bas(Addr ea)
   {
     TRACE("BAS");
+    Byte mask = getByte(ea);
+    Word addr = getWord(join(pbr, pc));
+    pc += 2;
+    Byte offset = getByte(join(pbr, pc));
+    pc++;
+    if ((getByte(join(dbr, addr)) & mask) == mask) {
+      pc = (Word)(pc + (signed char)offset);
+      cycles += 6;
+    } else {
+      cycles += 5;
+    }
   }
-  
+
   INLINE static void op_pia(Addr ea)
   {
     TRACE("PIA");
+    (void)ea;
+    i_reg = pullWord();
+    a.b = getByte(i_reg);
+    x.b = a.b;
+    i_reg++;
+    setnz_b(a.b);
+    cycles += 6;
+  }
+
+  // L28-specific JSR/RTS/BRK variants
+  INLINE static void op_jsr_l28(Addr ea)
+  {
+    TRACE("JSR");
+    pushWord(pc);  // L28 pushes PC, not PC-1
+    pc = (Word)ea;
+    cycles += 4;
+  }
+
+  INLINE static void op_rts_l28(Addr ea)
+  {
+    TRACE("RTS");
+    (void)ea;
+    pc = pullWord();  // L28 uses address directly, no +1
+    cycles += 6;
+  }
+
+  INLINE static void op_brk_l28(Addr ea)
+  {
+    TRACE("BRK");
+    (void)ea;
+    pushWord(pc);
+    pushByte(p.b | 0x10);
+    p.f_i = 1;
+    p.f_d = 0;
+    pc = getWord(0xFFFE);
+    cycles += 7;
   }
   
 

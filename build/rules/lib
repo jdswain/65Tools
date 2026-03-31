@@ -1,0 +1,47 @@
+# lib
+#
+# Rules for building a library
+
+#
+# Target names
+#
+
+LIB_DEBUG = $(OBJPATH)/$(target)d.a
+LIB_TEST = $(OBJPATH)/test_$(target).a
+LIB_RELEASE = $(OBJPATH)/$(target).a
+
+#
+# Include the compiler rule
+#
+include $(BUILD_BASE)/build/rules/compile
+
+#
+# Rules for creating a library
+#
+clean:
+	$(RM) $(OBJPATH)
+	$(RM) $(EXEC_DEBUG) $(EXEC_RELEASE)
+
+distclean: clean
+	$(RM) $(OBJPATH)
+	$(RM) $(DEPPATH)
+	$(RM) $(BINPATH)
+
+build: debug release
+debug: bindirs $(LIB_DEBUG)
+test: bindirs $(LIB_TEST)
+release: bindirs $(LIB_RELEASE)
+
+$(LIB_DEBUG): $(foreach o,$(objects),$(OBJPATH)/$(o)d.o)
+	@echo "** Building library (debug)" $@
+	$(AR) rcs $(LIB_DEBUG) $^
+
+$(LIB_TEST): $(foreach o,$(test_objects),$(OBJPATH)/$(o)d.o)
+	@echo "** Building library (test)" $@
+	$(AR) rcs $(LIB_TEST) $^
+
+$(LIB_RELEASE): $(foreach o,$(objects),$(OBJPATH)/$(o).o)
+	@echo "** Building library (release)" $@
+	$(AR) rcs $(LIB_RELEASE) $^
+
+

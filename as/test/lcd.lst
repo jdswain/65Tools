@@ -87,4 +87,11 @@
 028f: 20 60 02          		jsr lcd_wrauto
 0292: 60                		rts
 0293:                   	
+
 Symbols:
+__65AS__      1 lcd_data      0801 lcd_wr        025d on              01 wait_4        0270 
+false           00 lcd_hello     0279 lcd_wrauto    0260 true            01 wait_8        026d 
+lcd_base      0800 lcd_inst      0800 loop_2        0275 wait_16       026a wl            0244 
+lcd_busy      0257 lcd_reset     0200 no              00 wait_2        0273 yes             01 
+lcd_clr       024f lcd_setaddr   0239 off             00 wait_32       0267 
+

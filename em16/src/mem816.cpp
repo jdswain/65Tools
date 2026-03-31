@@ -23,13 +23,21 @@
 
 mem816::Addr	mem816::memMask;
 mem816::Addr	mem816::ramSize;
+mem816::Addr	mem816::uartBase = 0xC000;
+mem816::Addr	mem816::fdcBase = 0xC010;
+mem816::Addr	mem816::viaBase = 0xC020;
+bool		mem816::l28MCUEnabled = false;
+bool		mem816::flashInitialized = false;
 
 mem816::Byte   *mem816::pRAM;
 const mem816::Byte *mem816::pROM;
 UART mem816::uart;
+L28_MCU mem816::l28mcu;
 R6501 mem816::r6501 = R6501();
 Video mem816::video;
+LCD_ST7586S mem816::lcd;
 WD1793 mem816::fdc;
+VIA_6522 mem816::via;
 
 //==============================================================================
 

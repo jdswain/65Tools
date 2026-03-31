@@ -1,0 +1,52 @@
+# exec
+#
+# Rules for building and running executables
+
+#
+# Target names
+#
+
+EXEC_DEBUG = $(BINPATH)/$(target)d
+EXEC_TEST = $(BINPATH)/test_$(target)
+EXEC_RELEASE = $(BINPATH)/$(target)
+
+#
+# Include the compiler rule
+#
+include $(BUILD_BASE)/build/rules/compile
+
+#
+# Rules for creating an executable
+#
+clean:
+	$(RM) $(OBJPATH)
+	$(RM) $(EXEC_DEBUG) $(EXEC_RELEASE)
+
+distclean: clean
+	$(RM) $(OBJPATH)
+	$(RM) $(DEPPATH)
+	$(RM) $(BINPATH)
+
+build: debug release
+debug: bindirs $(EXEC_DEBUG)
+test: bindirs $(EXEC_TEST)
+release: bindirs $(EXEC_RELEASE)
+
+$(EXEC_DEBUG): $(foreach o,$(objects),$(OBJPATH)/$(o)d.o) ../shared/obj/lib65.a
+	@echo "** Building executable (debug)" $@
+	$(LINK) -o $(EXEC_DEBUG) $^ $(LINKFLAGS)
+
+$(EXEC_TEST): $(foreach o,$(test_objects),$(OBJPATH)/$(o)d.o) ../shared/obj/lib65.a
+	@echo "** Building executable (test)" $@
+	$(LINK) -o $(EXEC_TEST) $^ $(LINKFLAGS)
+
+$(EXEC_RELEASE): $(foreach o,$(objects),$(OBJPATH)/$(o).o) ../shared/obj/lib65.a
+	@echo "** Building executable (release)" $@
+	$(LINK) -o $(EXEC_RELEASE) $^ $(LINKFLAGS)
+
+run: $(EXEC_RELEASE)
+	$(EXEC_RELEASE)
+
+run_test: $(EXEC_TEST) 	
+	$(EXEC_TEST)
+

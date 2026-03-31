@@ -3,116 +3,93 @@
 #include <sys/select.h>
 #include <sys/time.h>
 #include <sys/types.h>
-#include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <cstdio>
-#ifdef __APPLE__
-#include <util.h>
-#else
-#include <pty.h>
-#endif
+#include <cstdlib>
+#include <termios.h>
 #include <cerrno>
-#include <string.h>
-#include <iostream>
+#include <signal.h>
+
+struct termios saved_tty;
+bool tty_raw = false;
+
+static void sigint_handler(int) {
+    // Restore terminal before exiting
+    if (tty_raw) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &saved_tty);
+    }
+    std::fprintf(stderr, "\n[em16] Caught SIGINT\n");
+    _exit(130);
+}
+
+void restore_terminal() {
+    if (tty_raw) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &saved_tty);
+        tty_raw = false;
+    }
+}
 
 UART::UART() {
-    use_stdout = !isatty(STDIN_FILENO);
-    pty_fd = -1;
+    signal(SIGPIPE, SIG_IGN);
+    signal(SIGINT, sigint_handler);
+
+    if (!isatty(STDIN_FILENO)) {
+        // Piped mode: output via stdout, no input
+        use_stdout = true;
+        interactive = false;
+    } else {
+        // Interactive mode: stdin/stdout in raw mode (deferred)
+        use_stdout = false;
+        interactive = true;
+    }
+    statusReg = 0x10;
+}
+
+// Switch stdin to raw mode on first UART I/O, so that
+// earlier diagnostic messages (printf/cout) display normally.
+void UART::enterRawMode()
+{
+    if (tty_raw) return;
+
+    tcgetattr(STDIN_FILENO, &saved_tty);
+    tty_raw = true;
+    atexit(restore_terminal);
+
+    struct termios raw = saved_tty;
+    cfmakeraw(&raw);
+    raw.c_lflag |= ISIG;   // Keep Ctrl+C = SIGINT
+    tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+
+    // Non-blocking so polling doesn't stall the emulated CPU
+    fcntl(STDIN_FILENO, F_SETFL, fcntl(STDIN_FILENO, F_GETFL) | O_NONBLOCK);
 }
 
 void UART::reset()
 {
-    // If stdin is not a terminal (piped), use stdout for output
-    if (!isatty(STDIN_FILENO)) {
-        use_stdout = true;
-        pty_fd = -1;
-        statusReg = 0x10;
-        return;
-    }
-
-    use_stdout = false;
-    int slave_fd;
-    char pty_name[128];
-    struct termios tty;
-
-    // Initialize termios structure for raw mode
-    memset(&tty, 0, sizeof(tty));
-    tty.c_cflag = CS8;
-
-    // Create PTY pair
-    int result = openpty(&pty_fd, &slave_fd, pty_name, &tty, nullptr);
-    if (result < 0) {
-        std::fprintf(stderr, "Failed to create PTY: %s\n", strerror(errno));
-        return;
-    }
-
-    std::printf("Slave PTY: %s\n", pty_name);
-
-    // Configure master PTY for raw mode
-    if (tcgetattr(pty_fd, &tty) < 0) {
-        std::fprintf(stderr, "Failed to get PTY attributes: %s\n", strerror(errno));
-        close(pty_fd);
-        close(slave_fd);
-        return;
-    }
-
-    cfmakeraw(&tty);
-
-    if (tcsetattr(pty_fd, TCSANOW, &tty) < 0) {
-        std::fprintf(stderr, "Failed to set PTY attributes: %s\n", strerror(errno));
-        close(pty_fd);
-        close(slave_fd);
-        return;
-    }
-
-    // Close slave fd as we only need the master
-    close(slave_fd);
-
     statusReg = 0x10;
 }
 
 void UART::status() {
-    if (statusReg & 0x08) return;
-    if (use_stdout) return;
+    if (statusReg & 0x08) return;  // already have unread data
 
-    wdc816::Byte buf[1];
-    fd_set read_fds;
-    
-    // Clear and set the file descriptor set for reading only
-    FD_ZERO(&read_fds);
-    FD_SET(pty_fd, &read_fds);
-    
-    // Set timeout to 100us
-    struct timeval timeout;
-    timeout.tv_sec = 0;
-    timeout.tv_usec = 100;
-    
-    // Wait for input to become ready or until timeout
-    int bytesReady = select(pty_fd + 1, &read_fds, nullptr, nullptr, &timeout);
-    
-    if (bytesReady > 0 && FD_ISSET(pty_fd, &read_fds)) {
-        ssize_t bytes_read = read(pty_fd, buf, 1);
-        if (bytes_read > 0) {
-            statusReg |= 0x08;
-            receiveDataReg = *buf;
-            std::cout << "Byte: 0x" << std::hex << static_cast<unsigned int>(receiveDataReg) << std::endl;
-        }
+    if (interactive) enterRawMode();
+
+    unsigned char buf;
+    ssize_t n = read(STDIN_FILENO, &buf, 1);
+    if (n == 1) {
+        statusReg |= 0x08;
+        receiveDataReg = buf;
+        std::fprintf(stderr, "[UART] recv $%02X '%c'\n", buf, (buf >= 0x20 && buf < 0x7f) ? buf : '.');
     }
 }
 
 void UART::send(wdc816::Byte data) {
-  if (use_stdout) {
+    if (interactive) enterRawMode();
     putchar(data);
     fflush(stdout);
-  } else {
-    int bytes = write(pty_fd, &data, 1);
-    if (bytes != 1) {
-      fprintf(stderr, "Couldn't write to serial port");
-    }
-  }
 }
-  
+
 wdc816::Byte UART::getByte(wdc816::Addr ea)
 {
   switch (ea & 0x03) {

@@ -1,0 +1,16 @@
+* Object file (.o)
+An object file contains sections, no segment header. All information is in the section headers.
+
+* Library (.lib)
+This is just a merged object file with a symbol table. It is treated just the same as a .o file. Library files are made up from .o files and where possible symbols are resolved and sections merged. There could be multiple text segments as each segment must be less than 64k.
+
+* Executable
+Segments are merged although there could be multiple segments of one type if more than 64k is required. This is up to the higher level code to manage, the ELF writer just writes segments as they are found.
+
+A debug executable still has symbol, string, etc. sections, a stripped executable minimises size by removing all non-essential data. Runtime relocation tables are required for dynamic library calls and for multiple banks. These tables are stored in the data section and a resolution function is included in the text section.
+
+* Dynamic Library (.dylib)
+This is like an executable file, a runtime relocation table is used here too.
+
+* ROM file
+This is an output of the linker but is not an ELF file. An additional data file is created that contains header information and a symbol table.

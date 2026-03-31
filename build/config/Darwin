@@ -1,0 +1,24 @@
+#
+# Define tools
+#
+
+CC = cc
+CPP = c++
+LINK = $(CPP)
+AR = ar
+DEBUG = lldb
+DEP = $(BUILD_BASE)/build/script/makedepend.gcc
+SHELL = sh
+RM = rm -rf
+CP = cp
+MKDIR = mkdir -p
+
+#
+# Compiler and linker flags
+#
+
+CFLAGS = -Wstrict-prototypes -std=c11 -fms-extensions -g
+CPPFLAGS =
+LINKFLAGS =
+DEBUGFLAGS = -g -O0 -Ddebug
+RELEASEFLAGS = -Os -Wall

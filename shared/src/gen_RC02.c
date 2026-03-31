@@ -62,6 +62,7 @@ void gen_RC02(const char *filename, int line_num, Instr *instr, AddrMode mode, i
     break;
   case sBCC:
     switch( mode ) {
+    case DirectPage:
 	case Absolute:
     case ProgramCounterRelative:         or(filename, line_num, 0x90, value1); return;
     default:                             break;
@@ -69,6 +70,7 @@ void gen_RC02(const char *filename, int line_num, Instr *instr, AddrMode mode, i
     break;
   case sBCS:
     switch( mode ) {
+    case DirectPage:
 	case Absolute:
     case ProgramCounterRelative:         or(filename, line_num, 0xB0, value1); return;
     default:                             break;
@@ -76,6 +78,7 @@ void gen_RC02(const char *filename, int line_num, Instr *instr, AddrMode mode, i
     break;
   case sBEQ:
     switch( mode ) {
+    case DirectPage:
     case Absolute:
     case ProgramCounterRelative:         or(filename, line_num, 0xf0, value1); return;
     default:                             break;
@@ -91,6 +94,7 @@ void gen_RC02(const char *filename, int line_num, Instr *instr, AddrMode mode, i
     break;
   case sBMI:
     switch( mode ) {
+    case DirectPage:
     case Absolute:
     case ProgramCounterRelative:         or(filename, line_num, 0x30, value1); return;
     default:                             break;
@@ -98,6 +102,7 @@ void gen_RC02(const char *filename, int line_num, Instr *instr, AddrMode mode, i
     break;
   case sBNE:
     switch( mode ) {
+    case DirectPage:
     case Absolute:
     case ProgramCounterRelative:         or(filename, line_num, 0xd0, value1); return;
     default:                             break;
@@ -105,6 +110,7 @@ void gen_RC02(const char *filename, int line_num, Instr *instr, AddrMode mode, i
     break;
   case sBPL:
     switch( mode ) {
+    case DirectPage:
     case Absolute:
     case ProgramCounterRelative:         or(filename, line_num, 0x10, value1); return;
     default:                             break;
@@ -112,6 +118,7 @@ void gen_RC02(const char *filename, int line_num, Instr *instr, AddrMode mode, i
     break;
   case sBRA:
     switch( mode ) {
+    case DirectPage:
     case Absolute:
     case ProgramCounterRelative:         or(filename, line_num, 0x80, value1); return;
     default:                             break;
@@ -126,6 +133,7 @@ void gen_RC02(const char *filename, int line_num, Instr *instr, AddrMode mode, i
     break;
   case sBVC:
     switch( mode ) {
+    case DirectPage:
     case Absolute:
     case ProgramCounterRelative:         or(filename, line_num, 0x50, value1); return;
     default:                             break;
@@ -133,6 +141,7 @@ void gen_RC02(const char *filename, int line_num, Instr *instr, AddrMode mode, i
     break;
   case sBVS:
     switch( mode ) {
+    case DirectPage:
     case Absolute:
     case ProgramCounterRelative:         or(filename, line_num, 0x70, value1); return;
     default:                             break;
@@ -197,7 +206,7 @@ void gen_RC02(const char *filename, int line_num, Instr *instr, AddrMode mode, i
     case Absolute:                       ow(0xce, value1); return;
     case DirectPage:                     ob(0xc6, value1); return;
     case Implied:
-    case Accumulator:                    o(0x3a); break;
+    case Accumulator:                    o(0x3a); return;
     case DirectPageIndexedX:             ob(0xd6, value1); return;
     case AbsoluteIndexedX:               ow(0xde, value1); return;
     default:                             break;

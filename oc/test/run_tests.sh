@@ -83,7 +83,8 @@ for modfile in "$SCRIPT_DIR"/*.Mod; do
   fi
 
   # Skip L12 negative tests — they are expected to fail compilation
-  case "$basename" in L12_*) TOTAL=$((TOTAL - 1)); continue ;; esac
+  # Skip L15 tests — they need -I flags handled by their own runner
+  case "$basename" in L12_*|L15_*) TOTAL=$((TOTAL - 1)); continue ;; esac
 
   if is_known_failure "$basename"; then
     echo "SKIP  $basename (known limitation)"

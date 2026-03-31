@@ -1,0 +1,18 @@
+#! /bin/sh
+#
+# $Id: //poco/1.6/build/script/makedepend.gcc#1 $
+#
+# makedepend.gcc
+#
+# Create dependency file, GCC version
+# Usage: makedepend.gcc source target dir1 dir2 dir3 dir4 flags...
+#
+
+source=$1
+shift
+target=$1
+shift
+dir1=$1
+
+echo $CC -MM $@ $source | sed "s#\(.*\.o$\)#$dir1/\1#" >$target 2>/dev/null
+

@@ -101,6 +101,15 @@ void parse_factor(Symbol *sym, bool is_local)
 	scanner_get(sym);
 	expect(sym, sIDENT);
 	is_local = true;
+	/* expect() already consumed the ident and advanced the scanner,
+	   so build the variable directly without falling through to sIDENT
+	   (which would call scanner_get again, double-advancing). */
+	v = object_new(Const, typeString);
+	v->string_val = as_strdup(id);
+	v->is_local = is_local;
+	interp_add(OpPushVar, v);
+	object_release(v);
+	break;
   case sIDENT:
 	v = object_new(Const, typeString);
     v->string_val = as_strdup(id);

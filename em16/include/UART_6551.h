@@ -51,11 +51,12 @@ class UART {
   wdc816::Byte commandReg = 0x02;
   wdc816::Byte controlReg = 0x00;
   
-  int pty_fd = -1;
   bool use_stdout = false;
+  bool interactive = false;
 
   void status();
   void send(wdc816::Byte data);
+  void enterRawMode();
 
 };
 

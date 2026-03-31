@@ -1,0 +1,369 @@
+Conexant L28 MCU Instruction Set Reference
+============================================
+
+Source: Conexant L28 MCU Technical Reference Manual, Doc. No. 1198, June 1999.
+
+The L28 is an enhanced CMOS 6502 derivative originally designed by Rockwell
+(R65C19) for modem controller applications. It extends the base 6502 with
+43 new instructions in three categories: 15 filter/DSP instructions,
+10 direct threaded code instructions, and 7 controller instructions. It also
+includes the 65C02 additions (BRA, PHX/PHY/PLX/PLY, RMB/SMB, BBR/BBS).
+
+
+ADDRESSING MODE CHANGES
+========================
+
+The L28 redefines two of the 6502's indirect addressing modes. This is the
+single most important difference when porting code.
+
+  6502                    L28
+  ----                    ---
+  (zp,X)  Indexed Ind.    (zp)    Indirect (no X indexing)
+  (zp),Y  Ind. Indexed    (zp),X  Indirect Indexed by X (not Y)
+
+On the 6502, "(zp,X)" adds X to the zero-page pointer address before
+dereferencing. The L28 removes this pre-indexing -- the pointer is
+dereferenced directly. The opcode bytes are unchanged ($61 for ADC, $A1 for
+LDA, etc.) but the CPU behaviour is different.
+
+On the 6502, "(zp),Y" dereferences the zero-page pointer then adds Y. The
+L28 changes this to add X instead of Y. Again, the opcode bytes are the same
+($71 for ADC, $B1 for LDA, etc.) but X is used for post-indexing.
+
+Impact on porting:
+
+  - Any code using (zp,X) must be reviewed. On the L28, the X offset is
+    ignored -- only the pointer at the zero-page address is used.
+  - Any code using (zp),Y must change the index register from Y to X.
+  - Software that uses both modes together (common in 6502 string/table
+    routines) will need restructuring.
+
+In the assembler, the syntax mapping is:
+
+  Assembler syntax         L28 meaning          Opcode (LDA example)
+  ---------------         -----------          --------------------
+  LDA ($10)               Indirect             $A1
+  LDA ($10,X)             Indirect (same)      Also maps to $A1 (*)
+  LDA ($10),X             Indirect indexed X   $B1 (via (zp,X) syntax)
+
+  (*) The parser produces DirectPageIndexedIndirectX for the (zp,X) syntax,
+      which gen_RC19.c maps to the (Indirect),X opcode. This is a pragmatic
+      mapping -- the L28 has no true pre-indexed indirect.
+
+
+OTHER BEHAVIOURAL CHANGES FROM THE 6502
+=========================================
+
+  Feature                    NMOS 6502              L28
+  -------                    ---------              ---
+  JMP (xxFF) page wrap       Does not increment     Increments correctly
+  Read/modify/write cycles   1 read + 2 write       2 read + 1 write
+  Decimal flag after reset   Indeterminate          Cleared to 0
+  Decimal ADD/SUB timing     Same as binary         +1 cycle for decimal
+  Flags after decimal ops    N, V, Z invalid        N, V, Z valid
+  Interrupt with BRK         BRK ignored            Both executed
+  JSR stacked address        Last byte of JSR       Next opcode (PC+3)
+  RTS return address         Incremented before use Used directly
+
+
+ADDITIONAL REGISTERS
+=====================
+
+The L28 adds two registers not present on the 6502:
+
+  W register (16-bit)
+    WH (high byte) and WL (low byte). Used by the multiply-accumulate (MPA)
+    instruction and related filter operations.
+
+  I register (16-bit)
+    Instruction pointer for threaded interpretive code. Used by NXT, LII,
+    LAI, INI, JPI, TIP, PIA, LAN, PHI, PLI.
+
+
+THREADED INTERPRETIVE CODE INSTRUCTIONS
+=========================================
+
+The L28 has hardware support for direct-threaded Forth. The I register acts
+as the Forth instruction pointer (IP). These 10 instructions replace what
+would otherwise be multi-instruction sequences, providing significant
+speedup for threaded interpreters.
+
+NXT -- Next Instruction ($8B, Implied, 1 byte, 4 cycles)
+  Operation: (I) -> PC, I + 2 -> I
+
+  The fundamental Forth NEXT operation. Loads the program counter with the
+  16-bit address pointed to by I (low byte first), then increments I by 2
+  to point past the cell just consumed.
+
+  In a direct-threaded Forth, the thread is a list of code addresses. NXT
+  fetches the next code address from the thread and jumps to it, advancing
+  the thread pointer.
+
+  Replaces the classic 6502 NEXT sequence:
+    LDA (IP),Y    ; 5 cycles
+    STA PC_LO     ; 3 cycles
+    INY           ; 2 cycles
+    LDA (IP),Y    ; 5 cycles
+    STA PC_HI     ; 3 cycles
+    JMP (PC)      ; 5 cycles  = 23 cycles total
+  The L28 does this in 4 cycles with a single byte.
+
+LII -- Load I Indirect through I ($9B, Implied, 1 byte, 5 cycles)
+  Operation: (I) -> I
+
+  Loads the I register with the 16-bit value at the address I currently
+  points to (low byte first). This is an indirect load of the IP itself.
+
+  Used for ENTER/DOCOL (entering a colon definition in Forth). When a
+  threaded word's code field points to a colon definition handler, the
+  handler saves the current I on the return stack and uses LII to load I
+  with the address of the new thread (the parameter field).
+
+LAI -- Load A Indirect through I ($EB, Implied, 1 byte, 3 cycles)
+  Operation: (I) -> A
+
+  Loads the accumulator with the byte at the address pointed to by I. The
+  I register is not modified.
+
+  Useful for fetching inline data from the thread without advancing the
+  thread pointer.
+
+LAN -- Load A and Increment I ($AB, Implied, 1 byte, 3 cycles)
+  Operation: (I) -> A, I + 1 -> I
+
+  Loads the accumulator with the byte at the address pointed to by I, then
+  increments I by 1. This is a byte-fetch-and-advance.
+
+  Used for fetching inline byte literals from the thread. The Forth word
+  LIT (for byte-sized literals) can use LAN to fetch the literal value
+  and advance past it.
+
+INI -- Increment I ($BB, Implied, 1 byte, 3 cycles)
+  Operation: I + 1 -> I
+
+  Increments the I register by 1. No flags are affected.
+
+  Used to skip over inline data in the thread (e.g., to advance past a
+  byte literal without loading it, or to align I after a LAN).
+
+PHI -- Push I on Stack ($CB, Implied, 1 byte, 4 cycles)
+  Operation: I -> (stack), SP - 2 -> SP
+
+  Pushes the I register onto the hardware stack, high byte first. The
+  stack pointer is decremented by 2.
+
+  Used to save the instruction pointer when entering a colon definition
+  (DOCOL/ENTER). The saved I is the return point in the calling thread.
+
+PLI -- Pull I from Stack ($DB, Implied, 1 byte, 6 cycles)
+  Operation: SP + 2 -> SP, (stack) -> I
+
+  Pulls two bytes from the stack into the I register, low byte first.
+  The stack pointer is incremented by 2.
+
+  Used by EXIT/UNNEST to restore the instruction pointer when returning
+  from a colon definition to the calling thread.
+
+JPI -- Jump Indirect with Return in I ($0C, 3 bytes, 5 cycles)
+  Operation: PC + 1 -> I, (I) -> PC, I + 2 -> I
+
+  A 3-byte instruction that performs an indirect JSR, saving the return
+  address in I instead of on the stack. Bytes 2 and 3 are the indirect
+  address (the address of a pointer to the target code). The sequence is:
+
+    1. PC + 1 (address of operand bytes) is loaded into I
+    2. The two bytes at (I) are loaded into PC (the indirect jump)
+    3. I is incremented by 2, pointing past the operand
+
+  After JPI executes, I points to the instruction following the JPI, and
+  execution continues at the address that was pointed to by the operand.
+  This is effectively "JSR indirect" with the return address in I.
+
+  The subroutine returns to the caller via TIP (not RTS).
+
+  This is useful for calling a Forth primitive that will then thread
+  through a word list starting at the return point.
+
+TIP -- Transfer I to Program Counter ($03, Implied, 1 byte, 2 cycles)
+  Operation: I -> PC
+
+  Copies the I register to the program counter. This functions as a
+  return from subroutine for code called via JPI.
+
+  In a Forth context, TIP can serve as a fast EXIT when I already holds
+  the correct return address.
+
+PIA -- Pull I, Load A and X, Increment I ($FB, Implied, 1 byte, 6 cycles)
+  Operation: (stack) -> I, (I) -> A, (I) -> X, I + 1 -> I
+
+  A compound instruction that:
+    1. Pulls I from the stack (2 bytes, low byte first, SP incremented)
+    2. Loads A with the byte at (I)
+    3. Loads X with the same byte at (I)
+    4. Increments I by 1
+
+  Flags: N and Z are set from the value loaded into A.
+
+  This combines PLI + LAN + TAX into a single instruction. It is designed
+  for Forth interpreters that need to restore the instruction pointer and
+  immediately fetch the next inline token or opcode.
+
+
+Typical Forth inner interpreter using L28 threaded instructions:
+
+  NEXT:     NXT              ; (I) -> PC, I + 2 -> I
+
+  ENTER:    PHI              ; save caller's IP on return stack
+            LII              ; (I) -> I (load new thread address)
+            NXT              ; begin executing the new thread
+
+  EXIT:     PLI              ; restore caller's IP from return stack
+            NXT              ; continue caller's thread
+
+
+FILTER ENHANCEMENT INSTRUCTIONS (15)
+======================================
+
+These instructions support DSP-style multiply-accumulate operations using
+the W register.
+
+ASR -- Arithmetic Shift Right ($3A, Accumulator, 1 byte, 2 cycles)
+  A >> 1, sign bit (bit 7) preserved. C receives bit 0.
+
+CLW -- Clear W and V ($52, Implied, 1 byte, 2 cycles)
+  0 -> WH, 0 -> WL, 0 -> V.
+
+EXC -- Exchange A and Memory ($D4, Zero Page X, 2 bytes, 5 cycles)
+  Swap the contents of A and the zero-page memory location.
+
+JSB 0-7 -- Jump to Subroutine via Vector ($0B-$7B, 1 byte, 6 cycles)
+  1-byte JSR through 8 fixed vectors at $FFE0-$FFEE. The bit number (0-7)
+  is encoded in the opcode: $0B | (n << 4). Pushes PC+1 on the stack.
+  Opcodes: $0B, $1B, $2B, $3B, $4B, $5B, $6B, $7B.
+
+LAB -- Load Absolute Value ($13, Accumulator, 1 byte, 3 cycles)
+  |A| -> A. If A is negative, takes twos complement. $80 stays $80.
+
+MPA -- Multiply and Accumulate ($12, Implied, 1 byte, 6 cycles)
+  A * Y + W -> W (signed, saturating to $7FFF/$8000). Y is destroyed.
+
+MPY -- Multiply ($02, Implied, 1 byte, 6 cycles)
+  A * Y -> A(high):Y(low) (signed). Both A and Y are modified.
+
+NEG -- Negate Accumulator ($1A, Accumulator, 1 byte, 2 cycles)
+  ~A + 1 -> A (twos complement). $80 stays $80.
+
+PSH -- Push A, X, Y ($22, Implied, 1 byte, 5 cycles)
+  Pushes A, X, and Y on the stack (in that order).
+
+PUL -- Pull Y, X, A ($32, Implied, 1 byte, 6 cycles)
+  Pulls Y, X, and A from the stack (reverse order of PSH).
+
+RND -- Round ($42, Implied, 1 byte, 2 cycles)
+  WH + WL.bit7 -> A. Rounds W to 8 bits with saturation at $7F.
+
+TAW -- Transfer A to W ($62, Implied, 1 byte, 2 cycles)
+  A -> WH, 0 -> WL.
+
+TWA -- Transfer W to A ($72, Implied, 1 byte, 2 cycles)
+  WH -> A.
+
+PHW -- Push W ($23, Implied, 1 byte, 4 cycles)
+  Push WH then WL on stack.
+
+PLW -- Pull W ($33, Implied, 1 byte, 5 cycles)
+  Pull WL then WH from stack.
+
+
+CONTROLLER INSTRUCTIONS (7)
+=============================
+
+ADD -- Add without Carry ($89/$64/$74)
+  A + M -> A. Like ADC but does not include the carry flag.
+  Immediate ($89, 2 bytes), Zero Page ($64, 2 bytes),
+  Zero Page X ($74, 2 bytes).
+
+BAR -- Branch on Bit(s) Reset ($E2, 5 bytes, 7-9 cycles)
+  Tests memory AND mask. Branches if all tested bits are zero.
+  Format: BAR addr, mask, offset.
+
+BAS -- Branch on Bit(s) Set ($F2, 5 bytes, 7-9 cycles)
+  Tests memory AND mask. Branches if all tested bits are set.
+  Format: BAS addr, mask, offset.
+
+JMP (abs,X) -- Jump Indirect Indexed ($7C, 3 bytes, 6 cycles)
+  Adds X to the 16-bit operand to form the indirect address.
+
+RBA -- Reset Bits in Memory ($C2, 4 bytes, 7 cycles)
+  ~mask AND M -> M. Clears bits specified by the mask.
+  Format: RBA mask, addr.
+
+SBA -- Set Bits in Memory ($D2, 4 bytes, 7 cycles)
+  mask OR M -> M. Sets bits specified by the mask.
+  Format: SBA mask, addr.
+
+STI -- Store Immediate to Memory ($B2, 3 bytes, 4 cycles)
+  Stores an immediate byte value directly to a zero-page address
+  without using the accumulator. Format: STI #value, zp_addr.
+
+
+COMPLETE OPCODE MAP
+====================
+
+     x0   x1   x2   x3   x4   x5   x6   x7   x8   x9   xA   xB   xC   xD   xE   xF
+0x | BRK  ORA  MPY  TIP  ---  ORA  ASL  RMB0 PHP  ORA  ASL  JSB0 JPI  ORA  ASL  BBR0
+1x | BPL  ORA  MPA  LAB  ---  ORA  ASL  RMB1 CLC  ORA  NEG  JSB1 ---  ORA  ASL  BBR1
+2x | JSR  AND  PSH  PHW  BIT  AND  ROL  RMB2 PLP  AND  ROL  JSB2 BIT  AND  ROL  BBR2
+3x | BMI  AND  PUL  PLW  ---  AND  ROL  RMB3 SEC  AND  ASR  JSB3 ---  AND  ROL  BBR3
+4x | RTI  EOR  RND  ---  ---  EOR  LSR  RMB4 PHA  EOR  LSR  JSB4 JMP  EOR  LSR  BBR4
+5x | BVC  EOR  CLW  ---  ---  EOR  LSR  RMB5 CLI  EOR  PHY  JSB5 ---  EOR  LSR  BBR5
+6x | RTS  ADC  TAW  ---  ADD  ADC  ROR  RMB6 PLA  ADC  ROR  JSB6 JMP  ADC  ROR  BBR6
+7x | BVS  ADC  TWA  ---  ADD  ADC  ROR  RMB7 SEI  ADC  PLY  JSB7 JMP  ADC  ROR  BBR7
+8x | BRA  STA  ---  ---  STY  STA  STX  SMB0 DEY  ADD  TXA  NXT  STY  STA  STX  BBS0
+9x | BCC  STA  ---  ---  STY  STA  STX  SMB1 TYA  STA  TXS  LII  ---  STA  ---  BBS1
+Ax | LDY  LDA  LDX  ---  LDY  LDA  LDX  SMB2 TAY  LDA  TAX  LAN  LDY  LDA  LDX  BBS2
+Bx | BCS  LDA  STI  ---  LDY  LDA  LDX  SMB3 CLV  LDA  TSX  INI  LDY  LDA  LDX  BBS3
+Cx | CPY  CMP  RBA  ---  CPY  CMP  DEC  SMB4 INY  CMP  DEX  PHI  CPY  CMP  DEC  BBS4
+Dx | BNE  CMP  SBA  ---  EXC  CMP  DEC  SMB5 CLD  CMP  PHX  PLI  ---  CMP  DEC  BBS5
+Ex | CPX  SBC  BAR  ---  CPX  SBC  INC  SMB6 INX  SBC  NOP  LAI  CPX  SBC  INC  BBS6
+Fx | BEQ  SBC  BAS  ---  ---  SBC  INC  SMB7 SED  SBC  PLX  PIA  ---  SBC  INC  BBS7
+
+Key:
+  ORA (Ind) at x1 column, ORA (Ind),X at x1 in odd rows
+  --- = unused opcode
+  Addressing modes for standard instructions follow the L28 conventions
+  (see ADDRESSING MODE CHANGES above).
+
+
+STANDARD INSTRUCTIONS WITH ALL ADDRESSING MODES
+=================================================
+
+  Instr  Imm    ZP     ZP,X   ZP,Y   Abs    Abs,X  Abs,Y  (Ind)  (Ind),X
+  -----  ----   ----   ----   ----   ----   -----  -----  -----  -------
+  ADC    $69    $65    $75    --     $6D    $7D    $79    $61    $71
+  AND    $29    $25    $35    --     $2D    $3D    $39    $21    $31
+  CMP    $C9    $C5    $D5    --     $CD    $DD    $D9    $C1    $D1
+  EOR    $49    $45    $55    --     $4D    $5D    $59    $41    $51
+  LDA    $A9    $A5    $B5    --     $AD    $BD    $B9    $A1    $B1
+  ORA    $09    $05    $15    --     $0D    $1D    $19    $01    $11
+  SBC    $E9    $E5    $F5    --     $ED    $FD    $F9    $E1    $F1
+  STA    --     $85    $95    --     $8D    $9D    $99    $81    $91
+
+  ASL    --     $06    $16    --     $0E    $1E    --     --     --
+  DEC    --     $C6    $D6    --     $CE    $DE    --     --     --
+  INC    --     $E6    $F6    --     $EE    $FE    --     --     --
+  LSR    --     $46    $56    --     $4E    $5E    --     --     --
+  ROL    --     $26    $36    --     $2E    $3E    --     --     --
+  ROR    --     $66    $76    --     $6E    $7E    --     --     --
+
+  BIT    --     $24    --     --     $2C    --     --     --     --
+  CPX    $E0    $E4    --     --     $EC    --     --     --     --
+  CPY    $C0    $C4    --     --     $CC    --     --     --     --
+  LDX    $A2    $A6    --     $B6    $AE    --     $BE    --     --
+  LDY    $A0    $A4    $B4    --     $AC    $BC    --     --     --
+  STX    --     $86    --     $96    $8E    --     --     --     --
+  STY    --     $84    $94    --     $8C    --     --     --     --
+
+  Note: ASL/LSR/ROL/ROR also support Accumulator ($0A/$4A/$2A/$6A).
+  Note: DEC and INC do NOT have Accumulator mode on the L28 (those
+        opcodes are ASR and NEG respectively).

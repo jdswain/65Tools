@@ -159,4 +159,16 @@ fffa:
 fffa: 00 0f                             data.w $0F00     ; NMI
 fffc: 00 ff                             data.w RESET     ; RESET
 fffe: 00 00                             word   $0000     ; BRK/IRQ
+
 Symbols:
+BACKSPACE     ff26 IN            0200 NOTHEX        ff7f SETSTOR       ff40 no              00 
+BLSKIP        ff43 KBD           d010 NOTSTOR       ff97 STH           0027 off             00 
+DIG           ff6e KBDCR         d011 NXTPRNT       ffa4 STL           0026 on              01 
+DSP           d012 L             0028 PRBYTE        ffdc TONEXTITEM    ff91 test          000e 
+DSPCR         d013 MOD8CHK       ffd6 PRDATA        ffba XAMH          0025 true            01 
+ECHO          ffef MODE          002b PRHEX         ffe5 XAML          0024 yes             01 
+ESCAPE        ff1a NEXTCHAR      ff29 RESET         ff00 XAMNEXT       ffc4 
+GETLINE       ff1f NEXTHEX       ff5f RUN           ff94 YSAV          002a 
+H             0029 NEXTITEM      ff44 SETADR        ff9b __65AS__      1 
+HEXSHIFT      ff74 NOTCR         ff0f SETMODE       ff41 false           00 
+

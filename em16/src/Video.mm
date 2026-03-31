@@ -39,6 +39,14 @@ static const uint8_t palette[16][3] = {
 }
 - (instancetype)initWithFrame:(NSRect)frame video:(Video *)v;
 - (void)refresh;
+- (BOOL)acceptsFirstResponder;
+- (void)keyDown:(NSEvent *)event;
+- (void)keyUp:(NSEvent *)event;
+- (void)flagsChanged:(NSEvent *)event;
+- (void)mouseDown:(NSEvent *)event;
+- (void)mouseUp:(NSEvent *)event;
+- (void)mouseMoved:(NSEvent *)event;
+- (void)mouseDragged:(NSEvent *)event;
 @end
 
 @implementation VideoView
@@ -50,6 +58,13 @@ static const uint8_t palette[16][3] = {
     videoWidth = v->getWidth();
     videoHeight = v->getHeight();
     rgbaBuffer = (uint8_t *)calloc(videoWidth * videoHeight, 4);
+
+    // Tracking area for mouseMoved events
+    NSTrackingArea *ta = [[NSTrackingArea alloc]
+      initWithRect:self.bounds
+      options:(NSTrackingMouseMoved | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect)
+      owner:self userInfo:nil];
+    [self addTrackingArea:ta];
   }
   return self;
 }
@@ -63,6 +78,81 @@ static const uint8_t palette[16][3] = {
   if (video->dirty.exchange(false)) {
     [self setNeedsDisplay:YES];
   }
+}
+
+- (BOOL)acceptsFirstResponder {
+  return YES;
+}
+
+- (void)keyDown:(NSEvent *)event {
+  mem816::getVIA().adbKeyDown([event keyCode]);
+}
+
+- (void)keyUp:(NSEvent *)event {
+  mem816::getVIA().adbKeyUp([event keyCode]);
+}
+
+- (void)flagsChanged:(NSEvent *)event {
+  // Track previous modifier state to detect press vs release
+  static NSEventModifierFlags prevFlags = 0;
+  NSEventModifierFlags flags = [event modifierFlags];
+  uint8_t kc = [event keyCode];
+
+  // If the modifier's flag bit is now set and wasn't before, it's a press
+  // Common modifier keycodes: Shift=56/60, Control=59/62, Option=58/61, Command=55/54
+  bool isPress = false;
+  switch (kc) {
+  case 56: case 60: // Shift
+    isPress = (flags & NSEventModifierFlagShift) != 0;
+    break;
+  case 59: case 62: // Control
+    isPress = (flags & NSEventModifierFlagControl) != 0;
+    break;
+  case 58: case 61: // Option
+    isPress = (flags & NSEventModifierFlagOption) != 0;
+    break;
+  case 55: case 54: // Command
+    isPress = (flags & NSEventModifierFlagCommand) != 0;
+    break;
+  case 57: // Caps Lock
+    isPress = (flags & NSEventModifierFlagCapsLock) != 0;
+    break;
+  default:
+    isPress = (flags & NSEventModifierFlagDeviceIndependentFlagsMask) >
+              (prevFlags & NSEventModifierFlagDeviceIndependentFlagsMask);
+    break;
+  }
+
+  if (isPress)
+    mem816::getVIA().adbKeyDown(kc);
+  else
+    mem816::getVIA().adbKeyUp(kc);
+
+  prevFlags = flags;
+}
+
+- (void)mouseDown:(NSEvent *)event {
+  (void)event;
+  mem816::getVIA().adbMouseButton(true);
+}
+
+- (void)mouseUp:(NSEvent *)event {
+  (void)event;
+  mem816::getVIA().adbMouseButton(false);
+}
+
+- (void)mouseMoved:(NSEvent *)event {
+  int dx = (int)[event deltaX];
+  int dy = (int)[event deltaY];
+  if (dx != 0 || dy != 0)
+    mem816::getVIA().adbMouseMove(dx, dy);
+}
+
+- (void)mouseDragged:(NSEvent *)event {
+  int dx = (int)[event deltaX];
+  int dy = (int)[event deltaY];
+  if (dx != 0 || dy != 0)
+    mem816::getVIA().adbMouseMove(dx, dy);
 }
 
 - (void)drawRect:(NSRect)dirtyRect {

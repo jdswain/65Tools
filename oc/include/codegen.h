@@ -29,8 +29,8 @@ extern bool longi;
 
 #define maxReloc 1024
 
-extern short int relocC;
-extern short int reloc[maxReloc];
+extern int relocC;
+extern int reloc[maxReloc];
 
 void codegen_gen(OpCode opcode, AddrMode mode, int value1, int value2);
 void codegen_byte(int b);
