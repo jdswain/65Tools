@@ -40,6 +40,18 @@ for lib in Out Runtime TestTool; do
   [ -f "$lib.Mod" ] && "$OC" "$lib.Mod" -s >/dev/null 2>&1
 done
 
+# Pre-compile helper/dependency modules — any *.Mod that is not a library and
+# has no *.expected of its own (e.g. the cross-module OO base/extension, or
+# L*_Lib helpers). Two passes so an extension picks up its base's fresh .smb.
+for pass in 1 2; do
+  for m in *.Mod; do
+    bn="${m%.Mod}"
+    case "$bn" in Out|Runtime|TestTool) continue;; esac
+    [ -f "$bn.expected" ] && continue   # a test driver — compiled+run below
+    "$OC" "$m" -s >/dev/null 2>&1
+  done
+done
+
 LEVELS=("$@")
 if [ ${#LEVELS[@]} -eq 0 ]; then
   # Discover level prefixes present as *.expected (L0..L15, sorted numerically).
