@@ -636,26 +636,26 @@ unsigned int loadMod(char * filename) {
 
   printf("Loading module at base address $%04X (bank %d)\n", module_base, current_module_bank);
 
-  // 3. Read type descriptors into module var area
+  // 3. Read type descriptors. As of .816 v2 the compiler emits them with the
+  // classic Oberon-2 deferred layout: descriptors sit AFTER the variables and
+  // strings (so a record's vtable size can be known when it is generated), at
+  // var-relative offset var_size+str_size. They are still stored first in the
+  // file, so buffer them here and place them once var_size/str_size are known.
   uint32_t td_size;
   if (fread(&td_size, 4, 1, file) != 1) {
     printf("Error: Cannot read type descriptor size\n");
     fclose(file);
     return 0;
   }
+  uint8_t *td_data = NULL;
   if (td_size > 0) {
-    uint8_t *td_data = (uint8_t*)malloc(td_size);
+    td_data = (uint8_t*)malloc(td_size);
     if (fread(td_data, 1, td_size, file) != td_size) {
       printf("Error: Cannot read type descriptor data\n");
       free(td_data);
       fclose(file);
       return 0;
     }
-    for (uint32_t i = 0; i < td_size; i++) {
-      emu816::setByte(module_var_base + i, td_data[i]);
-    }
-    free(td_data);
-    printf("Type descriptors: %d bytes loaded at $%04X\n", td_size, module_var_base);
   }
 
   // 4. Read variable section size
@@ -685,11 +685,26 @@ unsigned int loadMod(char * filename) {
       return 0;
     }
 
+    // v1 (C compiler): descriptors first, so strings follow them.
+    // v2 (oc816): deferred descriptors last, so strings follow the variables.
+    uint32_t str_at = (version >= 2) ? var_size : (td_size + var_size);
     for (count = 0; count < str_size; count++) {
-      emu816::setByte(module_var_base + td_size + var_size + count, string_data[count]);
+      emu816::setByte(module_var_base + str_at + count, string_data[count]);
     }
   }
   free(string_data);
+
+  // 5b. Place the buffered type descriptors: v2 after variables+strings
+  // (deferred layout), v1 first at offset 0.
+  if (td_data) {
+    uint32_t td_at = (version >= 2) ? (var_size + str_size) : 0;
+    for (uint32_t i = 0; i < td_size; i++) {
+      emu816::setByte(module_var_base + td_at + i, td_data[i]);
+    }
+    free(td_data);
+    printf("Type descriptors: %d bytes loaded at $%04X\n",
+           td_size, module_var_base + td_at);
+  }
 
   // 6. Read code section
   uint32_t code_length;
@@ -812,6 +827,53 @@ unsigned int loadMod(char * filename) {
       emu816::setWord(module_var_base + byte_offset, addr & 0xFFFF);
       emu816::setWord(module_var_base + byte_offset + 2, (addr >> 16) & 0xFFFF);
       printf("  TD fixup[%d]: offset=%d mno=%d -> $%04X\n", i, byte_offset, mno, (unsigned)(addr & 0xFFFF));
+    }
+  }
+
+  // 10c. Read and process vtable fixups (v2+): fill each method slot with the
+  // absolute in-bank code address of its implementation (all modules share one
+  // bank, so dynamic dispatch just reads the slot — no per-caller code base).
+  // mno==0: own method, slot currently holds its code offset -> add this
+  // module's base. mno>0: imported inherited method -> resolve via (mno, exno).
+  // offset(4) mno(2) exno(2).
+  if (version >= 2) {
+    int32_t vt_fixup_count;
+    if (fread(&vt_fixup_count, 4, 1, file) != 1) {
+      printf("Error reading vtable fixup count\n");
+      fclose(file);
+      return 0;
+    }
+    if (vt_fixup_count > 0) {
+      printf("Processing %d vtable fixups:\n", vt_fixup_count);
+      for (int i = 0; i < vt_fixup_count; i++) {
+        uint32_t byte_offset;
+        uint16_t mno, exno;
+        if (fread(&byte_offset, 4, 1, file) != 1 ||
+            fread(&mno, 2, 1, file) != 1 ||
+            fread(&exno, 2, 1, file) != 1) {
+          printf("Error reading vtable fixup entry %d\n", i);
+          break;
+        }
+        if (mno == 0) {
+          uint16_t off = emu816::getWord(module_var_base + byte_offset);
+          uint16_t addr = (uint16_t)(module_base + off);
+          emu816::setWord(module_var_base + byte_offset, addr);
+          printf("  vtable fixup[%d]: offset=%u own off=$%04X -> $%04X\n",
+                 i, byte_offset, off, addr);
+        } else if (mno <= import_count && import_map[mno]) {
+          ModuleInfo *target = import_map[mno];
+          if (exno > 0 && exno < target->export_count) {
+            uint16_t addr = (uint16_t)(target->base_address + target->exports[exno]);
+            emu816::setWord(module_var_base + byte_offset, addr);
+            printf("  vtable fixup[%d]: offset=%u mno=%d exno=%d -> %s $%04X\n",
+                   i, byte_offset, mno, exno, target->name, addr);
+          } else {
+            printf("  Warning: vtable fixup invalid exno %d for module %s\n", exno, target->name);
+          }
+        } else {
+          printf("  Warning: vtable fixup mno %d not resolved\n", mno);
+        }
+      }
     }
   }
 
@@ -1201,7 +1263,7 @@ int main(int argc, char **argv)
 
   Video &video = mem816::getVideo();
 
-  LCD_ST7586S &lcd = mem816::getLCD();
+  LCD_RA8889 &lcd = mem816::getLCD();
 
   if (lcd.isDisplayEnabled()) {
     // LCD console mode: CPU on background thread, Cocoa on main thread
