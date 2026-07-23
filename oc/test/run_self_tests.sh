@@ -64,8 +64,40 @@ for lvl in "${LEVELS[@]}"; do
     [ -f "$exp" ] || continue
     TOTAL=$((TOTAL + 1))
     bn="$(basename "$exp" .expected)"
+    marker="$(head -1 "$exp")"
+
+    # "!skip <reason>": a known gap (unsupported feature, missing dependency
+    # modules). Documented, not counted as a failure.
+    if [ "${marker%% *}" = "!skip" ]; then
+      echo "SKIP  $bn (${marker#!skip })"; SKIP=$((SKIP + 1)); continue
+    fi
+
     if [ ! -f "$bn.Mod" ]; then echo "SKIP  $bn (no .Mod)"; SKIP=$((SKIP + 1)); continue; fi
     out="$("$OC" "$bn.Mod" 2>&1)"
+
+    # "!compile-error": a negative test — a compile error IS the expected
+    # (passing) result. Remaining lines are substrings that must all appear in
+    # the diagnostics, so the test pins down WHICH error is reported.
+    if [ "$marker" = "!compile-error" ]; then
+      if echo "$out" | grep -q "  pos [0-9]"; then
+        ok=1
+        while IFS= read -r sub; do
+          [ -z "$sub" ] && continue
+          echo "$out" | grep -qF "$sub" || ok=0
+        done < <(tail -n +2 "$exp")
+        if [ "$ok" = 1 ]; then
+          echo "PASS  $bn (rejected as expected)"; PASS=$((PASS + 1))
+        else
+          echo "FAIL  $bn (wrong diagnostic)"; echo "$out" | grep "  pos [0-9]" | head -1 | sed 's/^/      /'
+          FAIL=$((FAIL + 1))
+        fi
+      else
+        echo "FAIL  $bn (expected a compile error, got none)"; FAIL=$((FAIL + 1))
+      fi
+      continue
+    fi
+
+    # Positive test.
     if echo "$out" | grep -q "  pos [0-9]"; then
       echo "FAIL  $bn (compile error)"; echo "$out" | grep "  pos [0-9]" | head -2 | sed 's/^/      /'
       FAIL=$((FAIL + 1)); continue
@@ -73,6 +105,11 @@ for lvl in "${LEVELS[@]}"; do
     [ -f "$bn.816" ] || { echo "SKIP  $bn (no .816)"; SKIP=$((SKIP + 1)); continue; }
     full="$(echo "" | perl -e "alarm $TIMEOUT_SECS; exec @ARGV" "$EM16" "$bn.816" 2>/dev/null)"
     [ $? -eq 142 ] && { echo "FAIL  $bn (timeout)"; FAIL=$((FAIL + 1)); continue; }
+    # Output from the first module init through to "Executed" — this includes
+    # the deterministic "OK" startup line most goldens in this tree capture.
+    # (The C run_level*_tests.sh reset the buffer per-init and so strip it; the
+    # goldens are historically inconsistent about it, so this runner keeps the
+    # OK-including convention and owns its own regenerated goldens.)
     actual="$(echo "$full" | awk '/^Initialising at/{f=1;next} /^Executed /{exit} f{print}')"
     if [ "$actual" = "$(cat "$exp")" ]; then
       echo "PASS  $bn"; PASS=$((PASS + 1))
