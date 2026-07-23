@@ -142,6 +142,14 @@ test_dp: $(BINDIR)/oc
 test:
 	@bash test/run_tests.sh; bash test/run_level0_tests.sh
 
+# Primary suite: the self-hosted Oberon compiler (oc816) is now the reference
+# implementation; it drives every level plus the OO (L16) and interface (L17)
+# goldens. The C compiler and its per-level test_* targets above are kept as a
+# cross-check. Needs the oc816 binary — build it in the oc repo
+# (cd ../../../oc/self/s816 && make); override the path with OC=/path/to/oc816.
+test_self:
+	@bash test/run_self_tests.sh
+
 test_scanner: $(BINDIR)/test_scanner
 	@echo "=== Testing Scanner ==="
 	@echo 'MODULE Test;' > test.Mod
@@ -204,4 +212,4 @@ test_disasm: $(BINDIR)/disasm
 	@$(BINDIR)/oc test/DisasmDemo.Mod
 	@$(BINDIR)/disasm DisasmDemo.816
 
-.PHONY: all clean test test_compile test_run test_level0 test_level1 test_level2 test_level3 test_level4 test_level5 test_level6 test_level7 test_level8 test_level9 test_level10 test_level11 test_level12 test_level13 test_level14 test_level15 test_dp test_scanner test_orb test_orp test_disasm install
+.PHONY: all clean test test_self test_compile test_run test_level0 test_level1 test_level2 test_level3 test_level4 test_level5 test_level6 test_level7 test_level8 test_level9 test_level10 test_level11 test_level12 test_level13 test_level14 test_level15 test_dp test_scanner test_orb test_orp test_disasm install

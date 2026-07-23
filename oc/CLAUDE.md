@@ -1,3 +1,14 @@
+> **Status (2026-07):** This C compiler is now a **reference cross-check**, not
+> the primary 65C816 compiler. The primary compiler is the self-hosted
+> `oc816`, built in the `oc` repo from a frontend shared with the LLVM backend
+> (`oc/self/s816/`, see `oc/CLAUDE.md`). It supports the full extended language
+> (methods, constructors, SUPER, interfaces). Run its golden suite with
+> `make test_self` (or `OC=… ./test/run_self_tests.sh`) — it covers every level
+> plus the OO (L16) and interface (L17) goldens. Keep this C compiler buildable
+> for `bin/disasm` and side-by-side comparison; it is baseline Oberon-07 +
+> LONGINT only (no methods/interfaces). The em16 emulator's `.816` loader lives
+> in `../em16/src/main.cpp`.
+
 This project is written in C.
 There is a Makefile for building.
 The file structure is:
