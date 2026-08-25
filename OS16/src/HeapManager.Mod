@@ -24,8 +24,10 @@ MODULE HeapManager;
        detected RAM and Creates the system heap explicitly; until then Bootstrap
        lays a sensible default over the managed zone so any module that imports
        HeapManager (and thus routes NEW through it) just works. *)
-    DfltRamBase  = 20000H;    (* managed zone starts at bank 2 *)
-    DfltRamTop   = 100000H;   (* ... up to 1 MB (adjust when RAM is detected) *)
+    DfltRamBase  = 40000H;    (* managed zone starts at bank 4 — safely above the
+                                 low banks where module code/data are linked;
+                                 a boot ROM replaces this with detected bounds *)
+    DfltRamTop   = 100000H;   (* ... up to 1 MB *)
     DfltHeapSize = 80000H;    (* 512 KB system heap *)
 
   TYPE Addr* = MemoryManager.Addr;   (* 24-bit LONGINT *)

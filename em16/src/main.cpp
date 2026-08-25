@@ -57,9 +57,10 @@ static void as_error(const char *message, ...) {
 // Memory Definitions
 //------------------------------------------------------------------------------
 
-// Create a 1024kb RAM area - No ROM.
-#define	RAM_SIZE	(2 * 64 * 1024)
-#define MEM_MASK	(2 * 64 * 1024L - 1)
+// Create a 1 MB RAM area - No ROM. (Target is >=1 MB so the MemoryManager
+// managed zone at bank 2+ is real memory, not a wrap of bank 0.)
+#define	RAM_SIZE	(16 * 64 * 1024)
+#define MEM_MASK	(16 * 64 * 1024L - 1)
 
 bool trace = false;
 
