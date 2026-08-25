@@ -1,5 +1,5 @@
 MODULE Files;
-  IMPORT Driver;
+  IMPORT Driver, HeapManager;   (* HeapManager: routes NEW(FileDesc) to the managed-zone heap *)
 
   CONST
     MaxNameLen = 128;
