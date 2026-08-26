@@ -23,9 +23,12 @@ MODULE Modules;
     varAddrs: ARRAY MaxModules OF INTEGER;
     exportCounts: ARRAY MaxModules OF INTEGER;
     exports: ARRAY MaxModules, MaxExports OF INTEGER;
+    entries: ARRAY MaxModules OF INTEGER;   (* per-module entry offset — kept for linking *)
     count*: INTEGER;
     loadAddr: INTEGER;
     varAddr: INTEGER;
+    linkBase: INTEGER;   (* Find() lower bound; MakeImage raises it so a linked
+                            kernel re-links its own copies and stays self-contained *)
     paths: ARRAY MaxPaths OF PathName;
     pathCount: INTEGER;
 
@@ -52,7 +55,7 @@ MODULE Modules;
   PROCEDURE Find(VAR name: ARRAY OF CHAR): INTEGER;
     VAR i, result: INTEGER;
   BEGIN
-    result := -1; i := 0;
+    result := -1; i := linkBase;
     WHILE (i < count) & (result < 0) DO
       IF StrEq(names[i], name) THEN result := i END;
       INC(i)
@@ -91,20 +94,28 @@ MODULE Modules;
 
   (* ---- File format helpers ---- *)
 
-  PROCEDURE ReadLong(VAR r: Files.Rider; VAR x: INTEGER);
-    VAR hi: INTEGER;
+  (* Read a 32-bit little-endian .816 field as a full LONGINT — used for the
+     section sizes (td/var/str/code), which can exceed 64 KB, so read loops and
+     cross-section file positioning stay correct. *)
+  PROCEDURE ReadLong(VAR r: Files.Rider; VAR x: LONGINT);
+    VAR lo, hi: INTEGER; xh: LONGINT;
   BEGIN
-    Files.ReadInt(r, x);
+    Files.ReadInt(r, lo);
     Files.ReadInt(r, hi);
-    IF hi # 0 THEN
-      Out.String("LONG!"); Out.Ln
-    END
+    x := lo;                    (* zero-extend low word (sizes are >= 0) *)
+    xh := hi; x := x + xh * 10000H
   END ReadLong;
+
+  (* Read a 32-bit field but keep only the low 16 bits — for values the loader
+     handles as 16-bit within-bank quantities (offsets, counts, identity). *)
+  PROCEDURE ReadLong16(VAR r: Files.Rider; VAR x: INTEGER);
+    VAR hi: INTEGER;
+  BEGIN Files.ReadInt(r, x); Files.ReadInt(r, hi)
+  END ReadLong16;
 
   PROCEDURE SkipLong(VAR r: Files.Rider);
     VAR dummy: INTEGER;
-  BEGIN
-    ReadLong(r, dummy)
+  BEGIN ReadLong16(r, dummy)
   END SkipLong;
 
   PROCEDURE SkipBytes(VAR r: Files.Rider; n: INTEGER);
@@ -261,7 +272,7 @@ MODULE Modules;
     out[i] := 0X
   END BuildPath;
 
-  PROCEDURE Load*(name: ARRAY OF CHAR; VAR res: INTEGER);
+  PROCEDURE LoadEx(name: ARRAY OF CHAR; VAR res: INTEGER; exec: BOOLEAN);
     VAR f: Files.File;
         r: Files.Rider;
         nm: ARRAY 64 OF CHAR;
@@ -275,7 +286,8 @@ MODULE Modules;
         b: BYTE;
         key, version, size: INTEGER;
         modBase, modVarBase: INTEGER;
-        tdSize, varSize, strSize, codeLen: INTEGER;
+        tdSize, varSize, strSize, codeLen: LONGINT;
+        bi: LONGINT;                       (* 32-bit byte-loop counter *)
         nofent, entryPoint: INTEGER;
         expIdx, expVal: INTEGER;
         relocCount, relocAddr, relocHi, actualAddr: INTEGER;
@@ -316,14 +328,14 @@ MODULE Modules;
         Files.ReadString(r, modName);
 
         (* Read key (4 bytes) *)
-        ReadLong(r, key);
+        ReadLong16(r, key);
 
         (* Read version (1 byte) *)
         Files.Read(r, b);
         version := b;
 
         (* Read size (4 bytes) *)
-        ReadLong(r, size);
+        ReadLong16(r, size);
 
         (* Parse imports *)
         impCount := 0;
@@ -353,7 +365,7 @@ MODULE Modules;
             (* Find or auto-load dependency *)
             impMap[impCount] := Find(impNames[impCount]);
             IF impMap[impCount] < 0 THEN
-              Load(impNames[impCount], depRes);
+              LoadEx(impNames[impCount], depRes, exec);
               IF depRes = 0 THEN
                 impMap[impCount] := Find(impNames[impCount]);
                 IF impMap[impCount] < 0 THEN
@@ -383,11 +395,11 @@ MODULE Modules;
           (* Read type descriptors *)
           ReadLong(r, tdSize);
           IF tdSize > 0 THEN
-            i := 0;
-            WHILE (i < tdSize) & ~r.eof DO
+            bi := 0;
+            WHILE (bi < tdSize) & ~r.eof DO
               Files.Read(r, b);
-              PutByte(0, modVarBase + i, b);
-              INC(i)
+              PutByte(0, modVarBase + bi, b);
+              INC(bi)
             END
           END;
 
@@ -397,21 +409,21 @@ MODULE Modules;
           (* Read string section *)
           ReadLong(r, strSize);
           IF strSize > 0 THEN
-            i := 0;
-            WHILE (i < strSize) & ~r.eof DO
+            bi := 0;
+            WHILE (bi < strSize) & ~r.eof DO
               Files.Read(r, b);
-              PutByte(0, modVarBase + tdSize + varSize + i, b);
-              INC(i)
+              PutByte(0, modVarBase + tdSize + varSize + bi, b);
+              INC(bi)
             END
           END;
 
           (* Read code section into bank 1 *)
           ReadLong(r, codeLen);
-          i := 0;
-          WHILE (i < codeLen) & ~r.eof DO
+          bi := 0;
+          WHILE (bi < codeLen) & ~r.eof DO
             Files.Read(r, b);
-            PutByte(CodeBank, modBase + i, b);
-            INC(i)
+            PutByte(CodeBank, modBase + bi, b);
+            INC(bi)
           END;
 
           (* Skip export procedures (name + value pairs until null) *)
@@ -425,16 +437,16 @@ MODULE Modules;
           END;
 
           (* Read nofent and entry point *)
-          ReadLong(r, nofent);
-          ReadLong(r, entryPoint);
+          ReadLong16(r, nofent);
+          ReadLong16(r, entryPoint);
 
           (* Read export values until -1 sentinel *)
           expIdx := 1;
-          ReadLong(r, expVal);
+          ReadLong16(r, expVal);
           WHILE (expVal # -1) & ~r.eof & (expIdx < MaxExports) DO
             exports[count, expIdx] := expVal;
             INC(expIdx);
-            ReadLong(r, expVal)
+            ReadLong16(r, expVal)
           END;
           exportCounts[count] := expIdx;
 
@@ -442,7 +454,7 @@ MODULE Modules;
           SkipLong(r); SkipLong(r); SkipLong(r);
 
           (* Process TD fixups *)
-          ReadLong(r, tdFixupCount);
+          ReadLong16(r, tdFixupCount);
           i := 0;
           WHILE (i < tdFixupCount) & ~r.eof DO
             Files.ReadInt(r, byteOffset);
@@ -468,12 +480,13 @@ MODULE Modules;
           banks[count] := CodeBank;
           baseAddrs[count] := modBase;
           varAddrs[count] := modVarBase;
+          entries[count] := entryPoint;
 
           (* Write module table entry *)
           PutWord(0, ModTableBase + count * 2, modVarBase);
 
           (* Process relocation table *)
-          ReadLong(r, relocCount);
+          ReadLong16(r, relocCount);
           i := 0;
           WHILE (i < relocCount) & ~r.eof DO
             Files.ReadInt(r, relocAddr);
@@ -496,16 +509,103 @@ MODULE Modules;
 
           Files.Close(f);
 
-          (* Execute module initialization *)
-          Out.String("Exec "); Out.String(modName);
-          Out.String(" at "); Out.Hex(modBase + entryPoint); Out.Ln;
-          SYSTEM.EXEC(modBase + entryPoint, CodeBank)
+          (* Execute module initialization (skipped when only linking) *)
+          IF exec THEN
+            Out.String("Exec "); Out.String(modName);
+            Out.String(" at "); Out.Hex(modBase + entryPoint); Out.Ln;
+            SYSTEM.EXEC(modBase + entryPoint, CodeBank)
+          END
         ELSE
           Files.Close(f)
         END
       END
     END
+  END LoadEx;
+
+  (* Runtime entry: load a module and run its init. *)
+  PROCEDURE Load*(name: ARRAY OF CHAR; VAR res: INTEGER);
+  BEGIN LoadEx(name, res, TRUE)
   END Load;
+
+  (* MakeImage entry: load + relocate into memory but DON'T run init, so the
+     linked bytes can be snapshotted into a kernel image. *)
+  PROCEDURE Link*(name: ARRAY OF CHAR; VAR res: INTEGER);
+  BEGIN LoadEx(name, res, FALSE)
+  END Link;
+
+  (* ---- Accessors + image writer (for MakeImage) ---- *)
+
+  PROCEDURE Count*(): INTEGER;   BEGIN RETURN count END Count;
+  PROCEDURE CodeTop*(): INTEGER; BEGIN RETURN loadAddr END CodeTop;
+  PROCEDURE VarTop*(): INTEGER;  BEGIN RETURN varAddr END VarTop;
+
+  (* Restrict Find() to modules loaded at index >= b, so a subsequent link
+     session builds a fresh, self-contained module set. *)
+  PROCEDURE SetLinkBase*(b: INTEGER);  BEGIN linkBase := b END SetLinkBase;
+
+  (* Place the next linked module's code/data at explicit addresses. MakeImage
+     uses this to link the kernel clear of the build-time heap: the runtime
+     loader writes a module's data at varAddr, but em16 (and later the memory
+     manager) put the heap at the same next-free address, and Files keeps the
+     FileDesc it is reading FROM on that heap — so linking on top of it clobbers
+     the open file mid-read. Linking into a region above the heap avoids that. *)
+  PROCEDURE SetLinkAddr*(code, var: INTEGER);
+  BEGIN loadAddr := code; varAddr := var
+  END SetLinkAddr;
+
+  PROCEDURE Wr(VAR r: Files.Rider; v: INTEGER);
+    VAR b: BYTE;
+  BEGIN b := v; Files.Write(r, b)
+  END Wr;
+
+  PROCEDURE Put4(VAR r: Files.Rider; v: INTEGER);
+  BEGIN Files.WriteInt(r, v); Files.WriteInt(r, 0)   (* 32-bit LE; addresses < 64K *)
+  END Put4;
+
+  (* Snapshot the modules linked in [firstMod..count) into an OS16 kernel image:
+     header, module manifest ($0D00 shape), then the linked code (bank CodeBank
+     [codeBase..CodeTop)) and data (bank 0 [varBase..VarTop)). The image loads
+     back to those same addresses at boot — no relocation. *)
+  PROCEDURE WriteImage*(fname: ARRAY OF CHAR; firstMod, codeBase, varBase: INTEGER;
+                        VAR res: INTEGER);
+    VAR f: Files.File; r: Files.Rider;
+        i, j, codeLen, varLen, entry: INTEGER;
+  BEGIN
+    res := 0;
+    codeLen := loadAddr - codeBase;
+    varLen := varAddr - varBase;
+    entry := baseAddrs[count - 1] + entries[count - 1];  (* last linked = main *)
+    f := Files.New(fname);
+    IF f = NIL THEN res := -1
+    ELSE
+      Files.Set(r, f, 0);
+      Wr(r, ORD("O")); Wr(r, ORD("S")); Wr(r, ORD("1")); Wr(r, ORD("6"));
+      Wr(r, 1);                              (* version *)
+      Put4(r, entry);
+      Put4(r, codeBase); Put4(r, codeLen);
+      Put4(r, varBase);  Put4(r, varLen);
+      (* manifest: kernel modules [firstMod..count) in $0D00 shape *)
+      Files.WriteInt(r, count - firstMod);
+      i := firstMod;
+      WHILE i < count DO
+        Files.WriteString(r, names[i]);
+        Files.WriteInt(r, banks[i]);
+        Files.WriteInt(r, baseAddrs[i]);
+        Files.WriteInt(r, varAddrs[i]);
+        Files.WriteInt(r, exportCounts[i] - 1);
+        j := 1;
+        WHILE j < exportCounts[i] DO Files.WriteInt(r, exports[i, j]); INC(j) END;
+        INC(i)
+      END;
+      Files.WriteInt(r, loadAddr);           (* next free code addr *)
+      Files.WriteInt(r, varAddr);            (* next free var addr *)
+      i := 0;
+      WHILE i < codeLen DO Wr(r, GetByte(CodeBank, codeBase + i)); INC(i) END;
+      i := 0;
+      WHILE i < varLen DO Wr(r, GetByte(0, varBase + i)); INC(i) END;
+      Files.Register(f)
+    END
+  END WriteImage;
 
   (* ---- Init: read boot manifest ---- *)
 
@@ -560,6 +660,7 @@ BEGIN
   count := 0;
   loadAddr := 0;
   varAddr := VarBase;
+  linkBase := 0;
   pathCount := 0;
   paths[0] := "Library/Modules/";
   pathCount := 1;
