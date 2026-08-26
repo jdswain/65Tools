@@ -19,13 +19,13 @@ MODULE Modules;
   VAR
     names: ARRAY MaxModules OF ModName;
     banks: ARRAY MaxModules OF INTEGER;
-    baseAddrs: ARRAY MaxModules OF INTEGER;
+    baseAddrs: ARRAY MaxModules OF LONGINT;    (* 24-bit module code base *)
     varAddrs: ARRAY MaxModules OF INTEGER;
     exportCounts: ARRAY MaxModules OF INTEGER;
     exports: ARRAY MaxModules, MaxExports OF INTEGER;
     entries: ARRAY MaxModules OF INTEGER;   (* per-module entry offset — kept for linking *)
     count*: INTEGER;
-    loadAddr: INTEGER;
+    loadAddr: LONGINT;                        (* 24-bit next-code pointer *)
     varAddr: INTEGER;
     linkBase: INTEGER;   (* Find() lower bound; MakeImage raises it so a linked
                             kernel re-links its own copies and stays self-contained *)
@@ -158,6 +158,31 @@ MODULE Modules;
     PutByte(bank, addr + 1, AND(LSR(val, 8), 0FFH))
   END PutWord;
 
+  (* ---- 24-bit access: a LONGINT address is split into bank:offset per byte,
+     so a value straddling a bank boundary reads/writes correctly. ---- *)
+
+  PROCEDURE GetB(a: LONGINT): INTEGER;
+  BEGIN RETURN GetByte(a DIV 10000H, a MOD 10000H)
+  END GetB;
+
+  PROCEDURE PutB(a: LONGINT; val: INTEGER);
+  BEGIN PutByte(a DIV 10000H, a MOD 10000H, val)
+  END PutB;
+
+  PROCEDURE GetW(a: LONGINT): INTEGER;
+  BEGIN RETURN ORA(GetB(a), ASL(GetB(a + 1), 8))
+  END GetW;
+
+  PROCEDURE PutW(a: LONGINT; val: INTEGER);
+  BEGIN PutB(a, AND(val, 0FFH)); PutB(a + 1, AND(LSR(val, 8), 0FFH))
+  END PutW;
+
+  (* Read a 24/32-bit LE value (two words) from the bank-0 boot manifest. *)
+  PROCEDURE Get24(a: INTEGER): LONGINT;
+    VAR lo, hi: LONGINT;
+  BEGIN lo := GetWord(0, a); hi := GetWord(0, a + 2); RETURN lo + hi * 10000H
+  END Get24;
+
   (* ---- Search path management ---- *)
 
   PROCEDURE AddPath*(VAR path: ARRAY OF CHAR);
@@ -170,80 +195,65 @@ MODULE Modules;
 
   (* ---- Relocation engine ---- *)
 
-  PROCEDURE ApplyBankReloc(bankAddr, modVarBase: INTEGER;
+  PROCEDURE ApplyBankReloc(bankAddr: LONGINT; modVarBase: INTEGER;
                            VAR impMap: ARRAY OF INTEGER; impCount: INTEGER);
-    VAR opcode, operand, varBank: INTEGER;
   BEGIN
-    opcode := GetByte(CodeBank, bankAddr);
-    IF opcode = 0A9H THEN  (* LDA #imm16 *)
-      operand := GetWord(CodeBank, bankAddr + 1);
-      varBank := 0;  (* data always in bank 0 *)
-      PutWord(CodeBank, bankAddr + 1, varBank)
+    IF GetB(bankAddr) = 0A9H THEN  (* LDA #imm16 — data bank is always 0 *)
+      PutW(bankAddr + 1, 0)
     END
   END ApplyBankReloc;
 
-  PROCEDURE ApplyReloc(bankAddr, modBase, modVarBase: INTEGER;
+  (* Relocate one site at the 24-bit address bankAddr in a module whose code base
+     is the 24-bit modBase. Modules are placed wholly within one bank, so JSR and
+     PER stay in-bank (16-bit); JSL carries a full 24-bit target. *)
+  PROCEDURE ApplyReloc(bankAddr, modBase: LONGINT; modVarBase: INTEGER;
                        VAR impMap: ARRAY OF INTEGER; impCount: INTEGER);
-    VAR opcode, addr, bankByte, mno, exno: INTEGER;
-        targetIdx, targetAddr, fullAddr, varBase: INTEGER;
-        perAddr, perOffset, operand: INTEGER;
+    VAR opcode, addr, bankByte, mno, exno, targetIdx, varBase, operand: INTEGER;
+        targetA: LONGINT;
   BEGIN
-    opcode := GetByte(CodeBank, bankAddr);
+    opcode := GetB(bankAddr);
 
-    IF opcode = 20H THEN  (* JSR - intra-module *)
-      addr := GetWord(CodeBank, bankAddr + 1);
-      addr := addr + modBase;
-      PutWord(CodeBank, bankAddr + 1, addr)
+    IF opcode = 20H THEN  (* JSR — intra-module, in-bank 16-bit *)
+      addr := GetW(bankAddr + 1);
+      PutW(bankAddr + 1, modBase + addr)              (* low 16 = in-bank offset *)
 
-    ELSIF opcode = 22H THEN  (* JSL - 3-byte address *)
-      bankByte := GetByte(CodeBank, bankAddr + 3);
-      addr := GetWord(CodeBank, bankAddr + 1);
+    ELSIF opcode = 22H THEN  (* JSL — 3-byte far address *)
+      bankByte := GetB(bankAddr + 3);
+      addr := GetW(bankAddr + 1);
       IF (bankByte > 0) & (bankByte <= impCount) & (impMap[bankByte] >= 0) THEN
-        (* Inter-module import *)
-        mno := bankByte;
-        exno := addr;
-        targetIdx := impMap[mno];
+        mno := bankByte; exno := addr; targetIdx := impMap[mno];
         IF (exno > 0) & (exno < exportCounts[targetIdx]) THEN
-          targetAddr := exports[targetIdx, exno];
-          fullAddr := baseAddrs[targetIdx] + targetAddr;
-          PutWord(CodeBank, bankAddr + 1, fullAddr);
-          PutByte(CodeBank, bankAddr + 3, banks[targetIdx])
-        ELSE
-          Out.String("JSL: bad exno "); Out.Int(exno, 1); Out.Ln
+          targetA := baseAddrs[targetIdx] + exports[targetIdx, exno];
+          PutW(bankAddr + 1, targetA MOD 10000H);
+          PutB(bankAddr + 3, targetA DIV 10000H)
+        ELSE Out.String("JSL: bad exno "); Out.Int(exno, 1); Out.Ln
         END
-      ELSE
-        (* Intra-module *)
-        addr := addr + modBase;
-        PutWord(CodeBank, bankAddr + 1, addr);
-        PutByte(CodeBank, bankAddr + 3, CodeBank)
+      ELSE                                             (* intra-module far call *)
+        targetA := modBase + addr;
+        PutW(bankAddr + 1, targetA MOD 10000H);
+        PutB(bankAddr + 3, targetA DIV 10000H)
       END
 
-    ELSIF opcode = 0A9H THEN  (* LDA #imm16 - var base reloc *)
-      operand := GetWord(CodeBank, bankAddr + 1);
-      IF operand = 0 THEN
-        varBase := modVarBase
+    ELSIF opcode = 0A9H THEN  (* LDA #imm16 — var base reloc *)
+      operand := GetW(bankAddr + 1);
+      IF operand = 0 THEN varBase := modVarBase
       ELSE
         mno := operand;
-        IF (mno <= impCount) & (impMap[mno] >= 0) THEN
-          varBase := varAddrs[impMap[mno]]
-        ELSE
-          varBase := 0;
-          Out.String("LDA: mno not found "); Out.Int(mno, 1); Out.Ln
+        IF (mno <= impCount) & (impMap[mno] >= 0) THEN varBase := varAddrs[impMap[mno]]
+        ELSE varBase := 0; Out.String("LDA: mno not found "); Out.Int(mno, 1); Out.Ln
         END
       END;
-      PutWord(CodeBank, bankAddr + 1, varBase)
+      PutW(bankAddr + 1, varBase)
 
-    ELSIF opcode = 62H THEN  (* PER - imported procedure variable *)
-      operand := GetWord(CodeBank, bankAddr + 1);
+    ELSIF opcode = 62H THEN  (* PER — imported procedure variable, PC-relative *)
+      operand := GetW(bankAddr + 1);
       mno := AND(LSR(operand, 8), 0FFH);
       exno := AND(operand, 0FFH);
       IF (mno > 0) & (mno <= impCount) & (impMap[mno] >= 0) THEN
         targetIdx := impMap[mno];
         IF (exno > 0) & (exno < exportCounts[targetIdx]) THEN
-          targetAddr := baseAddrs[targetIdx] + exports[targetIdx, exno];
-          perAddr := bankAddr;
-          perOffset := targetAddr - perAddr - 3;
-          PutWord(CodeBank, bankAddr + 1, perOffset)
+          targetA := baseAddrs[targetIdx] + exports[targetIdx, exno];
+          PutW(bankAddr + 1, targetA - bankAddr - 3)   (* 16-bit PC-relative *)
         END
       END
 
@@ -285,13 +295,14 @@ MODULE Modules;
         i, j, pi: INTEGER;
         b: BYTE;
         key, version, size: INTEGER;
-        modBase, modVarBase: INTEGER;
+        modVarBase: INTEGER;
+        modBase: LONGINT;
         tdSize, varSize, strSize, codeLen: LONGINT;
         bi: LONGINT;                       (* 32-bit byte-loop counter *)
         nofent, entryPoint: INTEGER;
         expIdx, expVal: INTEGER;
         relocCount, relocAddr, relocHi, actualAddr: INTEGER;
-        bankAddr: INTEGER;
+        bankAddr: LONGINT;
         isBankReloc: BOOLEAN;
         tdFixupCount, byteOffset, fixMno: INTEGER;
         lo, hi, tdAddr: INTEGER;
@@ -388,8 +399,8 @@ MODULE Modules;
         END;
 
         IF res = 0 THEN
-          (* Snapshot base addresses (after recursive loads advanced them) *)
-          modBase := loadAddr;
+          (* Snapshot data base (code base is chosen once codeLen is known,
+             below, so the module can be kept wholly within one bank) *)
           modVarBase := varAddr;
 
           (* Read type descriptors *)
@@ -417,12 +428,19 @@ MODULE Modules;
             END
           END;
 
-          (* Read code section into bank 1 *)
+          (* Read code section. Place the module wholly within one bank: the
+             65C816 PC is 16-bit and wraps at a bank boundary, so no procedure
+             (hence no module) may straddle one. Bump to the next bank if it
+             would not fit in the current bank's remaining space. *)
           ReadLong(r, codeLen);
+          IF loadAddr MOD 10000H + codeLen > 10000H THEN
+            loadAddr := (loadAddr DIV 10000H + 1) * 10000H
+          END;
+          modBase := loadAddr;
           bi := 0;
           WHILE (bi < codeLen) & ~r.eof DO
             Files.Read(r, b);
-            PutByte(CodeBank, modBase + bi, b);
+            PutB(modBase + bi, b);              (* 24-bit placement *)
             INC(bi)
           END;
 
@@ -477,7 +495,7 @@ MODULE Modules;
 
           (* Register module in tracking arrays *)
           CopyStr(modName, names[count]);
-          banks[count] := CodeBank;
+          banks[count] := modBase DIV 10000H;   (* the bank the module landed in *)
           baseAddrs[count] := modBase;
           varAddrs[count] := modVarBase;
           entries[count] := entryPoint;
@@ -512,8 +530,9 @@ MODULE Modules;
           (* Execute module initialization (skipped when only linking) *)
           IF exec THEN
             Out.String("Exec "); Out.String(modName);
-            Out.String(" at "); Out.Hex(modBase + entryPoint); Out.Ln;
-            SYSTEM.EXEC(modBase + entryPoint, CodeBank)
+            Out.String(" at "); Out.Int(modBase DIV 10000H, 1);
+            Out.String(":"); Out.Hex((modBase + entryPoint) MOD 10000H); Out.Ln;
+            SYSTEM.EXEC((modBase + entryPoint) MOD 10000H, (modBase + entryPoint) DIV 10000H)
           END
         ELSE
           Files.Close(f)
@@ -535,9 +554,9 @@ MODULE Modules;
 
   (* ---- Accessors + image writer (for MakeImage) ---- *)
 
-  PROCEDURE Count*(): INTEGER;   BEGIN RETURN count END Count;
-  PROCEDURE CodeTop*(): INTEGER; BEGIN RETURN loadAddr END CodeTop;
-  PROCEDURE VarTop*(): INTEGER;  BEGIN RETURN varAddr END VarTop;
+  PROCEDURE Count*(): INTEGER;    BEGIN RETURN count END Count;
+  PROCEDURE CodeTop*(): LONGINT;  BEGIN RETURN loadAddr END CodeTop;   (* 24-bit *)
+  PROCEDURE VarTop*(): INTEGER;   BEGIN RETURN varAddr END VarTop;
 
   (* Restrict Find() to modules loaded at index >= b, so a subsequent link
      session builds a fresh, self-contained module set. *)
@@ -549,7 +568,7 @@ MODULE Modules;
      manager) put the heap at the same next-free address, and Files keeps the
      FileDesc it is reading FROM on that heap — so linking on top of it clobbers
      the open file mid-read. Linking into a region above the heap avoids that. *)
-  PROCEDURE SetLinkAddr*(code, var: INTEGER);
+  PROCEDURE SetLinkAddr*(code: LONGINT; var: INTEGER);
   BEGIN loadAddr := code; varAddr := var
   END SetLinkAddr;
 
@@ -558,18 +577,18 @@ MODULE Modules;
   BEGIN b := v; Files.Write(r, b)
   END Wr;
 
-  PROCEDURE Put4(VAR r: Files.Rider; v: INTEGER);
-  BEGIN Files.WriteInt(r, v); Files.WriteInt(r, 0)   (* 32-bit LE; addresses < 64K *)
+  PROCEDURE Put4(VAR r: Files.Rider; v: LONGINT);   (* 32-bit LE *)
+  BEGIN Files.WriteInt(r, v MOD 10000H); Files.WriteInt(r, v DIV 10000H MOD 10000H)
   END Put4;
 
   (* Snapshot the modules linked in [firstMod..count) into an OS16 kernel image:
      header, module manifest ($0D00 shape), then the linked code (bank CodeBank
      [codeBase..CodeTop)) and data (bank 0 [varBase..VarTop)). The image loads
      back to those same addresses at boot — no relocation. *)
-  PROCEDURE WriteImage*(fname: ARRAY OF CHAR; firstMod, codeBase, varBase: INTEGER;
-                        VAR res: INTEGER);
+  PROCEDURE WriteImage*(fname: ARRAY OF CHAR; firstMod: INTEGER; codeBase: LONGINT;
+                        varBase: INTEGER; VAR res: INTEGER);
     VAR f: Files.File; r: Files.Rider;
-        i, j, codeLen, varLen, entry: INTEGER;
+        i, j, varLen: INTEGER; ci, codeLen, entry: LONGINT;
   BEGIN
     res := 0;
     codeLen := loadAddr - codeBase;
@@ -584,23 +603,24 @@ MODULE Modules;
       Put4(r, entry);
       Put4(r, codeBase); Put4(r, codeLen);
       Put4(r, varBase);  Put4(r, varLen);
-      (* manifest: kernel modules [firstMod..count) in $0D00 shape *)
+      (* manifest: kernel modules [firstMod..count) in $0D00 shape; base_addr and
+         the trailing next-code pointer are 24-bit (two words: low, high). *)
       Files.WriteInt(r, count - firstMod);
       i := firstMod;
       WHILE i < count DO
         Files.WriteString(r, names[i]);
         Files.WriteInt(r, banks[i]);
-        Files.WriteInt(r, baseAddrs[i]);
+        Put4(r, baseAddrs[i]);               (* 24-bit *)
         Files.WriteInt(r, varAddrs[i]);
         Files.WriteInt(r, exportCounts[i] - 1);
         j := 1;
         WHILE j < exportCounts[i] DO Files.WriteInt(r, exports[i, j]); INC(j) END;
         INC(i)
       END;
-      Files.WriteInt(r, loadAddr);           (* next free code addr *)
+      Put4(r, loadAddr);                     (* next free code addr (24-bit) *)
       Files.WriteInt(r, varAddr);            (* next free var addr *)
-      i := 0;
-      WHILE i < codeLen DO Wr(r, GetByte(CodeBank, codeBase + i)); INC(i) END;
+      ci := 0;
+      WHILE ci < codeLen DO Wr(r, GetB(codeBase + ci)); INC(ci) END;
       i := 0;
       WHILE i < varLen DO Wr(r, GetByte(0, varBase + i)); INC(i) END;
       Files.Register(f)
@@ -634,8 +654,8 @@ MODULE Modules;
 
       (* Read bank *)
       banks[count] := GetWord(0, maddr); maddr := maddr + 2;
-      (* Read base_addr *)
-      baseAddrs[count] := GetWord(0, maddr); maddr := maddr + 2;
+      (* Read base_addr (24-bit) *)
+      baseAddrs[count] := Get24(maddr); maddr := maddr + 4;
       (* Read var_addr *)
       varAddrs[count] := GetWord(0, maddr); maddr := maddr + 2;
       (* Read export_count (number of export values written) *)
@@ -652,7 +672,7 @@ MODULE Modules;
     END;
 
     (* Read next available load addresses (written by emulator after module entries) *)
-    loadAddr := GetWord(0, maddr); maddr := maddr + 2;
+    loadAddr := Get24(maddr); maddr := maddr + 4;
     varAddr := GetWord(0, maddr); maddr := maddr + 2
   END ReadManifest;
 

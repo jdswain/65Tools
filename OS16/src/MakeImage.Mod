@@ -47,7 +47,8 @@ MODULE MakeImage;
   PROCEDURE Run;
     VAR f: Files.File; r: Files.Rider;
         name: ARRAY 32 OF CHAR;
-        firstMod, codeBase, varBase, res, nLinked: INTEGER;
+        firstMod, varBase, res, nLinked: INTEGER;
+        codeBase: LONGINT;                     (* 24-bit code base *)
         ok: BOOLEAN;
         drv: Driver.BlockDriver;
   BEGIN

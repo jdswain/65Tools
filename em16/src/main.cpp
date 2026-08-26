@@ -1173,10 +1173,13 @@ int main(int argc, char **argv)
       emu816::setByte(maddr, m->bank & 0xFF);
       emu816::setByte(maddr + 1, (m->bank >> 8) & 0xFF);
       maddr += 2;
-      // Write base_addr (2 bytes)
-      emu816::setByte(maddr, m->base_address & 0xFF);
-      emu816::setByte(maddr + 1, (m->base_address >> 8) & 0xFF);
-      maddr += 2;
+      // Write base_addr (4 bytes, 24-bit LINEAR: modules may span banks)
+      { uint32_t base_lin = (MODULE_BANK << 16) + m->base_address;
+        emu816::setByte(maddr, base_lin & 0xFF);
+        emu816::setByte(maddr + 1, (base_lin >> 8) & 0xFF);
+        emu816::setByte(maddr + 2, (base_lin >> 16) & 0xFF);
+        emu816::setByte(maddr + 3, (base_lin >> 24) & 0xFF);
+        maddr += 4; }
       // Write var_addr (2 bytes)
       emu816::setByte(maddr, m->var_address & 0xFF);
       emu816::setByte(maddr + 1, (m->var_address >> 8) & 0xFF);
@@ -1194,10 +1197,14 @@ int main(int argc, char **argv)
         maddr += 2;
       }
     }
-    // Write current load addresses (so Modules.Mod knows where to place new modules)
-    emu816::setByte(maddr, current_load_address & 0xFF);
-    emu816::setByte(maddr + 1, (current_load_address >> 8) & 0xFF);
-    maddr += 2;
+    // Write current load addresses (so Modules.Mod knows where to place new
+    // modules). nextCode is 24-bit LINEAR (4 bytes); nextVar stays bank-0 16-bit.
+    { uint32_t code_lin = (MODULE_BANK << 16) + current_load_address;
+      emu816::setByte(maddr, code_lin & 0xFF);
+      emu816::setByte(maddr + 1, (code_lin >> 8) & 0xFF);
+      emu816::setByte(maddr + 2, (code_lin >> 16) & 0xFF);
+      emu816::setByte(maddr + 3, (code_lin >> 24) & 0xFF);
+      maddr += 4; }
     emu816::setByte(maddr, current_var_address & 0xFF);
     emu816::setByte(maddr + 1, (current_var_address >> 8) & 0xFF);
     maddr += 2;
