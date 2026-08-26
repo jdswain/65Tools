@@ -392,25 +392,29 @@ static void apply_relocation(uint32_t reloc_addr, uint32_t module_base,
 
             if (exno > 0 && exno < target->export_count) {
                 uint32_t target_addr = target->exports[exno];
-                uint32_t full_addr = target->base_address + target_addr;
+                // 24-bit absolute target (module code may span banks)
+                uint32_t full_addr = (MODULE_BANK << 16) + target->base_address + target_addr;
                 printf("  JSL import fixup at $%06X: mno=%d exno=%d -> %s $%02X:%04X\n",
                        reloc_addr, mno, exno, target->name,
-                       target->bank, full_addr);
+                       (full_addr >> 16) & 0xFF, full_addr & 0xFFFF);
                 emu816::setByte(reloc_addr + 1, full_addr & 0xFF);
                 emu816::setByte(reloc_addr + 2, (full_addr >> 8) & 0xFF);
-                emu816::setByte(reloc_addr + 3, target->bank);
+                emu816::setByte(reloc_addr + 3, (full_addr >> 16) & 0xFF);
             } else {
                 printf("  Warning: Invalid exno %d for module %s (has %d exports)\n",
                        exno, target->name, target->export_count - 1);
             }
         } else {
-            // Intra-module relocation: bank byte == 0
-            uint32_t addr = addr_word + module_base;
-            emu816::setByte(reloc_addr + 1, addr & 0xFF);
-            emu816::setByte(reloc_addr + 2, (addr >> 8) & 0xFF);
-            emu816::setByte(reloc_addr + 3, current_module_bank);
+            // Intra-module relocation: bank byte == 0. The target's absolute
+            // 24-bit address is the module's (absolute) base + the operand
+            // offset; derive the bank byte from it so LARGE modules whose code
+            // spans a bank boundary get the right far target.
+            uint32_t abs_target = (MODULE_BANK << 16) + module_base + addr_word;
+            emu816::setByte(reloc_addr + 1, abs_target & 0xFF);
+            emu816::setByte(reloc_addr + 2, (abs_target >> 8) & 0xFF);
+            emu816::setByte(reloc_addr + 3, (abs_target >> 16) & 0xFF);
             printf("  JSL relocation at $%06X: $%04X -> $%02X:%04X\n",
-                   reloc_addr, addr_word, current_module_bank, addr & 0xFFFF);
+                   reloc_addr, addr_word, (abs_target >> 16) & 0xFF, abs_target & 0xFFFF);
         }
 
     } else if (opcode == 0xA9) {    // LDA #imm16 - module var base relocation
@@ -881,7 +885,8 @@ unsigned int loadMod(char * filename) {
   // Add module to tracking list BEFORE relocations (so it's findable)
   ModuleInfo *info = (ModuleInfo*)malloc(sizeof(ModuleInfo));
   strcpy(info->name, module_name);
-  info->bank = current_module_bank;
+  // bank the module's code base actually lands in (code may span higher banks)
+  info->bank = (uint8_t)(((MODULE_BANK << 16) + module_base) >> 16);
   info->base_address = module_base;
   info->var_address = module_var_base;
   info->size = code_length;
@@ -956,10 +961,11 @@ unsigned int loadMod(char * filename) {
 
   fclose(file);
 
-  // Return full 24-bit entry point address (bank:address)
-  uint32_t full_entry = (MODULE_BANK << 16) | (module_base + entry_point);
+  // Return full 24-bit entry point address (bank:address). Use + not | so a
+  // module whose code spans into a higher bank gets the correct bank.
+  uint32_t full_entry = (MODULE_BANK << 16) + module_base + entry_point;
   printf("Entry point: Bank %d:$%04X (24-bit: $%06X)\n",
-         MODULE_BANK, module_base + entry_point, full_entry);
+         (full_entry >> 16) & 0xFF, full_entry & 0xFFFF, full_entry);
   printf("Module loaded successfully\n\n");
   return full_entry;
 }
