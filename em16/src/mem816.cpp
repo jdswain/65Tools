@@ -24,7 +24,7 @@
 mem816::Addr	mem816::memMask;
 mem816::Addr	mem816::ramSize;
 mem816::Addr	mem816::uartBase = 0xC000;
-mem816::Addr	mem816::fdcBase = 0xC010;
+mem816::Addr	mem816::fdcBase = 0x0800;
 mem816::Addr	mem816::viaBase = 0xC020;
 bool		mem816::l28MCUEnabled = false;
 bool		mem816::flashInitialized = false;

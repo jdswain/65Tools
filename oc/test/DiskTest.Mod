@@ -1,10 +1,10 @@
 MODULE DiskTest;
   IMPORT SYSTEM, Out;
   CONST
-    FDC_CMD    = 0C010H;
-    FDC_SECTOR = 0C012H;
-    FDC_DATA   = 0C013H;
-    FDC_CTRL   = 0C016H;
+    FDC_CMD    = 0800H;
+    FDC_SECTOR = 0802H;
+    FDC_DATA   = 0803H;
+    FDC_CTRL   = 0806H;
   VAR
     i, d: INTEGER;
     b: BYTE;

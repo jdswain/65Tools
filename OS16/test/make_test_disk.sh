@@ -29,16 +29,14 @@ fi
 
 echo "Mounted at: $MOUNT_POINT"
 
-# Create directory structure
-mkdir -p "$MOUNT_POINT/Library/Modules"
-
-# Copy all specified .816 files
+# Copy all specified .816 files into the FAT12 root directory.
+# The floppy boot path (Boot.Mod) scans the root dir only — no subdirs.
 for f in "$@"; do
-  cp "$f" "$MOUNT_POINT/Library/Modules/"
+  cp "$f" "$MOUNT_POINT/"
   echo "Copied $(basename "$f")"
 done
 
-ls -la "$MOUNT_POINT/Library/Modules/"
+ls -la "$MOUNT_POINT/"
 
 # Unmount
 hdiutil detach "$DEV"

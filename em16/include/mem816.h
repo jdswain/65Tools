@@ -46,7 +46,7 @@ public:
   // Configure UART base address (default $C000, L28 uses $0000)
   static void setUartBase(Addr base) { uartBase = base; }
 
-  // Configure FDC base address (default $C010, L28 uses $E000)
+  // Configure FDC base address (default $0800 = FPGA ext-bus card window, L28 uses $0640)
   static void setFdcBase(Addr base) { fdcBase = base; }
 
   // Configure VIA base address (default $C020, 0 = disabled)
@@ -242,7 +242,7 @@ private:
   static Addr memMask;		// The address mask pattern
   static Addr ramSize;		// The amount of RAM
   static Addr uartBase;		// UART base address ($C000 default, $0000 for L28)
-  static Addr fdcBase;		// FDC base address ($C010 default, $0800 for L28)
+  static Addr fdcBase;		// FDC base address ($0800 default = FPGA card window, $0640 for L28)
   static Addr viaBase;		// VIA base address ($C020 default, 0 = disabled)
   static bool l28MCUEnabled;	// L28 MCU peripherals enabled
   static bool flashInitialized;	// ES2/ES3 flash intercepts active

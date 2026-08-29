@@ -6,14 +6,14 @@
 #include <cstdint>
 
 // WD1793 Floppy Disk Controller emulation
-// I/O slot: $C010-$C01F (16 bytes)
+// I/O slot: $0800-$080F (16 bytes) — FPGA ext-bus card 0 window; register = ea & 0x0F
 //
-// Register map:
-//   $C010 (R) Status / (W) Command
-//   $C011 (R/W) Track
-//   $C012 (R/W) Sector
-//   $C013 (R/W) Data
-//   $C016 (R) Drive Status / (W) Drive Control
+// Register map (offset from base):
+//   +0 (R) Status / (W) Command
+//   +1 (R/W) Track
+//   +2 (R/W) Sector
+//   +3 (R/W) Data
+//   +6 (R) Drive Status / (W) Drive Control
 //
 // Disk geometry: 720K (80 tracks, 2 sides, 9 sectors/track, 512 bytes/sector)
 
@@ -61,7 +61,7 @@ private:
   uint8_t dataReg;
 
   // Drive control/status
-  uint8_t driveControl;    // last written to $C016
+  uint8_t driveControl;    // last written to reg +6 (Drive Control)
   int     selectedDrive;   // 0 or 1
   int     selectedSide;    // 0 or 1
   bool    motorOn;

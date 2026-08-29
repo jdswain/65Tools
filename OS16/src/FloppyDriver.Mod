@@ -2,13 +2,13 @@ MODULE FloppyDriver;
   IMPORT SYSTEM, Driver;
 
   CONST
-    (* FDC register addresses (WD1793 at I/O slot $C010) *)
-    CMD    = 0C010H;  (* W: command, R: status *)
-    STATUS = 0C010H;
-    TRACK  = 0C011H;
-    SECTOR = 0C012H;
-    DATA   = 0C013H;
-    CTRL   = 0C016H;  (* W: drive control, R: drive status *)
+    (* FDC register addresses (WD1773 at FPGA ext-bus card window $0800) *)
+    CMD    = 0800H;  (* W: command, R: status *)
+    STATUS = 0800H;
+    TRACK  = 0801H;
+    SECTOR = 0802H;
+    DATA   = 0803H;
+    CTRL   = 0806H;  (* W: drive control, R: drive status *)
 
     (* WD1793 commands *)
     cmdRestore = 0;
