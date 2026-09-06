@@ -33,7 +33,6 @@ MODULE Boot;
     SecPerCyl = 18;                 (* SecPerTrk * Sides *)
     MaxRetry  = 30000;              (* 816 INTEGER is 16-bit signed (max 32767) *)
     MaxFATSec = 8;                  (* 720K FAT12 = up to ~5 sectors; headroom *)
-    DumpMax   = 512;                (* cap the serial dump *)
 
     (* BPB field offsets *)
     bpbBPS = 11; bpbSPC = 13; bpbRES = 14; bpbNFAT = 16;
@@ -51,6 +50,8 @@ MODULE Boot;
     isFAT12: BOOLEAN;
     clu, size: INTEGER;
     target: ARRAY 12 OF CHAR;
+    (* payload byte-stream over the cluster chain *)
+    streamClu, streamSecOfs, streamPos: INTEGER; streamLoaded: BOOLEAN;
 
   (* ---- serial output ---- *)
 
@@ -237,37 +238,71 @@ MODULE Boot;
   END FindFile;
 
   (* follow the cluster chain, serial-dump up to DumpMax raw bytes *)
-  PROCEDURE DumpFile(c, len: INTEGER);
-    VAR base, j, k, remaining, budget: INTEGER;
-  BEGIN remaining := len; budget := DumpMax;
-    WHILE (c >= 2) & (c <= maxClu) & (remaining > 0) & (budget > 0) DO
-      base := ClusterToSector(c); j := 0;
-      WHILE (j < spc) & (remaining > 0) & (budget > 0) DO
-        IF ReadSector(base + j, secBuf) THEN
-          k := 0;
-          WHILE (k < SecSize) & (remaining > 0) & (budget > 0) DO
-            Wr(CHR(secBuf[k])); DEC(remaining); DEC(budget); INC(k)
-          END
-        END;
-        INC(j)
+  (* ---- byte stream over the file's cluster chain ---- *)
+
+  PROCEDURE InitStream(firstClu: INTEGER);
+  BEGIN streamClu := firstClu; streamSecOfs := 0; streamPos := 0; streamLoaded := FALSE
+  END InitStream;
+
+  PROCEDURE NextByte(): INTEGER;
+    VAR b: INTEGER;
+  BEGIN
+    IF ~streamLoaded OR (streamPos >= SecSize) THEN
+      IF streamLoaded THEN
+        INC(streamSecOfs);
+        IF streamSecOfs >= spc THEN
+          streamClu := GetFAT(streamClu); streamSecOfs := 0
+        END
       END;
-      c := GetFAT(c)
-    END
-  END DumpFile;
+      IF ~ReadSector(ClusterToSector(streamClu) + streamSecOfs, secBuf) THEN
+        (* leave secBuf as-is; caller sizes reads by header, not EOF *)
+      END;
+      streamPos := 0; streamLoaded := TRUE
+    END;
+    b := secBuf[streamPos]; INC(streamPos)
+  RETURN b
+  END NextByte;
+
+  PROCEDURE NextWord(): INTEGER;
+    VAR lo: INTEGER;
+  BEGIN lo := NextByte() RETURN ORA(lo, ASL(NextByte(), 8)) END NextWord;
+
+  (* ---- B3: load a relocated payload (MakePayload container) + EXEC it ----
+     Header: codeBase codeLen varBase varSize dataLen entry (6x 16-bit LE),
+     then code[codeLen], then data[dataLen]. All bank 0. *)
+  PROCEDURE LoadPayload(firstClu: INTEGER);
+    VAR codeBase, codeLen, varBase, varSize, dataLen, entry, i: INTEGER; bb: BYTE;
+  BEGIN
+    InitStream(firstClu);
+    codeBase := NextWord(); codeLen := NextWord();
+    varBase  := NextWord(); varSize := NextWord();
+    dataLen  := NextWord(); entry   := NextWord();
+    Str("load code="); Hex4(codeBase); Str("+"); Hex4(codeLen);
+    Str(" var="); Hex4(varBase); Str("+"); Hex4(varSize);
+    Str(" entry="); Hex4(entry); Ln;
+
+    i := 0;                                        (* code -> codeBase *)
+    WHILE i < codeLen DO bb := NextByte(); SYSTEM.PUT(0, codeBase + i, bb); INC(i) END;
+    i := 0;                                        (* data image -> varBase+varSize *)
+    WHILE i < dataLen DO bb := NextByte(); SYSTEM.PUT(0, varBase + varSize + i, bb); INC(i) END;
+    bb := 0;                                       (* zero the BSS *)
+    i := 0;
+    WHILE i < varSize DO SYSTEM.PUT(0, varBase + i, bb); INC(i) END;
+
+    Str("exec"); Ln;
+    SYSTEM.EXEC(entry, 0);                          (* runs the payload, returns *)
+    Str("returned"); Ln
+  END LoadPayload;
 
 BEGIN
   curTrack := -1;
   Str("OS16 boot"); Ln;
   target := "PAYLOAD 816";                 (* 8.3: "PAYLOAD.816" *)
   IF ReadBPB() THEN
-    Str("BPB spc="); Hex2(spc);
-    Str(" root="); Hex4(rootStart);
-    Str(" data="); Hex4(dataStart); Ln;
     IF LoadFAT() THEN
       IF FindFile() THEN
         Str("found clu="); Hex4(clu); Str(" size="); Hex4(size); Ln;
-        DumpFile(clu, size); Ln;
-        Str("done"); Ln
+        LoadPayload(clu)
       ELSE Str("not found"); Ln
       END
     ELSE Str("FAT read fail"); Ln

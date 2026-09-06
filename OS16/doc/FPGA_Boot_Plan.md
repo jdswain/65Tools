@@ -44,7 +44,20 @@ payload = **serial "hello", then the graphics window demo**.
   compile `Boot.Mod` from inside `boot/` (or the ROM goes stale). hdiutil 720K
   images report SPT=32/HEADS=16 in the BPB, but that's irrelevant — em16 is a
   flat LBA image and Boot's 9/2 mapping matches em16's, so it round-trips.
-- **Next: B3** load a payload to RAM + jump; **B4** payload = the window demo.
+- **B3 done (2026-08-29)** — Boot loads a relocated payload off the floppy and
+  jumps to it. `tools/makepayload.py` relocates a dependency-free `.816` to RAM
+  (code base + var base, both bank 0) and emits a container `[codeBase codeLen
+  varBase varSize dataLen entry]` (6×16-bit LE) + code + data-image. `Boot.Mod`
+  streams the file over its cluster chain (`NextByte`/`NextWord`), copies code →
+  codeBase and the string/TD image → varBase+varSize, zeroes the BSS, then
+  `SYSTEM.EXEC(entry, 0)` — which calls the payload via an RTL frame (saving/
+  restoring SB), so the payload's Header sets its own SB, its body runs, and it
+  returns. Verified in em16 -fpga: `boot/Payload.Mod` (prints "PAYLOAD RUNNING")
+  loads to $4000/vars $8000 (clear of Boot's $1000..~$2300) and runs. Payload
+  bases must sit above the loader's own vars — MakePayload defaults code $4000,
+  var $8000. Single self-contained payloads only for now (MakeImage multi-module
+  pre-linking is still blocked — see os16-status memory).
+- **Next: B4** payload = the graphics window demo (retargeted UIGraphics).
 
 Build: `oc816 -s Boot.Mod` → `Boot.816`; `python3 OS16/tools/makerom.py
 Boot.816 boot.rom` → `em16 -fpga -bootrom boot.rom -disk0 floppy.img`.
