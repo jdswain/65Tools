@@ -26,7 +26,7 @@ OBJS := $(MODS:%=$(OBJDIR)/%.o)
 # artifacts of the oc repository and may be missing in a clean checkout.
 RT_SMB := $(RT)/Errors.smb $(RT)/Out.smb $(RT)/Files.smb $(RT)/Env.smb
 
-.PHONY: all test clean
+.PHONY: all test test816 clean
 
 # keep the copies, or make would recompile everything each time
 .SECONDARY: $(MODS:%=$(OBJDIR)/%.Mod)
@@ -69,6 +69,10 @@ $(TARGET): $(OBJS) $(SRCDIR)/ASH_rt.c | $(BINDIR)
 test: $(TARGET)
 	@sh test/run_tests.sh $(abspath $(TARGET))
 
+# The assembler compiled with oc816 and run under em16.
+test816: $(TARGET)
+	@sh test816/run.sh
+
 clean:
-	rm -rf $(OBJDIR) test/out
+	rm -rf $(OBJDIR) test/out test816/out
 	rm -f $(TARGET)

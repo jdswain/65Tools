@@ -45,7 +45,7 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
     sOrg = 1; sAddr = 2; sLongA = 3; sLongI = 4; sCpu = 5; sPass = 6;
     sDBReg = 7; sDPage = 8; sPBReg = 9; sEntry = 10; sFile = 11; sLine = 12;
 
-    StackSize = 256;
+    StackSize = 128;
     maxFrames = 64;     (* nesting of IF and blocks *)
     maxDepth = 32;      (* nesting of macro calls *)
     maxPasses = 12;
@@ -341,9 +341,9 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
 
   (* Division and remainder truncate towards zero, as they do in C. *)
   PROCEDURE Quot(x, y: LONGINT): LONGINT;
-    VAR q: LONGINT;
-  BEGIN q := ABS(x) DIV ABS(y);
-    IF (x < 0) # (y < 0) THEN q := -q END;
+    VAR q, r: LONGINT;
+  BEGIN ASH.DivMod(ASH.Abs(x), ASH.Abs(y), q, r);
+    IF (x < 0) & (y > 0) OR (x > 0) & (y < 0) THEN q := -q END;
     RETURN q
   END Quot;
 
@@ -352,7 +352,7 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
     IF n > 32 THEN n := 32 END;
     WHILE n > 0 DO
       IF left THEN x := x * 2 ELSE x := x DIV 2 END;
-      DEC(n)
+      n := n - 1
     END;
     RETURN x
   END Shift;
@@ -362,7 +362,8 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
   BEGIN Pop(y); Pop(x);
     IF (x.form = ASB.Str) & (y.form = ASB.Str) & ((code = eql) OR (code = neq) OR (code = add)) THEN
       IF code = add THEN ASB.SetStr(z, Concat(x.s, y.s))
-      ELSE ASB.SetInt(z, Bool(SameStr(x.s, y.s) = (code = eql)))
+      ELSIF code = eql THEN ASB.SetInt(z, Bool(SameStr(x.s, y.s)))
+      ELSE ASB.SetInt(z, Bool(~SameStr(x.s, y.s)))
       END
     ELSIF ((x.form = ASB.Real) OR (y.form = ASB.Real)) &
           ((code <= div) OR (code >= eql) & (code <= geq)) THEN
@@ -383,9 +384,9 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
       CASE code OF
         add: c := a + b
       | sub: c := a - b
-      | mul: c := a * b
+      | mul: c := ASH.Mul(a, b)
       | div: IF b = 0 THEN Err("division by zero", "") ELSE c := Quot(a, b) END
-      | mod: IF b = 0 THEN Err("division by zero", "") ELSE c := a - Quot(a, b) * b END
+      | mod: IF b = 0 THEN Err("division by zero", "") ELSE c := a - ASH.Mul(Quot(a, b), b) END
       | and: c := AND(a, b)
       | or: c := ORA(a, b)
       | land: c := Bool((a # 0) & (b # 0))
@@ -596,7 +597,7 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
 
   (* One character of a TEXT; left counts those still to come. *)
   PROCEDURE TextByte(c: LONGINT; VAR left: LONGINT; bit7: BOOLEAN);
-  BEGIN DEC(left);
+  BEGIN left := left - 1;
     IF bit7 & (left = 0) THEN c := c MOD 80H + 80H END;
     ASG.Byte(c)
   END TextByte;
@@ -611,9 +612,9 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
     IF n > sp THEN n := sp END;
     left := 0; bit7 := modifier = ASG.MBit7;
     FOR k := sp - n TO sp - 1 DO
-      IF stack[k].form = ASB.Str THEN INC(left, stack[k].s.len)
-      ELSIF IntOf(stack[k]) > 0FFH THEN INC(left, 2)
-      ELSE INC(left)
+      IF stack[k].form = ASB.Str THEN left := left + stack[k].s.len
+      ELSIF IntOf(stack[k]) > 0FFH THEN left := left + 2
+      ELSE left := left + 1
       END
     END;
     IF modifier = ASG.MLong THEN ASG.Byte(left) END;
@@ -633,31 +634,36 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
   (* FILL count, value ...: count elements of the size the modifier
      names, taken in turn from the values; zeros if there are none. *)
   PROCEDURE Fill(n, modifier: INTEGER);
-    VAR count, k, v: LONGINT; base, pat: INTEGER;
+    VAR count, k, v: LONGINT; base, pat, p: INTEGER;
   BEGIN
     IF n > sp THEN n := sp END;
     IF n > 0 THEN
       base := sp - n; pat := n - 1; count := IntOf(stack[base]);
       IF (count < 0) OR (count > maxFill) THEN Err("bad length of fill", ""); count := 0 END;
-      k := 0;
+      k := 0; p := 0;
       WHILE k < count DO
-        IF pat = 0 THEN v := 0 ELSE v := IntOf(stack[base + 1 + k MOD pat]) END;
+        IF pat = 0 THEN v := 0
+        ELSE v := IntOf(stack[base + 1 + p]); INC(p);
+          IF p = pat THEN p := 0 END
+        END;
         IF (modifier = ASG.MWord) OR (modifier = ASG.MAbs) THEN ASG.Word(v)
         ELSIF modifier = ASG.MLong THEN ASG.Long(v)
         ELSE ASG.Byte(v)
         END;
-        INC(k)
+        k := k + 1
       END
     END;
     Drop(n)
   END Fill;
 
   PROCEDURE Align;
-    VAR v: ASB.Value; a: LONGINT;
+    VAR v: ASB.Value; a, q, r: LONGINT;
   BEGIN Pop(v); a := IntOf(v);
-    IF (a < 1) OR (a > 10000H) THEN Err("bad alignment", "")
-    ELSE
-      WHILE ASG.Here() MOD a # 0 DO ASG.Byte(0) END
+    IF (a < 1) OR (a > 10000H) OR (ASG.Here() < 0) THEN Err("bad alignment", "")
+    ELSE ASH.DivMod(ASG.Here(), a, q, r);
+      WHILE r # 0 DO ASG.Byte(0); r := r + 1;
+        IF r = a THEN r := 0 END
+      END
     END
   END Align;
 
@@ -719,7 +725,8 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
   PROCEDURE ListLine(op: Op);
   BEGIN
     IF final THEN
-      ASL.Line(ASG.Current(), lineAddr, lineStart, ASG.Size() - lineStart, exec, op.src, op.i, op.j)
+      ASL.Text(op.src, op.i, op.j);
+      ASL.Line(ASG.Current(), lineAddr, lineStart, ASG.Size() - lineStart, exec)
     END;
     lineAddr := ASG.Here(); lineStart := ASG.Size()
   END ListLine;

@@ -18,6 +18,8 @@ MODULE ASL; (* Listing of the 65xx assembler.
     F: Files.File; R: Files.Rider;
     (* the source file being quoted *)
     src: ASS.Source; srcF: Files.File; srcR: Files.Rider;
+    (* the text of the line being listed *)
+    textSrc: ASS.Source; textFrom, textTo: LONGINT;
 
   PROCEDURE Ch(ch: CHAR);
   BEGIN Files.WriteByte(R, ORD(ch))
@@ -74,7 +76,7 @@ MODULE ASL; (* Listing of the 65xx assembler.
     VAR b: BYTE; done: BOOLEAN;
   BEGIN done := FALSE;
     WHILE ~done & (pos < to) DO
-      Files.ReadByte(srcR, b); INC(pos);
+      Files.ReadByte(srcR, b); pos := pos + 1;
       IF srcR.eof THEN done := TRUE
       ELSIF b = ORD(LF) THEN done := TRUE
       ELSIF b # ORD(CR) THEN Files.WriteByte(R, b)
@@ -82,13 +84,19 @@ MODULE ASL; (* Listing of the 65xx assembler.
     END
   END CopyLine;
 
-  (* List the source text [from, to) of file s beside the n bytes at
-     offset start of section sect, which are at address addr. exec is
-     FALSE for text that conditional assembly left out. *)
-  PROCEDURE Line*(sect: ASG.Section; addr, start, n: LONGINT; exec: BOOLEAN;
-      s: ASS.Source; from, to: LONGINT);
-    VAR pos, i: LONGINT; j, digits: INTEGER; hasText: BOOLEAN;
-  BEGIN
+  (* The source text [from, to) of file s is what the next Line lists.
+     (A procedure of its own: with the text as parameters of Line, the
+     call needs more registers than the 65C816 compiler has.) *)
+  PROCEDURE Text*(s: ASS.Source; from, to: LONGINT);
+  BEGIN textSrc := s; textFrom := from; textTo := to
+  END Text;
+
+  (* List the source text given to Text beside the n bytes at offset
+     start of section sect, which are at address addr. exec is FALSE
+     for text that conditional assembly left out. *)
+  PROCEDURE Line*(sect: ASG.Section; addr, start, n: LONGINT; exec: BOOLEAN);
+    VAR pos, i, from, to: LONGINT; j, digits: INTEGER; hasText: BOOLEAN; s: ASS.Source;
+  BEGIN s := textSrc; from := textFrom; to := textTo;
     IF isOpen THEN
       IF ~exec THEN n := 0 END;
       hasText := (s # NIL) & s.isFile & (from < to);
@@ -110,7 +118,7 @@ MODULE ASL; (* Listing of the 65xx assembler.
         END;
         IF hasText & (pos < to) THEN CopyLine(pos, to) END;
         Ch(LF);
-        INC(i, BytesPerLine)
+        i := i + BytesPerLine
       UNTIL (i >= n) & ~(hasText & (pos < to))
       END
     END
@@ -178,5 +186,5 @@ MODULE ASL; (* Listing of the 65xx assembler.
     END
   END Symbols;
 
-BEGIN isOpen := FALSE; src := NIL; srcF := NIL
+BEGIN isOpen := FALSE; src := NIL; srcF := NIL; textSrc := NIL
 END ASL.

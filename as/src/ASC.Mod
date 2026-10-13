@@ -3,7 +3,8 @@ MODULE ASC; (* CPU definitions for the 65xx assembler.
    Mnemonics, addressing modes, instruction formats and the encoding table
    of each supported processor. Port of shared/src/gen_02.c, gen_C02.c,
    gen_RC02.c, gen_816.c and gen_RC19.c: one table row (mode, format,
-   opcode byte) replaces each case of the C switch statements.
+   opcode byte) replaces each case of the C switch statements. The rows
+   are written as text; see D.
 
    A leaf module. The scanner (ASS) takes the mnemonics from here; the
    code generator (ASG) looks instructions up with Find and emits them
@@ -19,51 +20,51 @@ MODULE ASC; (* CPU definitions for the 65xx assembler.
     (* addressing modes, as written in the source. The parser produces the
        general form (mAbs for a plain address, mPair for "a, b", ...); ASG
        narrows it to direct page or widens it to long where that applies. *)
-    mAbs* = 0;       (* addr *)
-    mAcc* = 1;       (* A *)
-    mAbsX* = 2;      (* addr,X *)
-    mAbsY* = 3;      (* addr,Y *)
-    mAbsL* = 4;      (* long *)
-    mAbsLX* = 5;     (* long,X *)
-    mAbsInd* = 6;    (* (addr) *)
-    mAbsIndX* = 7;   (* (addr,X) *)
-    mDP* = 8;        (* dp *)
-    mDPX* = 9;       (* dp,X *)
-    mDPY* = 10;      (* dp,Y *)
-    mDPInd* = 11;    (* (dp) *)
-    mDPIndL* = 12;   (* [dp] *)
-    mImpl* = 13;     (* no operand *)
-    mAbsIndL* = 14;  (* [addr] *)
-    mPair* = 15;     (* a,b: block move, or C19 bit/immediate with address *)
-    mDPIndX* = 16;   (* (dp,X); the C19 writes (dp),X *)
-    mDPIndY* = 17;   (* (dp),Y *)
-    mDPIndLY* = 18;  (* [dp],Y *)
-    mImm* = 19;      (* #const *)
-    mSR* = 20;       (* sr,S *)
-    mSRIY* = 21;     (* (sr,S),Y *)
-    mTriple* = 22;   (* a,b,c: C19 bit test and branch *)
+    mAbs* = 0;       (* A: addr *)
+    mAcc* = 1;       (* B: A *)
+    mAbsX* = 2;      (* C: addr,X *)
+    mAbsY* = 3;      (* D: addr,Y *)
+    mAbsL* = 4;      (* E: long *)
+    mAbsLX* = 5;     (* F: long,X *)
+    mAbsInd* = 6;    (* G: (addr) *)
+    mAbsIndX* = 7;   (* H: (addr,X) *)
+    mDP* = 8;        (* I: dp *)
+    mDPX* = 9;       (* J: dp,X *)
+    mDPY* = 10;      (* K: dp,Y *)
+    mDPInd* = 11;    (* L: (dp) *)
+    mDPIndL* = 12;   (* M: [dp] *)
+    mImpl* = 13;     (* N: no operand *)
+    mAbsIndL* = 14;  (* O: [addr] *)
+    mPair* = 15;     (* P: a,b: block move, or C19 bit/immediate with address *)
+    mDPIndX* = 16;   (* Q: (dp,X); the C19 writes (dp),X *)
+    mDPIndY* = 17;   (* R: (dp),Y *)
+    mDPIndLY* = 18;  (* S: [dp],Y *)
+    mImm* = 19;      (* T: #const *)
+    mSR* = 20;       (* U: sr,S *)
+    mSRIY* = 21;     (* V: (sr,S),Y *)
+    mTriple* = 22;   (* W: a,b,c: C19 bit test and branch *)
     nofModes* = 23;
 
     (* instruction formats: how the operands follow the opcode byte *)
-    fImpl* = 0;      (* opcode only *)
-    fByte* = 1;      (* one byte *)
-    fWord* = 2;      (* two bytes *)
-    fLong* = 3;      (* three bytes *)
-    fImmA* = 4;      (* immediate, as wide as the accumulator *)
-    fImmX* = 5;      (* immediate, as wide as the index registers *)
-    fRel* = 6;       (* 8 bit relative branch *)
-    fRelL* = 7;      (* 16 bit relative *)
-    fBra* = 8;       (* BRA, promoted to BRL when out of range *)
-    fBrl* = 9;       (* BRL, demoted to BRA when in range *)
-    fWordR* = 10;    (* two bytes, relocatable call *)
-    fLongR* = 11;    (* three bytes, relocatable call *)
-    fMove* = 12;     (* block move: destination bank, source bank *)
-    fBitZ* = 13;     (* bit number in the opcode, zero page address *)
-    fBitA* = 14;     (* bit mask, absolute address *)
-    fBitZR* = 15;    (* bit number in the opcode, zero page address, branch *)
-    fBitAR* = 16;    (* bit mask, absolute address, branch *)
-    fImmZ* = 17;     (* immediate, zero page address *)
-    fJsb* = 18;      (* vector number in the opcode *)
+    fImpl* = 0;      (* a: opcode only *)
+    fByte* = 1;      (* b: one byte *)
+    fWord* = 2;      (* c: two bytes *)
+    fLong* = 3;      (* d: three bytes *)
+    fImmA* = 4;      (* e: immediate, as wide as the accumulator *)
+    fImmX* = 5;      (* f: immediate, as wide as the index registers *)
+    fRel* = 6;       (* g: 8 bit relative branch *)
+    fRelL* = 7;      (* h: 16 bit relative *)
+    fBra* = 8;       (* i: BRA, promoted to BRL when out of range *)
+    fBrl* = 9;       (* j: BRL, demoted to BRA when in range *)
+    fWordR* = 10;    (* k: two bytes, relocatable call *)
+    fLongR* = 11;    (* l: three bytes, relocatable call *)
+    fMove* = 12;     (* m: block move: destination bank, source bank *)
+    fBitZ* = 13;     (* n: bit number in the opcode, zero page address *)
+    fBitA* = 14;     (* o: bit mask, absolute address *)
+    fBitZR* = 15;    (* p: bit number in the opcode, zero page address, branch *)
+    fBitAR* = 16;    (* q: bit mask, absolute address, branch *)
+    fImmZ* = 17;     (* r: immediate, zero page address *)
+    fJsb* = 18;      (* s: vector number in the opcode *)
 
     maxEnt = 304;    (* rows of the largest table, the 65C816's *)
 
@@ -122,518 +123,426 @@ MODULE ASC; (* CPU definitions for the 65xx assembler.
     END
   END E;
 
+  PROCEDURE HexVal(ch: CHAR): INTEGER;
+    VAR d: INTEGER;
+  BEGIN
+    IF ch <= "9" THEN d := ORD(ch) - 30H ELSE d := ORD(ch) - 37H END;
+    RETURN d
+  END HexVal;
+
+  (* The rows of instruction op. Each is four characters: the letter of
+     the mode, the letter of the format (both given with the constants
+     above) and the opcode byte in hexadecimal. The tables are text and
+     not statements because every call costs the loader a relocation,
+     and a module may have about a thousand. *)
+  PROCEDURE D(op: INTEGER; rows: ARRAY OF CHAR);
+    VAR i: INTEGER;
+  BEGIN I(op); i := 0;
+    WHILE (i + 3 < LEN(rows)) & (rows[i] # 0X) DO
+      E(ORD(rows[i]) - ORD("A"), ORD(rows[i + 1]) - ORD("a"),
+        HexVal(rows[i + 2]) * 10H + HexVal(rows[i + 3]));
+      i := i + 4;
+      IF (i < LEN(rows)) & (rows[i] = " ") THEN i := i + 1 END
+    END
+  END D;
+
   PROCEDURE Enter6502;
   BEGIN
-    I(ADC); E(mImm, fByte, 69H); E(mAbs, fWord, 6DH); E(mDP, fByte, 65H); E(mAbsX, fWord, 7DH);
-      E(mAbsY, fWord, 79H); E(mDPX, fByte, 75H); E(mDPIndX, fByte, 61H); E(mDPIndY, fByte, 71H);
-    I(AND); E(mImm, fByte, 29H); E(mAbs, fWord, 2DH); E(mDP, fByte, 25H); E(mAbsX, fWord, 3DH);
-      E(mAbsY, fWord, 39H); E(mDPX, fByte, 35H); E(mDPIndX, fByte, 21H); E(mDPIndY, fByte, 31H);
-    I(ASL); E(mImpl, fImpl, 0AH); E(mAcc, fImpl, 0AH); E(mAbs, fWord, 0EH); E(mDP, fByte, 06H);
-      E(mAbsX, fWord, 1EH); E(mDPX, fByte, 16H);
-    I(BCC); E(mAbs, fRel, 90H); E(mDP, fRel, 90H);
-    I(BCS); E(mAbs, fRel, 0B0H); E(mDP, fRel, 0B0H);
-    I(BEQ); E(mAbs, fRel, 0F0H); E(mDP, fRel, 0F0H);
-    I(BIT); E(mAbs, fWord, 2CH); E(mDP, fByte, 24H);
-    I(BMI); E(mDP, fRel, 30H); E(mAbs, fRel, 30H);
-    I(BNE); E(mAbs, fRel, 0D0H); E(mDP, fRel, 0D0H);
-    I(BPL); E(mAbs, fRel, 10H); E(mDP, fRel, 10H);
-    I(BRK); E(mImpl, fImpl, 00H); E(mImm, fByte, 00H);
-    I(BVC); E(mAbs, fRel, 50H); E(mDP, fRel, 50H);
-    I(BVS); E(mAbs, fRel, 70H); E(mDP, fRel, 70H);
-    I(CLC); E(mImpl, fImpl, 18H);
-    I(CLD); E(mImpl, fImpl, 0D8H);
-    I(CLI); E(mImpl, fImpl, 58H);
-    I(CLV); E(mImpl, fImpl, 0B8H);
-    I(CMP); E(mImm, fByte, 0C9H); E(mAbs, fWord, 0CDH); E(mDP, fByte, 0C5H); E(mAbsX, fWord, 0DDH);
-      E(mAbsY, fWord, 0D9H); E(mDPX, fByte, 0D5H); E(mDPIndX, fByte, 0C1H); E(mDPIndY, fByte, 0D1H);
-    I(CPX); E(mImm, fByte, 0E0H); E(mAbs, fWord, 0ECH); E(mDP, fByte, 0E4H);
-    I(CPY); E(mImm, fByte, 0C0H); E(mAbs, fWord, 0CCH); E(mDP, fByte, 0C4H);
-    I(DEC); E(mAbs, fWord, 0CEH); E(mDP, fByte, 0C6H); E(mAbsX, fWord, 0DEH); E(mDPX, fByte, 0D6H);
-    I(DEX); E(mImpl, fImpl, 0CAH);
-    I(DEY); E(mImpl, fImpl, 88H);
-    I(EOR); E(mImm, fByte, 49H); E(mAbs, fWord, 4DH); E(mDP, fByte, 45H); E(mAbsX, fWord, 5DH);
-      E(mAbsY, fWord, 59H); E(mDPX, fByte, 55H); E(mDPIndX, fByte, 41H); E(mDPIndY, fByte, 51H);
-    I(INC); E(mAbs, fWord, 0EEH); E(mDP, fByte, 0E6H); E(mAbsX, fWord, 0FEH); E(mDPX, fByte, 0F6H);
-    I(INX); E(mImpl, fImpl, 0E8H);
-    I(INY); E(mImpl, fImpl, 0C8H);
-    I(JMP); E(mDP, fWord, 4CH); E(mAbs, fWord, 4CH); E(mAbsInd, fWord, 6CH);
-    I(JSR); E(mDP, fWord, 20H); E(mAbs, fWord, 20H);
-    I(LDA); E(mImm, fByte, 0A9H); E(mAbs, fWord, 0ADH); E(mDP, fByte, 0A5H); E(mAbsX, fWord, 0BDH);
-      E(mAbsY, fWord, 0B9H); E(mDPX, fByte, 0B5H); E(mDPIndX, fByte, 0A1H); E(mDPIndY, fByte, 0B1H);
-    I(LDX); E(mImm, fByte, 0A2H); E(mAbs, fWord, 0AEH); E(mDP, fByte, 0A6H); E(mAbsY, fWord, 0BEH);
-      E(mDPY, fByte, 0B6H);
-    I(LDY); E(mImm, fByte, 0A0H); E(mAbs, fWord, 0ACH); E(mDP, fByte, 0A4H); E(mAbsX, fWord, 0BCH);
-      E(mDPX, fByte, 0B4H);
-    I(LSR); E(mAcc, fImpl, 4AH); E(mImpl, fImpl, 4AH); E(mAbs, fWord, 4EH); E(mDP, fByte, 46H);
-      E(mAbsX, fWord, 5EH); E(mDPX, fByte, 56H);
-    I(NOP); E(mImpl, fImpl, 0EAH);
-    I(ORA); E(mImm, fByte, 09H); E(mAbs, fWord, 0DH); E(mDP, fByte, 05H); E(mAbsX, fWord, 1DH);
-      E(mAbsY, fWord, 19H); E(mDPX, fByte, 15H); E(mDPIndX, fByte, 01H); E(mDPIndY, fByte, 11H);
-    I(PHA); E(mImpl, fImpl, 48H);
-    I(PHP); E(mImpl, fImpl, 08H);
-    I(PLA); E(mImpl, fImpl, 68H);
-    I(PLP); E(mImpl, fImpl, 28H);
-    I(ROL); E(mAcc, fImpl, 2AH); E(mImpl, fImpl, 2AH); E(mAbs, fWord, 2EH); E(mDP, fByte, 26H);
-      E(mAbsX, fWord, 3EH); E(mDPX, fByte, 36H);
-    I(ROR); E(mImpl, fImpl, 6AH); E(mAcc, fImpl, 6AH); E(mAbs, fWord, 6EH); E(mDP, fByte, 66H);
-      E(mAbsX, fWord, 7EH); E(mDPX, fByte, 76H);
-    I(RTI); E(mImpl, fImpl, 40H);
-    I(RTS); E(mImpl, fImpl, 60H);
-    I(SBC); E(mImm, fByte, 0E9H); E(mAbs, fWord, 0EDH); E(mDP, fByte, 0E5H); E(mAbsX, fWord, 0FDH);
-      E(mAbsY, fWord, 0F9H); E(mDPX, fByte, 0F5H); E(mDPIndX, fByte, 0E1H); E(mDPIndY, fByte, 0F1H);
-    I(SEC); E(mImpl, fImpl, 38H);
-    I(SED); E(mImpl, fImpl, 0F8H);
-    I(SEI); E(mImpl, fImpl, 78H);
-    I(STA); E(mAbs, fWord, 8DH); E(mDP, fByte, 85H); E(mAbsX, fWord, 9DH); E(mAbsY, fWord, 99H);
-      E(mDPX, fByte, 95H); E(mDPIndX, fByte, 81H); E(mDPIndY, fByte, 91H);
-    I(STX); E(mAbs, fWord, 8EH); E(mDP, fByte, 86H); E(mDPY, fByte, 96H);
-    I(STY); E(mAbs, fWord, 8CH); E(mDP, fByte, 84H); E(mDPX, fByte, 94H);
-    I(TAX); E(mImpl, fImpl, 0AAH);
-    I(TAY); E(mImpl, fImpl, 0A8H);
-    I(TSX); E(mImpl, fImpl, 0BAH);
-    I(TXA); E(mImpl, fImpl, 8AH);
-    I(TXS); E(mImpl, fImpl, 9AH);
-    I(TYA); E(mImpl, fImpl, 98H)
+    D(ADC, "Tb69 Ac6D Ib65 Cc7D Dc79 Jb75 Qb61 Rb71");
+    D(AND, "Tb29 Ac2D Ib25 Cc3D Dc39 Jb35 Qb21 Rb31");
+    D(ASL, "Na0A Ba0A Ac0E Ib06 Cc1E Jb16");
+    D(BCC, "Ag90 Ig90");
+    D(BCS, "AgB0 IgB0");
+    D(BEQ, "AgF0 IgF0");
+    D(BIT, "Ac2C Ib24");
+    D(BMI, "Ig30 Ag30");
+    D(BNE, "AgD0 IgD0");
+    D(BPL, "Ag10 Ig10");
+    D(BRK, "Na00 Tb00");
+    D(BVC, "Ag50 Ig50");
+    D(BVS, "Ag70 Ig70");
+    D(CLC, "Na18");
+    D(CLD, "NaD8");
+    D(CLI, "Na58");
+    D(CLV, "NaB8");
+    D(CMP, "TbC9 AcCD IbC5 CcDD DcD9 JbD5 QbC1 RbD1");
+    D(CPX, "TbE0 AcEC IbE4");
+    D(CPY, "TbC0 AcCC IbC4");
+    D(DEC, "AcCE IbC6 CcDE JbD6");
+    D(DEX, "NaCA");
+    D(DEY, "Na88");
+    D(EOR, "Tb49 Ac4D Ib45 Cc5D Dc59 Jb55 Qb41 Rb51");
+    D(INC, "AcEE IbE6 CcFE JbF6");
+    D(INX, "NaE8");
+    D(INY, "NaC8");
+    D(JMP, "Ic4C Ac4C Gc6C");
+    D(JSR, "Ic20 Ac20");
+    D(LDA, "TbA9 AcAD IbA5 CcBD DcB9 JbB5 QbA1 RbB1");
+    D(LDX, "TbA2 AcAE IbA6 DcBE KbB6");
+    D(LDY, "TbA0 AcAC IbA4 CcBC JbB4");
+    D(LSR, "Ba4A Na4A Ac4E Ib46 Cc5E Jb56");
+    D(NOP, "NaEA");
+    D(ORA, "Tb09 Ac0D Ib05 Cc1D Dc19 Jb15 Qb01 Rb11");
+    D(PHA, "Na48");
+    D(PHP, "Na08");
+    D(PLA, "Na68");
+    D(PLP, "Na28");
+    D(ROL, "Ba2A Na2A Ac2E Ib26 Cc3E Jb36");
+    D(ROR, "Na6A Ba6A Ac6E Ib66 Cc7E Jb76");
+    D(RTI, "Na40");
+    D(RTS, "Na60");
+    D(SBC, "TbE9 AcED IbE5 CcFD DcF9 JbF5 QbE1 RbF1");
+    D(SEC, "Na38");
+    D(SED, "NaF8");
+    D(SEI, "Na78");
+    D(STA, "Ac8D Ib85 Cc9D Dc99 Jb95 Qb81 Rb91");
+    D(STX, "Ac8E Ib86 Kb96");
+    D(STY, "Ac8C Ib84 Jb94");
+    D(TAX, "NaAA");
+    D(TAY, "NaA8");
+    D(TSX, "NaBA");
+    D(TXA, "Na8A");
+    D(TXS, "Na9A");
+    D(TYA, "Na98")
   END Enter6502;
 
   PROCEDURE Enter65C02;
   BEGIN
-    I(ADC); E(mImm, fByte, 69H); E(mAbs, fWord, 6DH); E(mDP, fByte, 65H); E(mDPInd, fByte, 72H);
-      E(mAbsX, fWord, 7DH); E(mAbsY, fWord, 79H); E(mDPX, fByte, 75H); E(mDPIndX, fByte, 61H);
-      E(mDPIndY, fByte, 71H);
-    I(AND); E(mImm, fByte, 29H); E(mAbs, fWord, 2DH); E(mDP, fByte, 25H); E(mDPInd, fByte, 32H);
-      E(mAbsX, fWord, 3DH); E(mAbsY, fWord, 39H); E(mDPX, fByte, 35H); E(mDPIndX, fByte, 21H);
-      E(mDPIndY, fByte, 31H);
-    I(ASL); E(mImpl, fImpl, 0AH); E(mAcc, fImpl, 0AH); E(mAbs, fWord, 0EH); E(mDP, fByte, 06H);
-      E(mAbsX, fWord, 1EH); E(mDPX, fByte, 16H);
-    I(BCC); E(mDP, fRel, 90H); E(mAbs, fRel, 90H);
-    I(BCS); E(mDP, fRel, 0B0H); E(mAbs, fRel, 0B0H);
-    I(BEQ); E(mDP, fRel, 0F0H); E(mAbs, fRel, 0F0H);
-    I(BIT); E(mImm, fByte, 89H); E(mAbs, fWord, 2CH); E(mDP, fByte, 24H); E(mAbsX, fWord, 3CH);
-      E(mDPX, fByte, 34H);
-    I(BMI); E(mDP, fRel, 30H); E(mAbs, fRel, 30H);
-    I(BNE); E(mDP, fRel, 0D0H); E(mAbs, fRel, 0D0H);
-    I(BPL); E(mDP, fRel, 10H); E(mAbs, fRel, 10H);
-    I(BRA); E(mDP, fRel, 80H); E(mAbs, fRel, 80H);
-    I(BRK); E(mImpl, fImpl, 00H); E(mImm, fByte, 00H);
-    I(BVC); E(mDP, fRel, 50H); E(mAbs, fRel, 50H);
-    I(BVS); E(mDP, fRel, 70H); E(mAbs, fRel, 70H);
-    I(CLC); E(mImpl, fImpl, 18H);
-    I(CLD); E(mImpl, fImpl, 0D8H);
-    I(CLI); E(mImpl, fImpl, 58H);
-    I(CLV); E(mImpl, fImpl, 0B8H);
-    I(CMP); E(mImm, fByte, 0C9H); E(mAbs, fWord, 0CDH); E(mDP, fByte, 0C5H); E(mDPInd, fByte, 0D2H);
-      E(mAbsX, fWord, 0DDH); E(mAbsY, fWord, 0D9H); E(mDPX, fByte, 0D5H); E(mDPIndX, fByte, 0C1H);
-      E(mDPIndY, fByte, 0D1H);
-    I(CPX); E(mImm, fByte, 0E0H); E(mAbs, fWord, 0ECH); E(mDP, fByte, 0E4H);
-    I(CPY); E(mImm, fByte, 0C0H); E(mAbs, fWord, 0CCH); E(mDP, fByte, 0C4H);
-    I(DEC); E(mAcc, fImpl, 3AH); E(mImpl, fImpl, 3AH); E(mAbs, fWord, 0CEH); E(mDP, fByte, 0C6H);
-      E(mAbsX, fWord, 0DEH); E(mDPX, fByte, 0D6H);
-    I(DEX); E(mImpl, fImpl, 0CAH);
-    I(DEY); E(mImpl, fImpl, 88H);
-    I(EOR); E(mImm, fByte, 49H); E(mAbs, fWord, 4DH); E(mDP, fByte, 45H); E(mDPInd, fByte, 52H);
-      E(mAbsX, fWord, 5DH); E(mAbsY, fWord, 59H); E(mDPX, fByte, 55H); E(mDPIndX, fByte, 41H);
-      E(mDPIndY, fByte, 51H);
-    I(INC); E(mAcc, fImpl, 1AH); E(mImpl, fImpl, 1AH); E(mAbs, fWord, 0EEH); E(mDP, fByte, 0E6H);
-      E(mAbsX, fWord, 0FEH); E(mDPX, fByte, 0F6H);
-    I(INX); E(mImpl, fImpl, 0E8H);
-    I(INY); E(mImpl, fImpl, 0C8H);
-    I(JMP); E(mDP, fWord, 4CH); E(mAbs, fWord, 4CH); E(mAbsInd, fWord, 6CH);
-      E(mAbsIndX, fWord, 7CH);
-    I(JSR); E(mDP, fWord, 20H); E(mAbs, fWord, 20H);
-    I(LDA); E(mImm, fByte, 0A9H); E(mAbs, fWord, 0ADH); E(mDP, fByte, 0A5H); E(mDPInd, fByte, 0B2H);
-      E(mAbsX, fWord, 0BDH); E(mAbsY, fWord, 0B9H); E(mDPX, fByte, 0B5H); E(mDPIndX, fByte, 0A1H);
-      E(mDPIndY, fByte, 0B1H);
-    I(LDX); E(mImm, fByte, 0A2H); E(mAbs, fWord, 0AEH); E(mDP, fByte, 0A6H); E(mAbsY, fWord, 0BEH);
-      E(mDPY, fByte, 0B6H);
-    I(LDY); E(mImm, fByte, 0A0H); E(mAbs, fWord, 0ACH); E(mDP, fByte, 0A4H); E(mAbsX, fWord, 0BCH);
-      E(mDPX, fByte, 0B4H);
-    I(LSR); E(mAcc, fImpl, 4AH); E(mImpl, fImpl, 4AH); E(mAbs, fWord, 4EH); E(mDP, fByte, 46H);
-      E(mAbsX, fWord, 5EH); E(mDPX, fByte, 56H);
-    I(NOP); E(mImpl, fImpl, 0EAH);
-    I(ORA); E(mImm, fByte, 09H); E(mAbs, fWord, 0DH); E(mDP, fByte, 05H); E(mDPInd, fByte, 12H);
-      E(mAbsX, fWord, 1DH); E(mAbsY, fWord, 19H); E(mDPX, fByte, 15H); E(mDPIndX, fByte, 01H);
-      E(mDPIndY, fByte, 11H);
-    I(PHA); E(mImpl, fImpl, 48H);
-    I(PHP); E(mImpl, fImpl, 08H);
-    I(PHX); E(mImpl, fImpl, 0DAH);
-    I(PHY); E(mImpl, fImpl, 5AH);
-    I(PLA); E(mImpl, fImpl, 68H);
-    I(PLP); E(mImpl, fImpl, 28H);
-    I(PLX); E(mImpl, fImpl, 0FAH);
-    I(PLY); E(mImpl, fImpl, 7AH);
-    I(ROL); E(mAcc, fImpl, 2AH); E(mImpl, fImpl, 2AH); E(mAbs, fWord, 2EH); E(mDP, fByte, 26H);
-      E(mAbsX, fWord, 3EH); E(mDPX, fByte, 36H);
-    I(ROR); E(mAcc, fImpl, 6AH); E(mImpl, fImpl, 6AH); E(mAbs, fWord, 6EH); E(mDP, fByte, 66H);
-      E(mAbsX, fWord, 7EH); E(mDPX, fByte, 76H);
-    I(RTI); E(mImpl, fImpl, 40H);
-    I(RTS); E(mImpl, fImpl, 60H);
-    I(SBC); E(mImm, fByte, 0E9H); E(mAbs, fWord, 0EDH); E(mDP, fByte, 0E5H); E(mDPInd, fByte, 0F2H);
-      E(mAbsX, fWord, 0FDH); E(mAbsY, fWord, 0F9H); E(mDPX, fByte, 0F5H); E(mDPIndX, fByte, 0E1H);
-      E(mDPIndY, fByte, 0F1H);
-    I(SEC); E(mImpl, fImpl, 38H);
-    I(SED); E(mImpl, fImpl, 0F8H);
-    I(SEI); E(mImpl, fImpl, 78H);
-    I(STA); E(mAbs, fWord, 8DH); E(mDP, fByte, 85H); E(mDPInd, fByte, 92H); E(mAbsX, fWord, 9DH);
-      E(mDPY, fWord, 99H); E(mAbsY, fWord, 99H); E(mDPX, fByte, 95H); E(mDPIndX, fByte, 81H);
-      E(mDPIndY, fByte, 91H);
-    I(STX); E(mAbs, fWord, 8EH); E(mDP, fByte, 86H); E(mDPY, fByte, 96H);
-    I(STY); E(mAbs, fWord, 8CH); E(mDP, fByte, 84H); E(mDPX, fByte, 94H);
-    I(STZ); E(mAbs, fWord, 9CH); E(mDP, fByte, 64H); E(mAbsX, fWord, 9EH); E(mDPX, fByte, 74H);
-    I(TAX); E(mImpl, fImpl, 0AAH);
-    I(TAY); E(mImpl, fImpl, 0A8H);
-    I(TRB); E(mAbs, fWord, 1CH); E(mDP, fByte, 14H);
-    I(TSB); E(mAbs, fWord, 0CH); E(mDP, fByte, 04H);
-    I(TSX); E(mImpl, fImpl, 0BAH);
-    I(TXA); E(mImpl, fImpl, 8AH);
-    I(TXS); E(mImpl, fImpl, 9AH);
-    I(TYA); E(mImpl, fImpl, 98H)
+    D(ADC, "Tb69 Ac6D Ib65 Lb72 Cc7D Dc79 Jb75 Qb61 Rb71");
+    D(AND, "Tb29 Ac2D Ib25 Lb32 Cc3D Dc39 Jb35 Qb21 Rb31");
+    D(ASL, "Na0A Ba0A Ac0E Ib06 Cc1E Jb16");
+    D(BCC, "Ig90 Ag90");
+    D(BCS, "IgB0 AgB0");
+    D(BEQ, "IgF0 AgF0");
+    D(BIT, "Tb89 Ac2C Ib24 Cc3C Jb34");
+    D(BMI, "Ig30 Ag30");
+    D(BNE, "IgD0 AgD0");
+    D(BPL, "Ig10 Ag10");
+    D(BRA, "Ig80 Ag80");
+    D(BRK, "Na00 Tb00");
+    D(BVC, "Ig50 Ag50");
+    D(BVS, "Ig70 Ag70");
+    D(CLC, "Na18");
+    D(CLD, "NaD8");
+    D(CLI, "Na58");
+    D(CLV, "NaB8");
+    D(CMP, "TbC9 AcCD IbC5 LbD2 CcDD DcD9 JbD5 QbC1 RbD1");
+    D(CPX, "TbE0 AcEC IbE4");
+    D(CPY, "TbC0 AcCC IbC4");
+    D(DEC, "Ba3A Na3A AcCE IbC6 CcDE JbD6");
+    D(DEX, "NaCA");
+    D(DEY, "Na88");
+    D(EOR, "Tb49 Ac4D Ib45 Lb52 Cc5D Dc59 Jb55 Qb41 Rb51");
+    D(INC, "Ba1A Na1A AcEE IbE6 CcFE JbF6");
+    D(INX, "NaE8");
+    D(INY, "NaC8");
+    D(JMP, "Ic4C Ac4C Gc6C Hc7C");
+    D(JSR, "Ic20 Ac20");
+    D(LDA, "TbA9 AcAD IbA5 LbB2 CcBD DcB9 JbB5 QbA1 RbB1");
+    D(LDX, "TbA2 AcAE IbA6 DcBE KbB6");
+    D(LDY, "TbA0 AcAC IbA4 CcBC JbB4");
+    D(LSR, "Ba4A Na4A Ac4E Ib46 Cc5E Jb56");
+    D(NOP, "NaEA");
+    D(ORA, "Tb09 Ac0D Ib05 Lb12 Cc1D Dc19 Jb15 Qb01 Rb11");
+    D(PHA, "Na48");
+    D(PHP, "Na08");
+    D(PHX, "NaDA");
+    D(PHY, "Na5A");
+    D(PLA, "Na68");
+    D(PLP, "Na28");
+    D(PLX, "NaFA");
+    D(PLY, "Na7A");
+    D(ROL, "Ba2A Na2A Ac2E Ib26 Cc3E Jb36");
+    D(ROR, "Ba6A Na6A Ac6E Ib66 Cc7E Jb76");
+    D(RTI, "Na40");
+    D(RTS, "Na60");
+    D(SBC, "TbE9 AcED IbE5 LbF2 CcFD DcF9 JbF5 QbE1 RbF1");
+    D(SEC, "Na38");
+    D(SED, "NaF8");
+    D(SEI, "Na78");
+    D(STA, "Ac8D Ib85 Lb92 Cc9D Kc99 Dc99 Jb95 Qb81 Rb91");
+    D(STX, "Ac8E Ib86 Kb96");
+    D(STY, "Ac8C Ib84 Jb94");
+    D(STZ, "Ac9C Ib64 Cc9E Jb74");
+    D(TAX, "NaAA");
+    D(TAY, "NaA8");
+    D(TRB, "Ac1C Ib14");
+    D(TSB, "Ac0C Ib04");
+    D(TSX, "NaBA");
+    D(TXA, "Na8A");
+    D(TXS, "Na9A");
+    D(TYA, "Na98")
   END Enter65C02;
 
   PROCEDURE EnterR65C02;
   BEGIN
-    I(ADC); E(mImm, fByte, 69H); E(mAbs, fWord, 6DH); E(mDP, fByte, 65H); E(mDPIndX, fByte, 61H);
-      E(mDPIndY, fByte, 71H); E(mDPX, fByte, 75H); E(mAbsX, fWord, 7DH); E(mAbsY, fWord, 79H);
-      E(mDPInd, fByte, 72H);
-    I(AND); E(mImm, fByte, 29H); E(mAbs, fWord, 2DH); E(mDP, fByte, 25H); E(mDPIndX, fByte, 21H);
-      E(mDPIndY, fByte, 31H); E(mDPX, fByte, 35H); E(mAbsX, fWord, 3DH); E(mAbsY, fWord, 39H);
-      E(mDPInd, fByte, 32H);
-    I(ASL); E(mAbs, fWord, 0EH); E(mDP, fByte, 06H); E(mImpl, fImpl, 0AH); E(mAcc, fImpl, 0AH);
-      E(mDPX, fByte, 16H); E(mAbsX, fWord, 1EH);
-    I(BBR); E(mTriple, fBitZR, 0FH);
-    I(BBS); E(mTriple, fBitZR, 8FH);
-    I(BCC); E(mDP, fRel, 90H); E(mAbs, fRel, 90H);
-    I(BCS); E(mDP, fRel, 0B0H); E(mAbs, fRel, 0B0H);
-    I(BEQ); E(mDP, fRel, 0F0H); E(mAbs, fRel, 0F0H);
-    I(BIT); E(mImm, fByte, 89H); E(mDP, fByte, 24H); E(mAbs, fWord, 2CH);
-    I(BMI); E(mDP, fRel, 30H); E(mAbs, fRel, 30H);
-    I(BNE); E(mDP, fRel, 0D0H); E(mAbs, fRel, 0D0H);
-    I(BPL); E(mDP, fRel, 10H); E(mAbs, fRel, 10H);
-    I(BRA); E(mDP, fRel, 80H); E(mAbs, fRel, 80H);
-    I(BRK); E(mImpl, fImpl, 00H); E(mImm, fByte, 00H);
-    I(BVC); E(mDP, fRel, 50H); E(mAbs, fRel, 50H);
-    I(BVS); E(mDP, fRel, 70H); E(mAbs, fRel, 70H);
-    I(CLC); E(mImpl, fImpl, 18H);
-    I(CLD); E(mImpl, fImpl, 0D8H);
-    I(CLI); E(mImpl, fImpl, 58H);
-    I(CLV); E(mImpl, fImpl, 0B8H);
-    I(CMP); E(mImm, fByte, 0C9H); E(mAbs, fWord, 0CDH); E(mDP, fByte, 0C5H);
-      E(mDPIndX, fByte, 0C1H); E(mDPIndY, fByte, 0D1H); E(mDPX, fByte, 0D5H); E(mAbsX, fWord, 0DDH);
-      E(mAbsY, fWord, 0D9H); E(mAbsInd, fByte, 0D2H);
-    I(CPX); E(mImm, fByte, 0E0H); E(mAbs, fWord, 0ECH); E(mDP, fByte, 0E4H);
-    I(CPY); E(mImm, fByte, 0C0H); E(mAbs, fWord, 0CCH); E(mDP, fByte, 0C4H);
-    I(DEC); E(mAbs, fWord, 0CEH); E(mDP, fByte, 0C6H); E(mImpl, fImpl, 3AH); E(mAcc, fImpl, 3AH);
-      E(mDPX, fByte, 0D6H); E(mAbsX, fWord, 0DEH);
-    I(DEX); E(mImpl, fImpl, 0CAH);
-    I(DEY); E(mImpl, fImpl, 88H);
-    I(EOR); E(mImm, fByte, 49H); E(mAbs, fWord, 4DH); E(mDP, fByte, 45H); E(mDPInd, fByte, 41H);
-      E(mDPIndY, fByte, 51H); E(mDPX, fByte, 55H); E(mAbsX, fWord, 5DH); E(mAbsY, fWord, 59H);
-    I(INC); E(mAbs, fWord, 0EEH); E(mDP, fByte, 0E6H); E(mImpl, fImpl, 1AH); E(mAcc, fImpl, 1AH);
-      E(mDPX, fByte, 0F6H); E(mAbsX, fWord, 0FEH);
-    I(INX); E(mImpl, fImpl, 0E8H);
-    I(INY); E(mImpl, fImpl, 0C8H);
-    I(JMP); E(mDP, fWord, 4CH); E(mAbs, fWord, 4CH); E(mAbsInd, fWord, 6CH);
-      E(mAbsIndX, fWord, 7CH);
-    I(JSR); E(mDP, fWord, 20H); E(mAbs, fWord, 20H);
-    I(LDA); E(mImm, fByte, 0A9H); E(mAbs, fWord, 0ADH); E(mDP, fByte, 0A5H);
-      E(mDPIndX, fByte, 0A1H); E(mDPIndY, fByte, 0B1H); E(mDPX, fByte, 0B5H); E(mAbsX, fWord, 0BDH);
-      E(mAbsY, fWord, 0B9H); E(mDPInd, fByte, 0B2H);
-    I(LDX); E(mImm, fByte, 0A2H); E(mAbs, fWord, 0AEH); E(mDP, fByte, 0A6H); E(mAbsY, fWord, 0BEH);
-      E(mDPY, fByte, 0B6H);
-    I(LDY); E(mImm, fByte, 0A0H); E(mAbs, fWord, 0ACH); E(mDP, fByte, 0A4H); E(mDPX, fByte, 0B4H);
-      E(mAbsX, fWord, 0BCH);
-    I(LSR); E(mAbs, fWord, 4EH); E(mDP, fByte, 46H); E(mImpl, fImpl, 4AH); E(mAcc, fImpl, 4AH);
-      E(mDPX, fByte, 56H); E(mAbsX, fWord, 5EH);
-    I(NOP); E(mImpl, fImpl, 0EAH);
-    I(ORA); E(mImm, fByte, 09H); E(mAbs, fWord, 0DH); E(mDP, fByte, 05H); E(mDPInd, fByte, 01H);
-      E(mDPIndX, fByte, 11H); E(mDPX, fByte, 15H); E(mAbsX, fWord, 1DH); E(mAbsY, fWord, 19H);
-      E(mAbsInd, fWord, 12H);
-    I(PHA); E(mImpl, fImpl, 48H);
-    I(PHP); E(mImpl, fImpl, 08H);
-    I(PHX); E(mImpl, fImpl, 0DAH);
-    I(PHY); E(mImpl, fImpl, 5AH);
-    I(PLA); E(mImpl, fImpl, 68H);
-    I(PLP); E(mImpl, fImpl, 28H);
-    I(PLX); E(mImpl, fImpl, 0FAH);
-    I(PLY); E(mImpl, fImpl, 7AH);
-    I(RMB); E(mPair, fBitZ, 07H);
-    I(ROL); E(mAbs, fWord, 2EH); E(mDP, fByte, 26H); E(mImpl, fImpl, 2AH); E(mAcc, fImpl, 2AH);
-      E(mDPX, fByte, 36H); E(mAbsX, fWord, 3EH);
-    I(ROR); E(mAbs, fWord, 6EH); E(mDP, fByte, 66H); E(mImpl, fImpl, 6AH); E(mAcc, fImpl, 6AH);
-      E(mDPX, fByte, 76H); E(mAbsX, fWord, 7EH);
-    I(RTI); E(mImpl, fImpl, 40H);
-    I(RTS); E(mImpl, fImpl, 60H);
-    I(SBC); E(mImm, fByte, 0E9H); E(mAbs, fWord, 0EDH); E(mDP, fByte, 0E5H); E(mDPInd, fByte, 0E1H);
-      E(mDPIndX, fByte, 0F1H); E(mDPX, fByte, 0F5H); E(mAbsX, fWord, 0FDH); E(mAbsY, fWord, 0F9H);
-      E(mAbsInd, fWord, 0F2H);
-    I(SEC); E(mImpl, fImpl, 38H);
-    I(SED); E(mImpl, fImpl, 0F8H);
-    I(SEI); E(mImpl, fImpl, 78H);
-    I(SMB); E(mPair, fBitZ, 87H);
-    I(STA); E(mAbs, fWord, 8DH); E(mDP, fByte, 85H); E(mDPIndX, fByte, 81H); E(mDPIndY, fByte, 91H);
-      E(mDPX, fByte, 95H); E(mAbsX, fWord, 9DH); E(mDPY, fWord, 99H); E(mAbsY, fWord, 99H);
-      E(mAbsInd, fWord, 92H);
-    I(STX); E(mAbs, fWord, 8EH); E(mDP, fByte, 86H); E(mDPY, fByte, 96H);
-    I(STY); E(mAbs, fWord, 8CH); E(mDP, fByte, 84H); E(mDPX, fByte, 94H);
-    I(STZ); E(mAbs, fWord, 9CH); E(mDP, fByte, 64H); E(mDPX, fByte, 74H); E(mAbsX, fWord, 9EH);
-    I(TAX); E(mImpl, fImpl, 0AAH);
-    I(TAY); E(mImpl, fImpl, 0A8H);
-    I(TSX); E(mImpl, fImpl, 0BAH);
-    I(TXA); E(mImpl, fImpl, 8AH);
-    I(TXS); E(mImpl, fImpl, 9AH);
-    I(TYA); E(mImpl, fImpl, 98H)
+    D(ADC, "Tb69 Ac6D Ib65 Qb61 Rb71 Jb75 Cc7D Dc79 Lb72");
+    D(AND, "Tb29 Ac2D Ib25 Qb21 Rb31 Jb35 Cc3D Dc39 Lb32");
+    D(ASL, "Ac0E Ib06 Na0A Ba0A Jb16 Cc1E");
+    D(BBR, "Wp0F");
+    D(BBS, "Wp8F");
+    D(BCC, "Ig90 Ag90");
+    D(BCS, "IgB0 AgB0");
+    D(BEQ, "IgF0 AgF0");
+    D(BIT, "Tb89 Ib24 Ac2C");
+    D(BMI, "Ig30 Ag30");
+    D(BNE, "IgD0 AgD0");
+    D(BPL, "Ig10 Ag10");
+    D(BRA, "Ig80 Ag80");
+    D(BRK, "Na00 Tb00");
+    D(BVC, "Ig50 Ag50");
+    D(BVS, "Ig70 Ag70");
+    D(CLC, "Na18");
+    D(CLD, "NaD8");
+    D(CLI, "Na58");
+    D(CLV, "NaB8");
+    D(CMP, "TbC9 AcCD IbC5 QbC1 RbD1 JbD5 CcDD DcD9 GbD2");
+    D(CPX, "TbE0 AcEC IbE4");
+    D(CPY, "TbC0 AcCC IbC4");
+    D(DEC, "AcCE IbC6 Na3A Ba3A JbD6 CcDE");
+    D(DEX, "NaCA");
+    D(DEY, "Na88");
+    D(EOR, "Tb49 Ac4D Ib45 Lb41 Rb51 Jb55 Cc5D Dc59");
+    D(INC, "AcEE IbE6 Na1A Ba1A JbF6 CcFE");
+    D(INX, "NaE8");
+    D(INY, "NaC8");
+    D(JMP, "Ic4C Ac4C Gc6C Hc7C");
+    D(JSR, "Ic20 Ac20");
+    D(LDA, "TbA9 AcAD IbA5 QbA1 RbB1 JbB5 CcBD DcB9 LbB2");
+    D(LDX, "TbA2 AcAE IbA6 DcBE KbB6");
+    D(LDY, "TbA0 AcAC IbA4 JbB4 CcBC");
+    D(LSR, "Ac4E Ib46 Na4A Ba4A Jb56 Cc5E");
+    D(NOP, "NaEA");
+    D(ORA, "Tb09 Ac0D Ib05 Lb01 Qb11 Jb15 Cc1D Dc19 Gc12");
+    D(PHA, "Na48");
+    D(PHP, "Na08");
+    D(PHX, "NaDA");
+    D(PHY, "Na5A");
+    D(PLA, "Na68");
+    D(PLP, "Na28");
+    D(PLX, "NaFA");
+    D(PLY, "Na7A");
+    D(RMB, "Pn07");
+    D(ROL, "Ac2E Ib26 Na2A Ba2A Jb36 Cc3E");
+    D(ROR, "Ac6E Ib66 Na6A Ba6A Jb76 Cc7E");
+    D(RTI, "Na40");
+    D(RTS, "Na60");
+    D(SBC, "TbE9 AcED IbE5 LbE1 QbF1 JbF5 CcFD DcF9 GcF2");
+    D(SEC, "Na38");
+    D(SED, "NaF8");
+    D(SEI, "Na78");
+    D(SMB, "Pn87");
+    D(STA, "Ac8D Ib85 Qb81 Rb91 Jb95 Cc9D Kc99 Dc99 Gc92");
+    D(STX, "Ac8E Ib86 Kb96");
+    D(STY, "Ac8C Ib84 Jb94");
+    D(STZ, "Ac9C Ib64 Jb74 Cc9E");
+    D(TAX, "NaAA");
+    D(TAY, "NaA8");
+    D(TSX, "NaBA");
+    D(TXA, "Na8A");
+    D(TXS, "Na9A");
+    D(TYA, "Na98")
   END EnterR65C02;
 
   PROCEDURE Enter65C816;
   BEGIN
-    I(ADC); E(mImm, fImmA, 69H); E(mAbs, fWord, 6DH); E(mAbsL, fLong, 6FH); E(mDP, fByte, 65H);
-      E(mDPInd, fByte, 72H); E(mDPIndL, fByte, 67H); E(mAbsX, fWord, 7DH); E(mAbsLX, fLong, 7FH);
-      E(mAbsY, fWord, 79H); E(mDPX, fByte, 75H); E(mDPIndX, fByte, 61H); E(mDPIndY, fByte, 71H);
-      E(mDPIndLY, fByte, 77H); E(mSR, fByte, 63H); E(mSRIY, fByte, 73H);
-    I(AND); E(mImm, fImmA, 29H); E(mAbs, fWord, 2DH); E(mAbsL, fLong, 2FH); E(mDP, fByte, 25H);
-      E(mDPInd, fByte, 32H); E(mDPIndL, fByte, 27H); E(mAbsX, fWord, 3DH); E(mAbsLX, fLong, 3FH);
-      E(mAbsY, fWord, 39H); E(mDPX, fByte, 35H); E(mDPIndX, fByte, 21H); E(mDPIndY, fByte, 31H);
-      E(mDPIndLY, fByte, 37H); E(mSR, fByte, 23H); E(mSRIY, fByte, 33H);
-    I(ASL); E(mImpl, fImpl, 0AH); E(mAcc, fImpl, 0AH); E(mAbs, fWord, 0EH); E(mDP, fByte, 06H);
-      E(mAbsX, fWord, 1EH); E(mDPX, fByte, 16H);
-    I(BCC); E(mDP, fRel, 90H); E(mAbs, fRel, 90H);
-    I(BCS); E(mDP, fRel, 0B0H); E(mAbs, fRel, 0B0H);
-    I(BEQ); E(mDP, fRel, 0F0H); E(mAbs, fRel, 0F0H);
-    I(BIT); E(mImm, fImmA, 89H); E(mAbs, fWord, 2CH); E(mDP, fByte, 24H); E(mAbsX, fWord, 3CH);
-      E(mDPX, fByte, 34H);
-    I(BMI); E(mDP, fRel, 30H); E(mAbs, fRel, 30H);
-    I(BNE); E(mDP, fRel, 0D0H); E(mAbs, fRel, 0D0H);
-    I(BPL); E(mDP, fRel, 10H); E(mAbs, fRel, 10H);
-    I(BRA); E(mDP, fBra, 80H); E(mAbs, fBra, 80H);
-    I(BRK); E(mImpl, fImpl, 00H); E(mImm, fByte, 00H);
-    I(BRL); E(mDP, fBrl, 82H); E(mAbs, fBrl, 82H);
-    I(BVC); E(mDP, fRel, 50H); E(mAbs, fRel, 50H);
-    I(BVS); E(mDP, fRel, 70H); E(mAbs, fRel, 70H);
-    I(CLC); E(mImpl, fImpl, 18H);
-    I(CLD); E(mImpl, fImpl, 0D8H);
-    I(CLI); E(mImpl, fImpl, 58H);
-    I(CLV); E(mImpl, fImpl, 0B8H);
-    I(CMP); E(mImm, fImmA, 0C9H); E(mAbs, fWord, 0CDH); E(mAbsL, fLong, 0CFH); E(mDP, fByte, 0C5H);
-      E(mDPInd, fByte, 0D2H); E(mDPIndL, fByte, 0C7H); E(mAbsX, fWord, 0DDH);
-      E(mAbsLX, fLong, 0DFH); E(mAbsY, fWord, 0D9H); E(mDPX, fByte, 0D5H); E(mDPIndX, fByte, 0C1H);
-      E(mDPIndY, fByte, 0D1H); E(mDPIndLY, fByte, 0D7H); E(mSR, fByte, 0C3H); E(mSRIY, fByte, 0D3H);
-    I(COP); E(mImm, fByte, 02H);
-    I(CPX); E(mImm, fImmX, 0E0H); E(mAbs, fWord, 0ECH); E(mDP, fByte, 0E4H);
-    I(CPY); E(mImm, fImmX, 0C0H); E(mAbs, fWord, 0CCH); E(mDP, fByte, 0C4H);
-    I(DEC); E(mAcc, fImpl, 3AH); E(mImpl, fImpl, 3AH); E(mAbs, fWord, 0CEH); E(mDP, fByte, 0C6H);
-      E(mAbsX, fWord, 0DEH); E(mDPX, fByte, 0D6H);
-    I(DEX); E(mImpl, fImpl, 0CAH);
-    I(DEY); E(mImpl, fImpl, 88H);
-    I(EOR); E(mImm, fImmA, 49H); E(mAbs, fWord, 4DH); E(mAbsL, fLong, 4FH); E(mDP, fByte, 45H);
-      E(mDPInd, fByte, 52H); E(mDPIndL, fByte, 47H); E(mAbsX, fWord, 5DH); E(mAbsLX, fLong, 5FH);
-      E(mAbsY, fWord, 59H); E(mDPX, fByte, 55H); E(mDPIndX, fByte, 41H); E(mDPIndY, fByte, 51H);
-      E(mDPIndLY, fByte, 57H); E(mSR, fByte, 43H); E(mSRIY, fByte, 53H);
-    I(INC); E(mAcc, fImpl, 1AH); E(mImpl, fImpl, 1AH); E(mAbs, fWord, 0EEH); E(mDP, fByte, 0E6H);
-      E(mAbsX, fWord, 0FEH); E(mDPX, fByte, 0F6H);
-    I(INX); E(mImpl, fImpl, 0E8H);
-    I(INY); E(mImpl, fImpl, 0C8H);
-    I(JML); E(mDP, fLong, 5CH); E(mAbs, fLong, 5CH); E(mAbsL, fLong, 5CH); E(mAbsInd, fWord, 0DCH);
-      E(mAbsIndL, fWord, 0DCH);
-    I(JMP); E(mDP, fWord, 4CH); E(mAbs, fWord, 4CH); E(mAbsInd, fWord, 6CH);
-      E(mAbsIndX, fWord, 7CH); E(mAbsL, fLong, 5CH); E(mAbsIndL, fWord, 0DCH);
-    I(JSL); E(mDP, fLongR, 22H); E(mAbs, fLongR, 22H); E(mAbsL, fLongR, 22H);
-    I(JSR); E(mDP, fWordR, 20H); E(mAbs, fWordR, 20H); E(mAbsIndX, fWord, 0FCH);
-      E(mAbsL, fLongR, 22H);
-    I(LDA); E(mImm, fImmA, 0A9H); E(mAbs, fWord, 0ADH); E(mAbsL, fLong, 0AFH); E(mDP, fByte, 0A5H);
-      E(mDPInd, fByte, 0B2H); E(mDPIndL, fByte, 0A7H); E(mAbsX, fWord, 0BDH);
-      E(mAbsLX, fLong, 0BFH); E(mAbsY, fWord, 0B9H); E(mDPX, fByte, 0B5H); E(mDPIndX, fByte, 0A1H);
-      E(mDPIndY, fByte, 0B1H); E(mDPIndLY, fByte, 0B7H); E(mSR, fByte, 0A3H); E(mSRIY, fByte, 0B3H);
-    I(LDX); E(mImm, fImmX, 0A2H); E(mAbs, fWord, 0AEH); E(mDP, fByte, 0A6H); E(mAbsY, fWord, 0BEH);
-      E(mDPY, fByte, 0B6H);
-    I(LDY); E(mImm, fImmX, 0A0H); E(mAbs, fWord, 0ACH); E(mDP, fByte, 0A4H); E(mAbsX, fWord, 0BCH);
-      E(mDPX, fByte, 0B4H);
-    I(LSR); E(mAcc, fImpl, 4AH); E(mImpl, fImpl, 4AH); E(mAbs, fWord, 4EH); E(mDP, fByte, 46H);
-      E(mAbsX, fWord, 5EH); E(mDPX, fByte, 56H);
-    I(MVN); E(mPair, fMove, 54H);
-    I(MVP); E(mPair, fMove, 44H);
-    I(NOP); E(mImpl, fImpl, 0EAH);
-    I(ORA); E(mImm, fImmA, 09H); E(mAbs, fWord, 0DH); E(mAbsL, fLong, 0FH); E(mDP, fByte, 05H);
-      E(mDPInd, fByte, 12H); E(mDPIndL, fByte, 07H); E(mAbsX, fWord, 1DH); E(mAbsLX, fLong, 1FH);
-      E(mAbsY, fWord, 19H); E(mDPX, fByte, 15H); E(mDPIndX, fByte, 01H); E(mDPIndY, fByte, 11H);
-      E(mDPIndLY, fByte, 17H); E(mSR, fByte, 03H); E(mSRIY, fByte, 13H);
-    I(PEA); E(mImm, fWord, 0F4H); E(mAbs, fWord, 0F4H);
-    I(PEI); E(mDPInd, fByte, 0D4H);
-    I(PER); E(mImm, fRelL, 62H); E(mDP, fRelL, 62H); E(mAbs, fRelL, 62H);
-    I(PHA); E(mImpl, fImpl, 48H);
-    I(PHB); E(mImpl, fImpl, 8BH);
-    I(PHD); E(mImpl, fImpl, 0BH);
-    I(PHK); E(mImpl, fImpl, 4BH);
-    I(PHP); E(mImpl, fImpl, 08H);
-    I(PHX); E(mImpl, fImpl, 0DAH);
-    I(PHY); E(mImpl, fImpl, 5AH);
-    I(PLA); E(mImpl, fImpl, 68H);
-    I(PLB); E(mImpl, fImpl, 0ABH);
-    I(PLD); E(mImpl, fImpl, 2BH);
-    I(PLP); E(mImpl, fImpl, 28H);
-    I(PLX); E(mImpl, fImpl, 0FAH);
-    I(PLY); E(mImpl, fImpl, 7AH);
-    I(REP); E(mImm, fByte, 0C2H);
-    I(ROL); E(mAcc, fImpl, 2AH); E(mImpl, fImpl, 2AH); E(mAbs, fWord, 2EH); E(mDP, fByte, 26H);
-      E(mAbsX, fWord, 3EH); E(mDPX, fByte, 36H);
-    I(ROR); E(mAcc, fImpl, 6AH); E(mImpl, fImpl, 6AH); E(mAbs, fWord, 6EH); E(mDP, fByte, 66H);
-      E(mAbsX, fWord, 7EH); E(mDPX, fByte, 76H);
-    I(RTI); E(mImpl, fImpl, 40H);
-    I(RTL); E(mImpl, fImpl, 6BH);
-    I(RTS); E(mImpl, fImpl, 60H);
-    I(SBC); E(mImm, fImmA, 0E9H); E(mAbs, fWord, 0EDH); E(mAbsL, fLong, 0EFH); E(mDP, fByte, 0E5H);
-      E(mDPInd, fByte, 0F2H); E(mDPIndL, fByte, 0E7H); E(mAbsX, fWord, 0FDH);
-      E(mAbsLX, fLong, 0FFH); E(mAbsY, fWord, 0F9H); E(mDPX, fByte, 0F5H); E(mDPIndX, fByte, 0E1H);
-      E(mDPIndY, fByte, 0F1H); E(mDPIndLY, fByte, 0F7H); E(mSR, fByte, 0E3H); E(mSRIY, fByte, 0F3H);
-    I(SEC); E(mImpl, fImpl, 38H);
-    I(SED); E(mImpl, fImpl, 0F8H);
-    I(SEI); E(mImpl, fImpl, 78H);
-    I(SEP); E(mImm, fByte, 0E2H);
-    I(STA); E(mAbs, fWord, 8DH); E(mAbsL, fLong, 8FH); E(mDP, fByte, 85H); E(mDPInd, fByte, 92H);
-      E(mDPIndL, fByte, 87H); E(mAbsX, fWord, 9DH); E(mAbsLX, fLong, 9FH); E(mDPY, fWord, 99H);
-      E(mAbsY, fWord, 99H); E(mDPX, fByte, 95H); E(mDPIndX, fByte, 81H); E(mDPIndY, fByte, 91H);
-      E(mDPIndLY, fByte, 97H); E(mSR, fByte, 83H); E(mSRIY, fByte, 93H);
-    I(STP); E(mImpl, fImpl, 0DBH);
-    I(STX); E(mAbs, fWord, 8EH); E(mDP, fByte, 86H); E(mDPY, fByte, 96H);
-    I(STY); E(mAbs, fWord, 8CH); E(mDP, fByte, 84H); E(mDPX, fByte, 94H);
-    I(STZ); E(mAbs, fWord, 9CH); E(mDP, fByte, 64H); E(mAbsX, fWord, 9EH); E(mDPX, fByte, 74H);
-    I(SWA); E(mImpl, fImpl, 0EBH);
-    I(TAD); E(mImpl, fImpl, 5BH);
-    I(TAS); E(mImpl, fImpl, 1BH);
-    I(TAX); E(mImpl, fImpl, 0AAH);
-    I(TAY); E(mImpl, fImpl, 0A8H);
-    I(TCD); E(mImpl, fImpl, 5BH);
-    I(TCS); E(mImpl, fImpl, 1BH);
-    I(TDA); E(mImpl, fImpl, 7BH);
-    I(TDC); E(mImpl, fImpl, 7BH);
-    I(TRB); E(mAbs, fWord, 1CH); E(mDP, fByte, 14H);
-    I(TSA); E(mImpl, fImpl, 3BH);
-    I(TSB); E(mAbs, fWord, 0CH); E(mDP, fByte, 04H);
-    I(TSC); E(mImpl, fImpl, 3BH);
-    I(TSX); E(mImpl, fImpl, 0BAH);
-    I(TXA); E(mImpl, fImpl, 8AH);
-    I(TXS); E(mImpl, fImpl, 9AH);
-    I(TXY); E(mImpl, fImpl, 9BH);
-    I(TYA); E(mImpl, fImpl, 98H);
-    I(TYX); E(mImpl, fImpl, 0BBH);
-    I(WAI); E(mImpl, fImpl, 0CBH);
-    I(WDM); E(mImm, fByte, 42H);
-    I(XBA); E(mImpl, fImpl, 0EBH);
-    I(XCE); E(mImpl, fImpl, 0FBH)
+    D(ADC, "Te69 Ac6D Ed6F Ib65 Lb72 Mb67 Cc7D Fd7F Dc79 Jb75 Qb61 Rb71 Sb77 Ub63 Vb73");
+    D(AND, "Te29 Ac2D Ed2F Ib25 Lb32 Mb27 Cc3D Fd3F Dc39 Jb35 Qb21 Rb31 Sb37 Ub23 Vb33");
+    D(ASL, "Na0A Ba0A Ac0E Ib06 Cc1E Jb16");
+    D(BCC, "Ig90 Ag90");
+    D(BCS, "IgB0 AgB0");
+    D(BEQ, "IgF0 AgF0");
+    D(BIT, "Te89 Ac2C Ib24 Cc3C Jb34");
+    D(BMI, "Ig30 Ag30");
+    D(BNE, "IgD0 AgD0");
+    D(BPL, "Ig10 Ag10");
+    D(BRA, "Ii80 Ai80");
+    D(BRK, "Na00 Tb00");
+    D(BRL, "Ij82 Aj82");
+    D(BVC, "Ig50 Ag50");
+    D(BVS, "Ig70 Ag70");
+    D(CLC, "Na18");
+    D(CLD, "NaD8");
+    D(CLI, "Na58");
+    D(CLV, "NaB8");
+    D(CMP, "TeC9 AcCD EdCF IbC5 LbD2 MbC7 CcDD FdDF DcD9 JbD5 QbC1 RbD1 SbD7 UbC3 VbD3");
+    D(COP, "Tb02");
+    D(CPX, "TfE0 AcEC IbE4");
+    D(CPY, "TfC0 AcCC IbC4");
+    D(DEC, "Ba3A Na3A AcCE IbC6 CcDE JbD6");
+    D(DEX, "NaCA");
+    D(DEY, "Na88");
+    D(EOR, "Te49 Ac4D Ed4F Ib45 Lb52 Mb47 Cc5D Fd5F Dc59 Jb55 Qb41 Rb51 Sb57 Ub43 Vb53");
+    D(INC, "Ba1A Na1A AcEE IbE6 CcFE JbF6");
+    D(INX, "NaE8");
+    D(INY, "NaC8");
+    D(JML, "Id5C Ad5C Ed5C GcDC OcDC");
+    D(JMP, "Ic4C Ac4C Gc6C Hc7C Ed5C OcDC");
+    D(JSL, "Il22 Al22 El22");
+    D(JSR, "Ik20 Ak20 HcFC El22");
+    D(LDA, "TeA9 AcAD EdAF IbA5 LbB2 MbA7 CcBD FdBF DcB9 JbB5 QbA1 RbB1 SbB7 UbA3 VbB3");
+    D(LDX, "TfA2 AcAE IbA6 DcBE KbB6");
+    D(LDY, "TfA0 AcAC IbA4 CcBC JbB4");
+    D(LSR, "Ba4A Na4A Ac4E Ib46 Cc5E Jb56");
+    D(MVN, "Pm54");
+    D(MVP, "Pm44");
+    D(NOP, "NaEA");
+    D(ORA, "Te09 Ac0D Ed0F Ib05 Lb12 Mb07 Cc1D Fd1F Dc19 Jb15 Qb01 Rb11 Sb17 Ub03 Vb13");
+    D(PEA, "TcF4 AcF4");
+    D(PEI, "LbD4");
+    D(PER, "Th62 Ih62 Ah62");
+    D(PHA, "Na48");
+    D(PHB, "Na8B");
+    D(PHD, "Na0B");
+    D(PHK, "Na4B");
+    D(PHP, "Na08");
+    D(PHX, "NaDA");
+    D(PHY, "Na5A");
+    D(PLA, "Na68");
+    D(PLB, "NaAB");
+    D(PLD, "Na2B");
+    D(PLP, "Na28");
+    D(PLX, "NaFA");
+    D(PLY, "Na7A");
+    D(REP, "TbC2");
+    D(ROL, "Ba2A Na2A Ac2E Ib26 Cc3E Jb36");
+    D(ROR, "Ba6A Na6A Ac6E Ib66 Cc7E Jb76");
+    D(RTI, "Na40");
+    D(RTL, "Na6B");
+    D(RTS, "Na60");
+    D(SBC, "TeE9 AcED EdEF IbE5 LbF2 MbE7 CcFD FdFF DcF9 JbF5 QbE1 RbF1 SbF7 UbE3 VbF3");
+    D(SEC, "Na38");
+    D(SED, "NaF8");
+    D(SEI, "Na78");
+    D(SEP, "TbE2");
+    D(STA, "Ac8D Ed8F Ib85 Lb92 Mb87 Cc9D Fd9F Kc99 Dc99 Jb95 Qb81 Rb91 Sb97 Ub83 Vb93");
+    D(STP, "NaDB");
+    D(STX, "Ac8E Ib86 Kb96");
+    D(STY, "Ac8C Ib84 Jb94");
+    D(STZ, "Ac9C Ib64 Cc9E Jb74");
+    D(SWA, "NaEB");
+    D(TAD, "Na5B");
+    D(TAS, "Na1B");
+    D(TAX, "NaAA");
+    D(TAY, "NaA8");
+    D(TCD, "Na5B");
+    D(TCS, "Na1B");
+    D(TDA, "Na7B");
+    D(TDC, "Na7B");
+    D(TRB, "Ac1C Ib14");
+    D(TSA, "Na3B");
+    D(TSB, "Ac0C Ib04");
+    D(TSC, "Na3B");
+    D(TSX, "NaBA");
+    D(TXA, "Na8A");
+    D(TXS, "Na9A");
+    D(TXY, "Na9B");
+    D(TYA, "Na98");
+    D(TYX, "NaBB");
+    D(WAI, "NaCB");
+    D(WDM, "Tb42");
+    D(XBA, "NaEB");
+    D(XCE, "NaFB")
   END Enter65C816;
 
   PROCEDURE EnterC19;
   BEGIN
-    I(ADC); E(mImm, fByte, 69H); E(mDP, fByte, 65H); E(mDPX, fByte, 75H); E(mAbs, fWord, 6DH);
-      E(mAbsX, fWord, 7DH); E(mAbsY, fWord, 79H); E(mDPInd, fByte, 61H); E(mDPIndX, fByte, 71H);
-    I(ADD); E(mImm, fByte, 89H); E(mDP, fByte, 64H); E(mDPX, fByte, 74H);
-    I(AND); E(mImm, fByte, 29H); E(mDP, fByte, 25H); E(mDPX, fByte, 35H); E(mAbs, fWord, 2DH);
-      E(mAbsX, fWord, 3DH); E(mAbsY, fWord, 39H); E(mDPInd, fByte, 21H); E(mDPIndX, fByte, 31H);
-    I(ASL); E(mAcc, fImpl, 0AH); E(mImpl, fImpl, 0AH); E(mDP, fByte, 06H); E(mDPX, fByte, 16H);
-      E(mAbs, fWord, 0EH); E(mAbsX, fWord, 1EH);
-    I(ASR); E(mImpl, fImpl, 3AH); E(mAcc, fImpl, 3AH);
-    I(BAR); E(mTriple, fBitAR, 0E2H);
-    I(BAS); E(mTriple, fBitAR, 0F2H);
-    I(BBR); E(mTriple, fBitZR, 0FH);
-    I(BBS); E(mTriple, fBitZR, 8FH);
-    I(BCC); E(mDP, fRel, 90H); E(mAbs, fRel, 90H);
-    I(BCS); E(mDP, fRel, 0B0H); E(mAbs, fRel, 0B0H);
-    I(BEQ); E(mAbs, fRel, 0F0H); E(mDP, fRel, 0F0H);
-    I(BIT); E(mDP, fByte, 24H); E(mAbs, fWord, 2CH);
-    I(BMI); E(mDP, fRel, 30H); E(mAbs, fRel, 30H);
-    I(BNE); E(mDP, fRel, 0D0H); E(mAbs, fRel, 0D0H);
-    I(BPL); E(mDP, fRel, 10H); E(mAbs, fRel, 10H);
-    I(BRA); E(mDP, fRel, 80H); E(mAbs, fRel, 80H);
-    I(BRK); E(mImpl, fImpl, 00H); E(mImm, fByte, 00H);
-    I(BVC); E(mDP, fRel, 50H); E(mAbs, fRel, 50H);
-    I(BVS); E(mDP, fRel, 70H); E(mAbs, fRel, 70H);
-    I(CLC); E(mImpl, fImpl, 18H);
-    I(CLD); E(mImpl, fImpl, 0D8H);
-    I(CLI); E(mImpl, fImpl, 58H);
-    I(CLV); E(mImpl, fImpl, 0B8H);
-    I(CLW); E(mImpl, fImpl, 52H);
-    I(CMP); E(mImm, fByte, 0C9H); E(mDP, fByte, 0C5H); E(mDPX, fByte, 0D5H); E(mAbs, fWord, 0CDH);
-      E(mAbsX, fWord, 0DDH); E(mAbsY, fWord, 0D9H); E(mDPInd, fByte, 0C1H); E(mDPIndX, fByte, 0D1H);
-    I(CPX); E(mImm, fByte, 0E0H); E(mDP, fByte, 0E4H); E(mAbs, fWord, 0ECH);
-    I(CPY); E(mImm, fByte, 0C0H); E(mDP, fByte, 0C4H); E(mAbs, fWord, 0CCH);
-    I(DEC); E(mDP, fByte, 0C6H); E(mDPX, fByte, 0D6H); E(mAbs, fWord, 0CEH); E(mAbsX, fWord, 0DEH);
-    I(DEX); E(mImpl, fImpl, 0CAH);
-    I(DEY); E(mImpl, fImpl, 88H);
-    I(EOR); E(mImm, fByte, 49H); E(mDP, fByte, 45H); E(mDPX, fByte, 55H); E(mAbs, fWord, 4DH);
-      E(mAbsX, fWord, 5DH); E(mAbsY, fWord, 59H); E(mDPInd, fByte, 41H); E(mDPIndX, fByte, 51H);
-    I(EXC); E(mDPX, fByte, 0D4H);
-    I(INC); E(mDP, fByte, 0E6H); E(mDPX, fByte, 0F6H); E(mAbs, fWord, 0EEH); E(mAbsX, fWord, 0FEH);
-    I(INI); E(mImpl, fImpl, 0BBH);
-    I(INX); E(mImpl, fImpl, 0E8H);
-    I(INY); E(mImpl, fImpl, 0C8H);
-    I(JMP); E(mDP, fWord, 4CH); E(mAbs, fWord, 4CH); E(mAbsInd, fWord, 6CH);
-      E(mAbsIndX, fWord, 7CH);
-    I(JPI); E(mAbsInd, fWord, 0CH);
-    I(JSB); E(mImm, fJsb, 0BH); E(mDP, fJsb, 0BH);
-    I(JSR); E(mDP, fWord, 20H); E(mAbs, fWord, 20H);
-    I(LAB); E(mImpl, fImpl, 13H); E(mAcc, fImpl, 13H);
-    I(LAI); E(mImpl, fImpl, 0EBH);
-    I(LAN); E(mImpl, fImpl, 0ABH);
-    I(LDA); E(mImm, fByte, 0A9H); E(mDP, fByte, 0A5H); E(mDPX, fByte, 0B5H); E(mAbs, fWord, 0ADH);
-      E(mAbsX, fWord, 0BDH); E(mAbsY, fWord, 0B9H); E(mDPInd, fByte, 0A1H); E(mDPIndX, fByte, 0B1H);
-    I(LDX); E(mImm, fByte, 0A2H); E(mDP, fByte, 0A6H); E(mDPY, fByte, 0B6H); E(mAbs, fWord, 0AEH);
-      E(mAbsY, fWord, 0BEH);
-    I(LDY); E(mImm, fByte, 0A0H); E(mDP, fByte, 0A4H); E(mDPX, fByte, 0B4H); E(mAbs, fWord, 0ACH);
-      E(mAbsX, fWord, 0BCH);
-    I(LII); E(mImpl, fImpl, 9BH);
-    I(LSR); E(mImpl, fImpl, 4AH); E(mAcc, fImpl, 4AH); E(mDP, fByte, 46H); E(mDPX, fByte, 56H);
-      E(mAbs, fWord, 4EH); E(mAbsX, fWord, 5EH);
-    I(MPA); E(mImpl, fImpl, 12H);
-    I(MPY); E(mImpl, fImpl, 02H);
-    I(NEG); E(mImpl, fImpl, 1AH); E(mAcc, fImpl, 1AH);
-    I(NOP); E(mImpl, fImpl, 0EAH);
-    I(NXT); E(mImpl, fImpl, 8BH);
-    I(ORA); E(mImm, fByte, 09H); E(mDP, fByte, 05H); E(mDPX, fByte, 15H); E(mAbs, fWord, 0DH);
-      E(mAbsX, fWord, 1DH); E(mAbsY, fWord, 19H); E(mDPInd, fByte, 01H); E(mDPIndX, fByte, 11H);
-    I(PHA); E(mImpl, fImpl, 48H);
-    I(PHI); E(mImpl, fImpl, 0CBH);
-    I(PHP); E(mImpl, fImpl, 08H);
-    I(PHW); E(mImpl, fImpl, 23H);
-    I(PHX); E(mImpl, fImpl, 0DAH);
-    I(PHY); E(mImpl, fImpl, 5AH);
-    I(PIA); E(mImpl, fImpl, 0FBH);
-    I(PLA); E(mImpl, fImpl, 68H);
-    I(PLI); E(mImpl, fImpl, 0DBH);
-    I(PLP); E(mImpl, fImpl, 28H);
-    I(PLW); E(mImpl, fImpl, 33H);
-    I(PLX); E(mImpl, fImpl, 0FAH);
-    I(PLY); E(mImpl, fImpl, 7AH);
-    I(PSH); E(mImpl, fImpl, 22H);
-    I(PUL); E(mImpl, fImpl, 32H);
-    I(RBA); E(mPair, fBitA, 0C2H);
-    I(RMB); E(mPair, fBitZ, 07H);
-    I(RND); E(mImpl, fImpl, 42H);
-    I(ROL); E(mImpl, fImpl, 2AH); E(mAcc, fImpl, 2AH); E(mDP, fByte, 26H); E(mDPX, fByte, 36H);
-      E(mAbs, fWord, 2EH); E(mAbsX, fWord, 3EH);
-    I(ROR); E(mImpl, fImpl, 6AH); E(mAcc, fImpl, 6AH); E(mDP, fByte, 66H); E(mDPX, fByte, 76H);
-      E(mAbs, fWord, 6EH); E(mAbsX, fWord, 7EH);
-    I(RTI); E(mImpl, fImpl, 40H);
-    I(RTS); E(mImpl, fImpl, 60H);
-    I(SBA); E(mPair, fBitA, 0D2H);
-    I(SBC); E(mImm, fByte, 0E9H); E(mDP, fByte, 0E5H); E(mDPX, fByte, 0F5H); E(mAbs, fWord, 0EDH);
-      E(mAbsX, fWord, 0FDH); E(mAbsY, fWord, 0F9H); E(mDPInd, fByte, 0E1H); E(mDPIndX, fByte, 0F1H);
-    I(SEC); E(mImpl, fImpl, 38H);
-    I(SED); E(mImpl, fImpl, 0F8H);
-    I(SEI); E(mImpl, fImpl, 78H);
-    I(SMB); E(mPair, fBitZ, 87H);
-    I(STA); E(mDP, fByte, 85H); E(mDPX, fByte, 95H); E(mAbs, fWord, 8DH); E(mAbsX, fWord, 9DH);
-      E(mDPY, fWord, 99H); E(mAbsY, fWord, 99H); E(mDPInd, fByte, 81H); E(mDPIndX, fByte, 91H);
-    I(STI); E(mPair, fImmZ, 0B2H);
-    I(STX); E(mDP, fByte, 86H); E(mDPY, fByte, 96H); E(mAbs, fWord, 8EH);
-    I(STY); E(mDP, fByte, 84H); E(mDPX, fByte, 94H); E(mAbs, fWord, 8CH);
-    I(TAW); E(mImpl, fImpl, 62H);
-    I(TAX); E(mImpl, fImpl, 0AAH);
-    I(TAY); E(mImpl, fImpl, 0A8H);
-    I(TIP); E(mImpl, fImpl, 03H);
-    I(TSX); E(mImpl, fImpl, 0BAH);
-    I(TWA); E(mImpl, fImpl, 72H);
-    I(TXA); E(mImpl, fImpl, 8AH);
-    I(TXS); E(mImpl, fImpl, 9AH);
-    I(TYA); E(mImpl, fImpl, 98H)
+    D(ADC, "Tb69 Ib65 Jb75 Ac6D Cc7D Dc79 Lb61 Qb71");
+    D(ADD, "Tb89 Ib64 Jb74");
+    D(AND, "Tb29 Ib25 Jb35 Ac2D Cc3D Dc39 Lb21 Qb31");
+    D(ASL, "Ba0A Na0A Ib06 Jb16 Ac0E Cc1E");
+    D(ASR, "Na3A Ba3A");
+    D(BAR, "WqE2");
+    D(BAS, "WqF2");
+    D(BBR, "Wp0F");
+    D(BBS, "Wp8F");
+    D(BCC, "Ig90 Ag90");
+    D(BCS, "IgB0 AgB0");
+    D(BEQ, "AgF0 IgF0");
+    D(BIT, "Ib24 Ac2C");
+    D(BMI, "Ig30 Ag30");
+    D(BNE, "IgD0 AgD0");
+    D(BPL, "Ig10 Ag10");
+    D(BRA, "Ig80 Ag80");
+    D(BRK, "Na00 Tb00");
+    D(BVC, "Ig50 Ag50");
+    D(BVS, "Ig70 Ag70");
+    D(CLC, "Na18");
+    D(CLD, "NaD8");
+    D(CLI, "Na58");
+    D(CLV, "NaB8");
+    D(CLW, "Na52");
+    D(CMP, "TbC9 IbC5 JbD5 AcCD CcDD DcD9 LbC1 QbD1");
+    D(CPX, "TbE0 IbE4 AcEC");
+    D(CPY, "TbC0 IbC4 AcCC");
+    D(DEC, "IbC6 JbD6 AcCE CcDE");
+    D(DEX, "NaCA");
+    D(DEY, "Na88");
+    D(EOR, "Tb49 Ib45 Jb55 Ac4D Cc5D Dc59 Lb41 Qb51");
+    D(EXC, "JbD4");
+    D(INC, "IbE6 JbF6 AcEE CcFE");
+    D(INI, "NaBB");
+    D(INX, "NaE8");
+    D(INY, "NaC8");
+    D(JMP, "Ic4C Ac4C Gc6C Hc7C");
+    D(JPI, "Gc0C");
+    D(JSB, "Ts0B Is0B");
+    D(JSR, "Ic20 Ac20");
+    D(LAB, "Na13 Ba13");
+    D(LAI, "NaEB");
+    D(LAN, "NaAB");
+    D(LDA, "TbA9 IbA5 JbB5 AcAD CcBD DcB9 LbA1 QbB1");
+    D(LDX, "TbA2 IbA6 KbB6 AcAE DcBE");
+    D(LDY, "TbA0 IbA4 JbB4 AcAC CcBC");
+    D(LII, "Na9B");
+    D(LSR, "Na4A Ba4A Ib46 Jb56 Ac4E Cc5E");
+    D(MPA, "Na12");
+    D(MPY, "Na02");
+    D(NEG, "Na1A Ba1A");
+    D(NOP, "NaEA");
+    D(NXT, "Na8B");
+    D(ORA, "Tb09 Ib05 Jb15 Ac0D Cc1D Dc19 Lb01 Qb11");
+    D(PHA, "Na48");
+    D(PHI, "NaCB");
+    D(PHP, "Na08");
+    D(PHW, "Na23");
+    D(PHX, "NaDA");
+    D(PHY, "Na5A");
+    D(PIA, "NaFB");
+    D(PLA, "Na68");
+    D(PLI, "NaDB");
+    D(PLP, "Na28");
+    D(PLW, "Na33");
+    D(PLX, "NaFA");
+    D(PLY, "Na7A");
+    D(PSH, "Na22");
+    D(PUL, "Na32");
+    D(RBA, "PoC2");
+    D(RMB, "Pn07");
+    D(RND, "Na42");
+    D(ROL, "Na2A Ba2A Ib26 Jb36 Ac2E Cc3E");
+    D(ROR, "Na6A Ba6A Ib66 Jb76 Ac6E Cc7E");
+    D(RTI, "Na40");
+    D(RTS, "Na60");
+    D(SBA, "PoD2");
+    D(SBC, "TbE9 IbE5 JbF5 AcED CcFD DcF9 LbE1 QbF1");
+    D(SEC, "Na38");
+    D(SED, "NaF8");
+    D(SEI, "Na78");
+    D(SMB, "Pn87");
+    D(STA, "Ib85 Jb95 Ac8D Cc9D Kc99 Dc99 Lb81 Qb91");
+    D(STI, "PrB2");
+    D(STX, "Ib86 Kb96 Ac8E");
+    D(STY, "Ib84 Jb94 Ac8C");
+    D(TAW, "Na62");
+    D(TAX, "NaAA");
+    D(TAY, "NaA8");
+    D(TIP, "Na03");
+    D(TSX, "NaBA");
+    D(TWA, "Na72");
+    D(TXA, "Na8A");
+    D(TXS, "Na9A");
+    D(TYA, "Na98")
   END EnterC19;
 
   (* --- queries --- *)
@@ -653,10 +562,15 @@ MODULE ASC; (* CPU definitions for the 65xx assembler.
       ELSIF (c = cR65C02) OR (c = cR6501Q) THEN EnterR65C02
       ELSIF c = cC19 THEN EnterC19
       END;
-      I(nofInstr);
-      ASSERT(~overflow)
+      I(nofInstr)
     END
   END Select;
+
+  (* TRUE if a table had more rows than maxEnt. (Not an ASSERT in Select:
+     the 65C816 compiler's ASSERT traps when the condition holds.) *)
+  PROCEDURE Overflow*(): BOOLEAN;
+  BEGIN RETURN overflow
+  END Overflow;
 
   PROCEDURE Cpu*(): INTEGER;
   BEGIN RETURN cpu

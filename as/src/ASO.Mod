@@ -35,12 +35,14 @@ MODULE ASO; (* Output of the 65xx assembler.
   VAR F: Files.File; R: Files.Rider;
     sum: ARRAY 4 OF LONGINT;   (* of the bytes written, by position in a word *)
     count: LONGINT;            (* bytes written *)
+    phase: INTEGER;            (* count MOD 4, as an index *)
 
   (* --- writing --- *)
 
   PROCEDURE W1(x: LONGINT);
   BEGIN x := x MOD 100H;
-    Files.WriteByte(R, x); sum[count MOD 4] := sum[count MOD 4] + x; INC(count)
+    Files.WriteByte(R, x); sum[phase] := sum[phase] + x;
+    count := count + 1; phase := (phase + 1) MOD 4
   END W1;
 
   PROCEDURE W2(x: LONGINT);
@@ -85,14 +87,14 @@ MODULE ASO; (* Output of the 65xx assembler.
   PROCEDURE WCode(s: ASG.Section; off, n: LONGINT);
     VAR i: LONGINT;
   BEGIN i := 0;
-    WHILE i < n DO W1(ASG.Get(s, off + i)); INC(i) END
+    WHILE i < n DO W1(ASG.Get(s, off + i)); i := i + 1 END
   END WCode;
 
   PROCEDURE Create(name: ARRAY OF CHAR): BOOLEAN;
     VAR i: INTEGER;
   BEGIN F := Files.New(name);
     IF F # NIL THEN Files.Set(R, F, 0) ELSE ASS.Error(NIL, 0, "cannot create ", name) END;
-    count := 0;
+    count := 0; phase := 0;
     FOR i := 0 TO 3 DO sum[i] := 0 END;
     RETURN F # NIL
   END Create;
@@ -394,7 +396,7 @@ MODULE ASO; (* Output of the 65xx assembler.
         WNum(exno); INC(exno);
         obj := obj.link
       END;
-      REPEAT W1(0) UNTIL count MOD 4 = 0;
+      REPEAT W1(0) UNTIL phase = 0;
       (* the key: the sum of the file's words, taken modulo 2^32 *)
       s := 0;
       FOR i := 0 TO 3 DO s := s DIV 100H + sum[i]; key[i] := s MOD 100H END;
@@ -449,7 +451,7 @@ MODULE ASO; (* Output of the 65xx assembler.
       W4(0);   (*no type descriptor fixups*)
       IF ~legacy THEN W4(0) END;   (*no method table fixups*)
       W4(ASG.nofReloc);
-      FOR i := 0 TO ASG.nofReloc - 1 DO W4(ASG.reloc[i]) END;
+      FOR i := 0 TO ASG.nofReloc - 1 DO W4(ASG.Reloc(i)) END;
       W4(entry); W1(ORD("O"));
       Close;
       ASH.Str("  "); ASH.Str(name); ASH.Str("  "); ASH.Int(text.size);

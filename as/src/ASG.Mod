@@ -31,6 +31,7 @@ MODULE ASG; (* Code generator of the 65xx assembler.
     maxSections* = 32;
     maxReloc* = 1023;    (* the loaders accept fewer than 1024 *)
     BlockSize = 1024;
+    RelocBlockSize = 64;
 
   TYPE
     (* Block and Op (in ASI) are exported in name only: the stage-0
@@ -40,6 +41,13 @@ MODULE ASG; (* Code generator of the 65xx assembler.
     BlockDesc* = RECORD
       next: Block;
       d: ARRAY BlockSize OF BYTE
+    END;
+
+    (* relocations are kept in blocks allocated as they are needed *)
+    RelocBlock* = POINTER TO RelocBlockDesc;
+    RelocBlockDesc* = RECORD
+      next: RelocBlock;
+      r: ARRAY RelocBlockSize OF LONGINT
     END;
 
     (* A run of code at consecutive addresses. Setting the location
@@ -72,8 +80,8 @@ MODULE ASG; (* Code generator of the 65xx assembler.
     entry*: LONGINT;             (* start address of the program *)
     defaultCpu*: INTEGER;        (* processor selected when a section begins *)
     machine*: INTEGER;           (* processor the program last selected *)
-    reloc*: ARRAY maxReloc OF LONGINT;   (* offsets in text of relocatable calls *)
-    nofReloc*: INTEGER;
+    nofReloc*: INTEGER;          (* relocatable calls in text; see Reloc *)
+    relocs: RelocBlock;
 
     cur: Section;
     lastSect: Section;
@@ -186,6 +194,8 @@ MODULE ASG; (* Code generator of the 65xx assembler.
 
   (* --- emission --- *)
 
+  (* (LONGINT variables are stepped with := throughout the assembler:
+     INC and DEC of the 65C816 compiler change the low word only.) *)
   PROCEDURE o(b: LONGINT);
     VAR off: LONGINT; blk: Block;
   BEGIN
@@ -198,7 +208,7 @@ MODULE ASG; (* Code generator of the 65xx assembler.
       END;
       cur.last.d[off] := b MOD 100H
     END;
-    INC(cur.size); INC(addr)
+    cur.size := cur.size + 1; addr := addr + 1
   END o;
 
   PROCEDURE Byte*(b: LONGINT);
@@ -215,13 +225,29 @@ MODULE ASG; (* Code generator of the 65xx assembler.
 
   (* Note a call at the location counter for the loader to relocate. *)
   PROCEDURE AddReloc;
+    VAR b: RelocBlock; i: INTEGER;
   BEGIN
     IF cur = text THEN
-      IF nofReloc < maxReloc THEN reloc[nofReloc] := addr - cur.org; INC(nofReloc)
+      IF nofReloc < maxReloc THEN
+        IF relocs = NIL THEN NEW(relocs); relocs.next := NIL END;
+        b := relocs; i := nofReloc;
+        WHILE i >= RelocBlockSize DO
+          IF b.next = NIL THEN NEW(b.next); b.next.next := NIL END;
+          b := b.next; i := i - RelocBlockSize
+        END;
+        b.r[i] := addr - cur.org; INC(nofReloc)
       ELSE relocOverflow := TRUE
       END
     END
   END AddReloc;
+
+  (* The offset in text of relocatable call i. *)
+  PROCEDURE Reloc*(i: INTEGER): LONGINT;
+    VAR b: RelocBlock;
+  BEGIN b := relocs;
+    WHILE i >= RelocBlockSize DO b := b.next; i := i - RelocBlockSize END;
+    RETURN b.r[i]
+  END Reloc;
 
   PROCEDURE RelocOverflow*(): BOOLEAN;
   BEGIN RETURN relocOverflow
@@ -384,5 +410,5 @@ MODULE ASG; (* Code generator of the 65xx assembler.
     cur := text; addr := 0
   END Init;
 
-BEGIN defaultCpu := ASC.c6502; machine := defaultCpu; Init
+BEGIN defaultCpu := ASC.c6502; machine := defaultCpu; relocs := NIL; Init
 END ASG.

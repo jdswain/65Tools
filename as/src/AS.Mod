@@ -18,11 +18,14 @@ MODULE AS; (* The 65xx assembler: command line and control.
 
   IMPORT Env, ASH, ASC, ASS, ASB, ASG, ASL, ASI, ASP, ASO;
 
-  CONST maxFiles = 16; maxDefs = 16;
+  CONST maxFiles = 32; maxDefs = 32;
 
   VAR
-    files: ARRAY maxFiles OF ASH.Path; nofFiles: INTEGER;
-    defs: ARRAY maxDefs OF ASH.Path; nofDefs: INTEGER;
+    (* input files and definitions, as the numbers of their arguments;
+       a definition written "-Dsym" shares its argument with the option *)
+    files: ARRAY maxFiles OF INTEGER; nofFiles: INTEGER;
+    defs: ARRAY maxDefs OF INTEGER; nofDefs: INTEGER;
+    defShared: ARRAY maxDefs OF BOOLEAN;
     outName: ASH.Path;
     verbose, legacy, help, bad: BOOLEAN;
 
@@ -60,7 +63,7 @@ MODULE AS; (* The 65xx assembler: command line and control.
     WHILE i < Env.ArgCount() DO
       Env.Arg(i, arg);
       IF (arg[0] # "-") OR (arg[1] = 0X) THEN
-        IF nofFiles < maxFiles THEN files[nofFiles] := arg; INC(nofFiles)
+        IF nofFiles < maxFiles THEN files[nofFiles] := i; INC(nofFiles)
         ELSE ASH.Str("Too many input files"); ASH.Ln; bad := TRUE
         END
       ELSIF (arg = "-h") OR (arg = "--help") OR (arg = "-?") THEN help := TRUE
@@ -69,8 +72,10 @@ MODULE AS; (* The 65xx assembler: command line and control.
       ELSIF arg[1] = "o" THEN Value(arg, i, outName)
       ELSIF arg[1] = "I" THEN Value(arg, i, val);
         IF val[0] # 0X THEN ASS.AddPath(val) END
-      ELSIF arg[1] = "D" THEN Value(arg, i, val);
-        IF nofDefs < maxDefs THEN defs[nofDefs] := val; INC(nofDefs)
+      ELSIF arg[1] = "D" THEN
+        IF nofDefs < maxDefs THEN
+          defShared[nofDefs] := arg[2] # 0X; Value(arg, i, val);
+          defs[nofDefs] := i; INC(nofDefs)
         ELSE ASH.Str("Too many definitions"); ASH.Ln; bad := TRUE
         END
       ELSE ASH.Str("Unknown option "); ASH.Str(arg); ASH.Ln; bad := TRUE
@@ -80,7 +85,7 @@ MODULE AS; (* The 65xx assembler: command line and control.
   END Arguments;
 
   PROCEDURE Assemble;
-    VAR format, i: INTEGER; listName: ASH.Path;
+    VAR format, i, j: INTEGER; listName, arg: ASH.Path;
   BEGIN
     format := ASO.Format(outName);
     IF outName[0] = 0X THEN ASH.Str("No output file; name one with -o"); ASH.Ln; bad := TRUE
@@ -89,15 +94,24 @@ MODULE AS; (* The 65xx assembler: command line and control.
     ELSE
       ASS.Init; ASB.Init; ASG.Init; ASI.Init; ASP.Init(outName);
       ASG.SetDefaultCpu(ASO.DefaultCpu(format)); ASI.SetVerbose(verbose);
-      FOR i := 0 TO nofDefs - 1 DO ASP.Define(defs[i]) END;
+      FOR i := 0 TO nofDefs - 1 DO
+        Env.Arg(defs[i], arg);
+        IF defShared[i] THEN  (*drop the "-D"*)
+          j := 0;
+          REPEAT arg[j] := arg[j + 2]; INC(j) UNTIL arg[j - 1] = 0X
+        END;
+        ASP.Define(arg)
+      END;
       FOR i := 0 TO nofFiles - 1 DO
-        ASH.Str("Assembling "); ASH.Str(files[i]); ASH.Ln;
-        ASP.Compile(files[i])
+        Env.Arg(files[i], arg);
+        ASH.Str("Assembling "); ASH.Str(arg); ASH.Ln;
+        ASP.Compile(arg)
       END;
       IF ASS.errcnt = 0 THEN
-        ASH.SetExt(files[0], ".lst", listName);
+        Env.Arg(files[0], arg); ASH.SetExt(arg, ".lst", listName);
         ASI.Assemble(listName)
       END;
+      IF ASC.Overflow() THEN ASS.Error(NIL, 0, "internal error: processor table too small", "") END;
       IF ASS.errcnt = 0 THEN ASO.Write(outName, format, legacy) END;
       IF ASS.errcnt # 0 THEN
         ASH.Int(ASS.errcnt);

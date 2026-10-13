@@ -16,7 +16,7 @@ MODULE ASS; (* Scanner of the 65xx assembler.
     KwLen = 12;
     NKW = 184;        (* size of the keyword table *)
     maxDepth = 8;     (* nesting of include files *)
-    maxPaths = 10;    (* include directories *)
+    maxPaths = 6;     (* include directories *)
     maxErrors = 50;   (* messages printed before the rest are only counted *)
     LF = 0AX; CR = 0DX;
 
@@ -151,7 +151,7 @@ MODULE ASS; (* Scanner of the 65xx assembler.
     ELSE
       IF ch = LF THEN INC(cur.line); cur.col := 0 END;
       REPEAT
-        INC(cur.pos);
+        cur.pos := cur.pos + 1;
         IF cur.isFile THEN Files.ReadByte(cur.R, b); eof := cur.R.eof
         ELSE b := ORD(cur.text[cur.pos]); eof := b = 0
         END
@@ -292,7 +292,7 @@ MODULE ASS; (* Scanner of the 65xx assembler.
     VAR x: REAL; e, s, d: INTEGER; negE: BOOLEAN;
   BEGIN ival := 0; x := 0.0; sym := int;
     REPEAT d := ORD(ch) - 30H;
-      ival := ival * 10 + d; x := x * 10.0 + FLT(d); Read
+      ival := ival * 8 + ival * 2 + d; x := x * 10.0 + FLT(d); Read
     UNTIL ~IsDigit(ch);
     IF ch = "." THEN Read;
       IF ~IsDigit(ch) THEN ahead := period  (*not a fraction*)

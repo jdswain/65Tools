@@ -9,6 +9,7 @@ Oberon compiler it is built with.
 
     make            # -> ../bin/as
     make test       # regression tests in test/
+    make test816    # the assembler compiled with oc816, run under em16
     make OC=/path/to/oc/bin/oc
 
 It is compiled by the LLVM Oberon compiler of the `oc` repository
@@ -40,7 +41,7 @@ written then.
 | `ASP` | parser: source to operations | `parser.c` |
 | `ASI` | interpreter: runs the operations in several passes | `interp.c`, `as.c` |
 | `ASG` | code generator: sections, addressing modes, instruction formats | `codegen.c`, `elf_file.c` |
-| `ASC` | processor tables: mnemonics, modes, encodings | `gen_*.c`, `cpu.c` |
+| `ASC` | processor tables: mnemonics, modes, encodings (as text rows) | `gen_*.c`, `cpu.c` |
 | `ASB` | base: values, symbol table, symbol file import | `value.c`, `as.c` |
 | `ASS` | scanner, source files | `scanner.c`, `buffered_file.c` |
 | `ASL` | listing | `interp.c`, `as.c` |
@@ -120,24 +121,42 @@ Encoding fixes:
 - `<` in expressions compared with `<=`; a leading minus negated the
   whole sum instead of the first term.
 
-## Towards the 65C816 compiler
+## On the 65C816
 
-The code keeps to what both compilers share: plain Oberon-07 with
+`make test816` compiles the same sources with `oc816`, loads them into
+em16 and has the emulated assembler assemble `test816/sample.s`; its
+output file and listing must equal the host's. The run uses a small
+runtime in `test816/`: files held in memory, arguments set by a module,
+`Out` on the ACIA, and `Stack.s`, which moves the stack out of em16's
+floppy controller window before anything else runs.
+
+The sources keep to what both compilers accept: plain Oberon-07 with
 `LONGINT`, no methods, no array constants. Addresses and values are
-`LONGINT` (16-bit `INTEGER` on the 816), bytes are extracted with `DIV`
-and `MOD`, and nothing but `ASH`, `AS` and the `Files` calls depends on
-the host. Source text is not kept in memory for the listing but re-read
-from the file. What remains for a port to OS16:
+`LONGINT` (`INTEGER` is 16 bits there) and bytes are extracted with `DIV`
+and `MOD`. Source text is not kept in memory for the listing but re-read
+from the file. Some of the code is shaped by what `oc816` cannot do yet:
 
-- `Files` there has `Read`/`Write` on bytes instead of
-  `ReadByte`/`WriteByte`; `Env` and `ASH.Exit` need equivalents.
-- `ASC` enters its tables with about 300 procedure calls per processor;
-  the compiler's array constants would be smaller, once the LLVM compiler
-  supports indexing them.
-- Strings are fixed 256-byte records and the code buffer grows in 1K
-  blocks, sized for a host; they may want tuning for the heap there.
+- `LONGINT` is multiplied and divided by constant powers of two only;
+  `ASH.Mul` and `ASH.DivMod` do the general cases.
+- `INC`, `DEC`, `ABS` and `ODD` do not work on a `LONGINT`, so those
+  variables are stepped with `:=` and `ASH.Abs` is used.
+- `ASSERT` traps when its condition holds, so there is none.
+- Two conditions cannot be compared with `=` or `#`.
+- Procedure variables take exported procedures only (`ASP.Expression`,
+  `ASP.Statement`).
+- A call cannot have more parameters than fit the register stack
+  (`ASL.Text` and `ASL.Line` are two calls for that reason).
+- The loaders accept fewer than 1024 relocations a module, and every
+  call is one; the processor tables in `ASC` are therefore text.
 
-Limits of the stage-0 compiler that shaped the code are noted where they
-apply: constant expressions are not folded in declarations, `CASE` needs
-a simple variable, procedures take at most 8 parameters, and an exported
-record must not have a field of a private recursive pointer type.
+What a port to OS16 still needs: its `Files` has `Read`/`Write` on bytes
+instead of `ReadByte`/`WriteByte` and positions are 16 bit, and `Env` and
+`ASH.Exit` need equivalents. Under em16 the heap is what is left of bank
+0, which is enough for a source of a few dozen lines; anything real needs
+the OS16 heap manager.
+
+Limits of the LLVM compiler that also shaped the code: constant
+expressions are not folded in declarations, `CASE` needs a simple
+variable, procedures take at most 8 parameters, and an exported record
+must not have a field of a private recursive pointer type (`oc816` shares
+that last one).
