@@ -136,10 +136,6 @@ The sources keep to what both compilers accept: plain Oberon-07 with
 and `MOD`. Source text is not kept in memory for the listing but re-read
 from the file. Some of the code is shaped by what `oc816` cannot do yet:
 
-- `LONGINT` is multiplied and divided by constant powers of two only;
-  `ASH.Mul` and `ASH.DivMod` do the general cases.
-- `INC`, `DEC`, `ABS` and `ODD` do not work on a `LONGINT`, so those
-  variables are stepped with `:=` and `ASH.Abs` is used.
 - `ASSERT` traps when its condition holds, so there is none.
 - Two conditions cannot be compared with `=` or `#`.
 - Procedure variables take exported procedures only (`ASP.Expression`,

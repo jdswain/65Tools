@@ -25,50 +25,12 @@ MODULE ASH; (* Host interface of the 65xx assembler.
   BEGIN Out.Ln
   END Ln;
 
-  (* --- long arithmetic --- *)
-
-  (* The 65C816 compiler multiplies and divides LONGINT by constant
-     powers of two only, and its ABS and ODD do not take a LONGINT.
-     These do the general cases by shifting. *)
-
-  PROCEDURE Abs*(x: LONGINT): LONGINT;
-  BEGIN
-    IF x < 0 THEN x := -x END;
-    RETURN x
-  END Abs;
-
-  PROCEDURE Mul*(x, y: LONGINT): LONGINT;
-    VAR p: LONGINT; neg: BOOLEAN;
-  BEGIN neg := x < 0;
-    IF y < 0 THEN neg := ~neg END;
-    x := Abs(x); y := Abs(y); p := 0;
-    WHILE y # 0 DO
-      IF y MOD 2 = 1 THEN p := p + x END;
-      x := x * 2; y := y DIV 2
-    END;
-    IF neg THEN p := -p END;
-    RETURN p
-  END Mul;
-
-  (* quotient q and remainder r of x by y, for x >= 0 and y > 0 *)
-  PROCEDURE DivMod*(x, y: LONGINT; VAR q, r: LONGINT);
-    VAR d: LONGINT;
-  BEGIN q := 0; d := y;
-    WHILE (d <= x) & (d <= x - d) DO d := d * 2 END;
-    WHILE d >= y DO
-      q := q * 2;
-      IF x >= d THEN x := x - d; q := q + 1 END;
-      d := d DIV 2
-    END;
-    r := x
-  END DivMod;
-
   (* x as decimal digits *)
   PROCEDURE IntStr*(x: LONGINT; VAR s: ARRAY OF CHAR);
-    VAR d: ARRAY 24 OF CHAR; i, j: INTEGER; neg: BOOLEAN; r: LONGINT;
+    VAR d: ARRAY 24 OF CHAR; i, j: INTEGER; neg: BOOLEAN;
   BEGIN neg := x < 0; i := 0; j := 0;
     IF neg THEN x := -x END;
-    REPEAT DivMod(x, 10, x, r); d[i] := CHR(r + 30H); INC(i) UNTIL x = 0;
+    REPEAT d[i] := CHR(x MOD 10 + 30H); x := x DIV 10; INC(i) UNTIL x = 0;
     IF neg THEN s[0] := "-"; j := 1 END;
     WHILE (i > 0) & (j < LEN(s) - 1) DO DEC(i); s[j] := d[i]; INC(j) END;
     s[j] := 0X

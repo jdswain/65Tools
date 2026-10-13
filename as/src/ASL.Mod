@@ -76,7 +76,7 @@ MODULE ASL; (* Listing of the 65xx assembler.
     VAR b: BYTE; done: BOOLEAN;
   BEGIN done := FALSE;
     WHILE ~done & (pos < to) DO
-      Files.ReadByte(srcR, b); pos := pos + 1;
+      Files.ReadByte(srcR, b); INC(pos);
       IF srcR.eof THEN done := TRUE
       ELSIF b = ORD(LF) THEN done := TRUE
       ELSIF b # ORD(CR) THEN Files.WriteByte(R, b)
@@ -118,7 +118,7 @@ MODULE ASL; (* Listing of the 65xx assembler.
         END;
         IF hasText & (pos < to) THEN CopyLine(pos, to) END;
         Ch(LF);
-        i := i + BytesPerLine
+        INC(i, BytesPerLine)
       UNTIL (i >= n) & ~(hasText & (pos < to))
       END
     END

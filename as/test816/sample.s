@@ -23,5 +23,8 @@ start*: twice 4, $20
         text.0 "Hi", 33
         word done, 1000 / 7, 1000 mod 7, 123 * 45
         long $12345678
+        long 70000 * 300, -100000 / 7, 100000 mod 70001
+        fill 6, 1, 2, 3
+        align 4
 done:   rts
 far:    rtl

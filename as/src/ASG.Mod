@@ -194,8 +194,6 @@ MODULE ASG; (* Code generator of the 65xx assembler.
 
   (* --- emission --- *)
 
-  (* (LONGINT variables are stepped with := throughout the assembler:
-     INC and DEC of the 65C816 compiler change the low word only.) *)
   PROCEDURE o(b: LONGINT);
     VAR off: LONGINT; blk: Block;
   BEGIN
@@ -208,7 +206,7 @@ MODULE ASG; (* Code generator of the 65xx assembler.
       END;
       cur.last.d[off] := b MOD 100H
     END;
-    cur.size := cur.size + 1; addr := addr + 1
+    INC(cur.size); INC(addr)
   END o;
 
   PROCEDURE Byte*(b: LONGINT);
