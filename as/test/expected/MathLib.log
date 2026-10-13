@@ -1,0 +1,3 @@
+Assembling MathLib.s
+  out/MathLib.816  15 bytes code, 2 exports
+exit 0

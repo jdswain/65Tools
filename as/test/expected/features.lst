@@ -1,0 +1,53 @@
+0000:                   	cpu = "65C02"
+0000:                   	org = $1000
+1000:                   	include "simple_include.s"
+1000:                   	var included = true
+1000:                   	var child = 123
+1000:                   count	= 3
+1000:                   	let K = 10
+1000:                   	var v = K * 2 + -1
+1000:                   	v += 5
+1000:                   twice	macro val, dst {
+1000:                   	lda #val * 2
+1000:                   	sta dst
+1000:                   .skip:	nop
+1000:                   }
+1000: a9 08 85 20 ea    start*:	twice 4, $20
+1005: a9 f6 8d 34 12 ea 	twice child, $1234
+100b:                   	if count == 3 {
+100b: a9 01             	lda #1
+100d: XX                	} else if count == 4 {
+100d: XX                	lda #2
+100d: XX                	} else {
+100d: XX                	lda #3
+100d:                   	}
+100d: ea                	if DEBUG { brk } else { nop }
+100e: ca                .loop:	dex
+100f: d0 fd             	bne .loop
+1011: 80 3f             	bra fwd
+1013: 04 68 69 0a 41    	text.l "hi\n", 65
+1018: 41 c2             	text.7 "AB"
+101a: 7a 00             	text.0 "z"
+101c: 52 10 34 12       	word fwd, $1234
+1020: 78 56 34 12       	long $12345678
+1024: 00 00 c0 3f 00 00 	float 1.5, -2.0
+102a: 00 c0             
+102c: aa 55 aa          	fill 3, $aa, $55
+102f: 00 00             	fill 2
+1031: 00 00 00 00 00 00 	align 8
+1037: 00                
+1038: 00 ff 10 00 03 00 	data.w ~0 & $ff00, 1 << 4, 7 / 2, -7 / 2, 7 mod 4, <$1234, >$1234, ^$123456
+103e: fd ff 03 00 34 00 
+1044: 12 00 12 00       
+1048: 18 01 00 01 00 01 	byte v, K >= 10, K != 10, !0, 1 && 0, 1 || 0
+104e:                   	{
+104e: ea                priv:	nop
+104f: 4c 4e 10          	jmp priv
+1052:                   	}
+1052:                   	message "v=", v, " file ", __FILE__, " line ", __LINE__, " cpu ", cpu
+1052:                   	errorif v != 24, "v is wrong: ", v
+1052: 60                fwd:	rts
+
+Symbols:
+DEBUG                0000      child                007b      fwd                  1052      start*               1000      
+K                    000a      count                0003      included             0001      v                    0018      

@@ -1,0 +1,11 @@
+Assembling errors.s
+errors.s:2: Error: undefined symbol: nowhere
+errors.s:3: Error: label defined twice: aa
+errors.s:4: Error: branch out of range
+errors.s:7: Error: number expected, not a string
+errors.s:9: Error: c is a constant and cannot be changed
+errors.s:10: Error: stz addr is not supported by the 6502
+errors.s:11: Error: division by zero
+errors.s:12: Error: on is a constant and cannot be changed
+8 errors, no output written
+exit 1

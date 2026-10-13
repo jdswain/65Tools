@@ -1,0 +1,3 @@
+Assembling TestReloc.s
+  out/TestReloc.816  16 bytes code, 2 exports
+exit 0

@@ -1,0 +1,3 @@
+Assembling C19.s
+C19.s:37: Warning: address truncated to the direct page
+exit 0
