@@ -40,6 +40,8 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
     byte* = 50; word* = 51; long* = 52; float* = 53; text* = 54; fill* = 55;
     align* = 56; message* = 57; error* = 58; errorIf* = 59;
     title* = 60; subheading* = 61; page* = 62;
+    (* a SECTION inside a block: leave the section, and arrive in the other *)
+    suspend = 63; resume = 64;
 
     (* built-in variables *)
     sOrg = 1; sAddr = 2; sLongA = 3; sLongI = 4; sCpu = 5; sPass = 6;
@@ -65,6 +67,7 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
     Macro* = POINTER TO MacroDesc;
 
     Op = POINTER TO OpDesc;
+    Saved = POINTER TO SavedDesc;
     OpDesc = RECORD
       next: Op;
       code: INTEGER;
@@ -75,6 +78,7 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
       ref: Ref;
       obj: ASB.Object;      (* scope of a block or a macro call *)
       mac: Macro;
+      sav: Saved;           (* suspend, resume: the blocks open at a SECTION *)
       src: ASS.Source; line: INTEGER
     END;
 
@@ -88,7 +92,19 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
     Frame = RECORD
       parent: BOOLEAN;      (* exec outside the statement *)
       taken: BOOLEAN;       (* a branch of the IF has been selected *)
-      scope: BOOLEAN        (* the frame opened a scope *)
+      scope: BOOLEAN;       (* the frame opened a scope *)
+      obj: ASB.Object       (* that scope *)
+    END;
+
+    (* The blocks that are open where a SECTION directive stands inside
+       them. Each section has its own list of operations and is executed
+       on its own, so the directive leaves this in the section it ends
+       (suspend) and takes it up in the one it begins (resume): the rest of
+       the block is then skipped or assembled there as it was here. *)
+    SavedDesc = RECORD
+      exec: BOOLEAN;
+      n: INTEGER;
+      frames: ARRAY maxFrames OF Frame
     END;
 
   VAR
@@ -98,6 +114,7 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
     (* the program: one list of operations for each section *)
     lists: ARRAY ASG.maxSections OF RECORD first, last: Op END;
     psect: ASG.Section;     (* section the parser is adding to *)
+    open: INTEGER;          (* IF statements and blocks the parser is inside *)
     macros, defining: Macro;
 
     (* state of a pass *)
@@ -136,7 +153,13 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
   END Append;
 
   PROCEDURE Put*(code: INTEGER);
-  BEGIN Append(NewOp(code))
+  BEGIN
+    IF defining = NIL THEN
+      IF code = ifBegin THEN INC(open)
+      ELSIF (code = endIf) OR (code = scopeEnd) THEN DEC(open)
+      END
+    END;
+    Append(NewOp(code))
   END Put;
 
   (* A directive with n operands on the stack. *)
@@ -203,7 +226,9 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
   (* Open a block: the symbols defined up to its scopeEnd are local. *)
   PROCEDURE BeginScope*;
     VAR op: Op;
-  BEGIN op := NewOp(scopeBegin); op.obj := ASB.NewScope(); Append(op)
+  BEGIN
+    IF defining = NIL THEN INC(open) END;
+    op := NewOp(scopeBegin); op.obj := ASB.NewScope(); Append(op)
   END BeginScope;
 
   PROCEDURE ThisMacro*(name: ARRAY OF CHAR): Macro;
@@ -243,9 +268,21 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
 
   (* Continue in section `name`, creating it if it does not exist. *)
   PROCEDURE SetSection*(name: ARRAY OF CHAR; type, flags: INTEGER);
-    VAR s: ASG.Section;
+    VAR s: ASG.Section; sv: Saved; op: Op;
   BEGIN s := ASG.NewSection(name, type, flags);
-    IF s = NIL THEN ASS.Mark("too many sections") ELSE psect := s END
+    IF s = NIL THEN ASS.Mark("too many sections")
+    ELSIF (s # psect) & (defining = NIL) THEN
+      (* Inside a block its state goes along. A section that is taken up
+         again is given the state too, even outside a block, because it
+         may have been left inside one that was never closed there. *)
+      NEW(sv); sv.exec := TRUE; sv.n := 0;
+      IF open > 0 THEN op := NewOp(suspend); op.sav := sv; Append(op) END;
+      psect := s;
+      IF (open > 0) OR (lists[s.no].first # NIL) THEN
+        op := NewOp(resume); op.sav := sv; Append(op)
+      END
+    ELSE psect := s
+    END
   END SetSection;
 
   (* --- messages --- *)
@@ -741,11 +778,21 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
      FALSE) is still walked: the statements that nest must be followed,
      and the listing shows the text. *)
   PROCEDURE Exec(op: Op);
-    VAR v: ASB.Value; code, f, saved: INTEGER; opened: BOOLEAN; outer: ASB.Object;
+    VAR v: ASB.Value; code, f, saved, i: INTEGER; opened: BOOLEAN; outer: ASB.Object;
   BEGIN
     WHILE op # NIL DO
       here := op; code := op.code;
       IF code = line THEN ListLine(op)
+      ELSIF code = suspend THEN
+        op.sav.exec := exec; op.sav.n := nofFrames; i := 0;
+        WHILE (i < nofFrames) & (i < maxFrames) DO op.sav.frames[i] := frames[i]; INC(i) END
+      ELSIF code = resume THEN
+        ASB.ResetScopes; exec := op.sav.exec; nofFrames := op.sav.n; i := 0;
+        WHILE (i < nofFrames) & (i < maxFrames) DO
+          frames[i] := op.sav.frames[i];
+          IF frames[i].scope & ~ASB.OpenScope(frames[i].obj) THEN frames[i].scope := FALSE END;
+          INC(i)
+        END
       ELSIF (code >= ifBegin) & (code <= scopeEnd) THEN
         f := nofFrames - 1;
         CASE code OF
@@ -771,7 +818,8 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
         | scopeBegin:
             opened := exec & ASB.OpenScope(op.obj);
             IF exec & ~opened THEN Err("blocks nested too deeply", "") END;
-            PushFrame(opened)
+            PushFrame(opened);
+            IF nofFrames <= maxFrames THEN frames[nofFrames - 1].obj := op.obj END
         | scopeEnd:
             IF f >= 0 THEN
               IF (f < maxFrames) & frames[f].scope THEN ASB.CloseScope END;
@@ -872,7 +920,7 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
     VAR i: INTEGER;
   BEGIN
     FOR i := 0 TO ASG.maxSections - 1 DO lists[i].first := NIL; lists[i].last := NIL END;
-    psect := ASG.text; macros := NIL; defining := NIL;
+    psect := ASG.text; macros := NIL; defining := NIL; open := 0;
     stamp := 0; passNo := 1; final := FALSE
   END Init;
 

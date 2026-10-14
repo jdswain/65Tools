@@ -43,6 +43,10 @@ for ext in bin tim hex s19 s28 s37 mem; do
   check wozmon.$ext wozmon.$ext
 done
 
+# a SECTION directive inside an IF block
+run section_if -o out/section_if.hex section_if.s
+check section_if section_if.hex section_if.log
+
 # Oberon modules, with their symbol files
 for t in MathLib TestAsm TestReloc TestImport TestImport6; do
   run $t -o out/$t.816 $t.s

@@ -92,6 +92,11 @@ Formats, brought in line with the current compiler and loaders:
 
 Language:
 
+- A `section` directive inside an `if` block that is false no longer ends the
+  skipping: the rest of the block is skipped, or assembled, in the new section
+  as the condition says. The directive itself is not conditional, because the
+  text of each section is collected when the source is read: what follows it
+  belongs to the section it names, also after the block.
 - `//` and `/* */` comments, which the test sources use.
 - `end` ends the source only on a line of its own; elsewhere it is a name
   (`operators.s` has a label `end`).
