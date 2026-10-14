@@ -36,6 +36,7 @@ MODULE AS; (* The 65xx assembler: command line and control.
     ASH.Str("  -o outfile   output file; its extension selects the format:"); ASH.Ln;
     ASH.Str("                 none ELF executable, .o ELF object, .bin binary,"); ASH.Ln;
     ASH.Str("                 .hex Intel hex, .s19 .s28 .s37 S-records, .tim paper tape,"); ASH.Ln;
+    ASH.Str("                 .mem Verilog memory file ($readmemh),"); ASH.Ln;
     ASH.Str("                 .816 Oberon module with its .smb symbol file"); ASH.Ln;
     ASH.Str("  -I dir       add dir to the include and symbol file search path"); ASH.Ln;
     ASH.Str("  -D sym[=val] define symbol sym, as 1 if no value is given"); ASH.Ln;

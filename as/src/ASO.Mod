@@ -2,8 +2,8 @@ MODULE ASO; (* Output of the 65xx assembler.
 
    Writes the assembled program in the format the name of the output
    file asks for: an ELF executable or object file, a plain binary,
-   MOS paper tape (TIM), Intel hex, Motorola S-records, or an Oberon
-   module for the 65C816 (.816) with its symbol file (.smb). Port of the
+   MOS paper tape (TIM), Intel hex, Motorola S-records, a Verilog
+   memory file, or an Oberon module for the 65C816 (.816) with its symbol file (.smb). Port of the
    writers in shared/src/elf_file.c.
 
    The .816 and .smb layouts are those of the Oberon compiler (ORGW and
@@ -15,7 +15,7 @@ MODULE ASO; (* Output of the 65xx assembler.
   CONST
     (* output formats *)
     Unsupported* = 0; Exec* = 1; Object* = 2; Binary* = 3; TIM* = 4;
-    Intel* = 5; S19* = 6; S28* = 7; S37* = 8; Mod816* = 9;
+    Intel* = 5; S19* = 6; S28* = 7; S37* = 8; Mod816* = 9; Mem* = 10;
 
     (* ELF *)
     EhdrSize = 52; PhdrSize = 32; ShdrSize = 40; SymSize = 16;
@@ -31,6 +31,7 @@ MODULE ASO; (* Output of the 65xx assembler.
     Const = 1; Var = 2; Par = 3; Proc = 10;
 
     RecLen = 16;        (* data bytes of a record in the text formats *)
+    MemFill = 0FFH;     (* between the runs of code in a memory file *)
 
   VAR F: Files.File; R: Files.Rider;
     sum: ARRAY 4 OF LONGINT;   (* of the bytes written, by position in a word *)
@@ -340,6 +341,71 @@ MODULE ASO; (* Output of the 65xx assembler.
     END
   END WriteText;
 
+  (* One byte of a memory file, RecLen to a line; n counts those on
+     the line. *)
+  PROCEDURE MemByte(b: INTEGER; VAR n: INTEGER);
+  BEGIN
+    IF n = RecLen THEN WChar(0AX); n := 0 ELSIF n > 0 THEN WChar(" ") END;
+    WHex(b, 2); INC(n)
+  END MemByte;
+
+  (* A Verilog memory file, as $readmemh reads it into reg [7:0] rom [0:n]:
+     the bytes of the program from its lowest address to its highest, the
+     gaps between the runs of code filled with MemFill. There are no
+     @address lines, because the address in one counts from the start of
+     the Verilog array, not of the processor's memory, and Gowin's
+     synthesis truncates it to the width of the data. A comment gives the
+     range, so the first byte belongs at the base of the ROM. *)
+  PROCEDURE WriteMem(name: ARRAY OF CHAR);
+    VAR s, bs: ASG.Section; e, be: ASG.Extent;
+      pos, lo, hi, off, end: LONGINT; n, digits: INTEGER; first: BOOLEAN;
+  BEGIN
+    IF Create(name) THEN
+      (* the range *)
+      first := TRUE; lo := 0; hi := 0; s := ASG.sections;
+      WHILE s # NIL DO
+        IF HasData(s) THEN e := s.extents;
+          WHILE e # NIL DO
+            end := e.addr + ExtentSize(s, e);
+            IF end > e.addr THEN
+              IF first OR (e.addr < lo) THEN lo := e.addr END;
+              IF first OR (end > hi) THEN hi := end END;
+              first := FALSE
+            END;
+            e := e.next
+          END
+        END;
+        s := s.next
+      END;
+      IF ~first THEN
+        digits := ASH.HexDigits(hi - 1, 4);
+        WText("// $"); WHex(lo, digits); WText("-$"); WHex(hi - 1, digits); WChar(0AX)
+      END;
+      (* the runs in order of address: each time the lowest that reaches
+         past what is written *)
+      pos := lo; n := 0;
+      WHILE pos < hi DO
+        be := NIL; bs := NIL; s := ASG.sections;
+        WHILE s # NIL DO
+          IF HasData(s) THEN e := s.extents;
+            WHILE e # NIL DO
+              IF (e.addr + ExtentSize(s, e) > pos) & ((be = NIL) OR (e.addr < be.addr)) THEN
+                be := e; bs := s
+              END;
+              e := e.next
+            END
+          END;
+          s := s.next
+        END;
+        WHILE pos < be.addr DO MemByte(MemFill, n); INC(pos) END;
+        off := be.offset + (pos - be.addr); end := be.offset + ExtentSize(bs, be);
+        WHILE off < end DO MemByte(ASG.Get(bs, off), n); INC(off); INC(pos) END
+      END;
+      IF n > 0 THEN WChar(0AX) END;
+      Close
+    END
+  END WriteMem;
+
   (* --- Oberon modules --- *)
 
   (* The exported symbols, in alphabetical order, which is the order of
@@ -471,6 +537,7 @@ MODULE ASO; (* Output of the 65xx assembler.
     ELSIF ext = ".s19" THEN f := S19
     ELSIF ext = ".s28" THEN f := S28
     ELSIF ext = ".s37" THEN f := S37
+    ELSIF ext = ".mem" THEN f := Mem
     ELSIF ext = ".816" THEN f := Mod816
     ELSE f := Unsupported
     END;
@@ -497,6 +564,7 @@ MODULE ASO; (* Output of the 65xx assembler.
     ELSIF format = Object THEN WriteELF(name, FALSE)
     ELSIF format = Binary THEN WriteBinary(name)
     ELSIF format = Mod816 THEN WriteModule(name, legacy)
+    ELSIF format = Mem THEN WriteMem(name)
     ELSIF format # Unsupported THEN WriteText(name, format)
     END
   END Write;

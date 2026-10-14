@@ -38,7 +38,7 @@ for t in 816 branch bss C19 iopmon operators test_longa2; do
 done
 
 # the text formats carry addresses
-for ext in bin tim hex s19 s28 s37; do
+for ext in bin tim hex s19 s28 s37 mem; do
   run wozmon-$ext -o out/wozmon.$ext wozmon.s
   check wozmon.$ext wozmon.$ext
 done

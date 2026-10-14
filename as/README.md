@@ -23,8 +23,8 @@ source, so the sources are copied to `obj/` and compiled there.
 
 The extension of the output file selects the format: none = ELF
 executable, `.o` ELF object, `.bin` binary, `.hex` Intel hex, `.s19`
-`.s28` `.s37` S-records, `.tim` MOS paper tape, `.816` Oberon module plus
-its `.smb` symbol file. A listing is written beside the first source file
+`.s28` `.s37` S-records, `.tim` MOS paper tape, `.mem` Verilog memory file,
+`.816` Oberon module plus its `.smb` symbol file. A listing is written beside the first source file
 (`name.lst`). The exit status is 1 if there was an error; no output file is
 written then.
 
@@ -82,6 +82,13 @@ Formats, brought in line with the current compiler and loaders:
   program header per run of code, so a section with several `org`s loads
   at all of them. Paper tape gets the same per-run addresses.
 - Intel hex and S-records are implemented (they were empty stubs).
+- `.mem` is new: a memory file for Verilog's `$readmemh`, one byte per
+  value, from the lowest address of the program to the highest with `$FF`
+  between the runs of code. It is read into an array that starts at 0
+  (`reg [7:0] rom [0:8191]`), so the program's lowest address must be the
+  base of the ROM; a comment on the first line gives the range. There are
+  no `@address` lines: one counts from the start of the Verilog array, and
+  Gowin's synthesis truncates it to the width of the data.
 
 Language:
 
