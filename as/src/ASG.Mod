@@ -29,23 +29,20 @@ MODULE ASG; (* Code generator of the 65xx assembler.
     Write* = 1; Alloc* = 2; Exec* = 4; DPage* = 8; Stack* = 10H; TLS* = 400H;
 
     maxSections* = 32;
-    maxReloc* = 1023;    (* the loaders accept fewer than 1024 *)
+    maxReloc* = 1023;    (* older loaders accept fewer than 1024 *)
     BlockSize = 1024;
     RelocBlockSize = 64;
 
   TYPE
-    (* Block and Op (in ASI) are exported in name only: the stage-0
-       compiler cannot re-export a record with a field of a private
-       recursive pointer type. *)
-    Block* = POINTER TO BlockDesc;
-    BlockDesc* = RECORD
+    Block = POINTER TO BlockDesc;
+    BlockDesc = RECORD
       next: Block;
       d: ARRAY BlockSize OF BYTE
     END;
 
     (* relocations are kept in blocks allocated as they are needed *)
-    RelocBlock* = POINTER TO RelocBlockDesc;
-    RelocBlockDesc* = RECORD
+    RelocBlock = POINTER TO RelocBlockDesc;
+    RelocBlockDesc = RECORD
       next: RelocBlock;
       r: ARRAY RelocBlockSize OF LONGINT
     END;

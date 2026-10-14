@@ -562,15 +562,10 @@ MODULE ASC; (* CPU definitions for the 65xx assembler.
       ELSIF (c = cR65C02) OR (c = cR6501Q) THEN EnterR65C02
       ELSIF c = cC19 THEN EnterC19
       END;
-      I(nofInstr)
+      I(nofInstr);
+      ASSERT(~overflow)
     END
   END Select;
-
-  (* TRUE if a table had more rows than maxEnt. (Not an ASSERT in Select:
-     the 65C816 compiler's ASSERT traps when the condition holds.) *)
-  PROCEDURE Overflow*(): BOOLEAN;
-  BEGIN RETURN overflow
-  END Overflow;
 
   PROCEDURE Cpu*(): INTEGER;
   BEGIN RETURN cpu

@@ -6,10 +6,8 @@ MODULE Files;
   CONST NameLen = 64; BlockSize = 256;
 
   TYPE
-    (* exported in name only: the compilers cannot re-export a record
-       with a field of a private recursive pointer type *)
-    Block* = POINTER TO BlockDesc;
-    BlockDesc* = RECORD next: Block; d: ARRAY BlockSize OF BYTE END;
+    Block = POINTER TO BlockDesc;
+    BlockDesc = RECORD next: Block; d: ARRAY BlockSize OF BYTE END;
 
     File* = POINTER TO FileDesc;
     FileDesc* = RECORD

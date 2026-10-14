@@ -111,7 +111,6 @@ MODULE AS; (* The 65xx assembler: command line and control.
         Env.Arg(files[0], arg); ASH.SetExt(arg, ".lst", listName);
         ASI.Assemble(listName)
       END;
-      IF ASC.Overflow() THEN ASS.Error(NIL, 0, "internal error: processor table too small", "") END;
       IF ASS.errcnt = 0 THEN ASO.Write(outName, format, legacy) END;
       IF ASS.errcnt # 0 THEN
         ASH.Int(ASS.errcnt);

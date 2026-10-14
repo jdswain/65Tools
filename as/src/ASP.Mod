@@ -161,10 +161,8 @@ MODULE ASP; (* Parser of the 65xx assembler.
   END SimpleExpression;
 
   (* local: the first name of the expression follows a "." that has
-     been read already. (Exported, as is Statement, only because the
-     65C816 compiler assigns none but exported procedures to procedure
-     variables.) *)
-  PROCEDURE Expression*(local: BOOLEAN);
+     been read already *)
+  PROCEDURE Expression(local: BOOLEAN);
     VAR op: INTEGER;
   BEGIN SimpleExpression(local);
     IF (sym >= ASS.eql) & (sym <= ASS.rshift) THEN
@@ -485,7 +483,7 @@ MODULE ASP; (* Parser of the 65xx assembler.
     END
   END Named;
 
-  PROCEDURE Statement*;
+  PROCEDURE Statement;
     VAR ref: ASI.Ref; m: ASI.Macro; name: ASS.Ident; errs: INTEGER;
   BEGIN
     IF sym = ASS.eol THEN Get

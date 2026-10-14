@@ -25,9 +25,6 @@ cp Out.Mod Files.Mod Env.Mod Dump.Mod ../src/*.Mod sample.s out/
 python3 mkseed.py sample.s sample.bin && mv Seed.Mod out/
 cd out || exit 1
 
-# the stack is moved by a module written in assembler; see Stack.s
-"$AS" -o Stack.816 ../Stack.s > Stack.log 2>&1 || { echo "FAIL: as Stack.s"; cat Stack.log; exit 1; }
-
 # compile, in order of import
 for m in $RUNTIME $MODS Seed AS Dump; do
   if ! "$OC816" $m.Mod -s > $m.log 2>&1; then
@@ -38,7 +35,7 @@ done
 
 # run: the modules initialise in the order given, so Seed prepares the
 # source and the arguments, AS assembles, Dump prints the results
-LOAD="Stack.816"
+LOAD=""
 for m in $RUNTIME $MODS Seed AS Dump; do LOAD="$LOAD $m.816"; done
 echo "" | perl -e 'alarm 120; exec @ARGV' "$EM16" $LOAD > em16.log 2>&1
 sed -n '/^--- output$/,/^--- listing$/p' em16.log | sed '1d;$d' > sample.hex

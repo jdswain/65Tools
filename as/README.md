@@ -127,23 +127,24 @@ Encoding fixes:
 em16 and has the emulated assembler assemble `test816/sample.s`; its
 output file and listing must equal the host's. The run uses a small
 runtime in `test816/`: files held in memory, arguments set by a module,
-`Out` on the ACIA, and `Stack.s`, which moves the stack out of em16's
-floppy controller window before anything else runs.
+and `Out` on the ACIA.
 
 The sources keep to what both compilers accept: plain Oberon-07 with
 `LONGINT`, no methods, no array constants. Addresses and values are
 `LONGINT` (`INTEGER` is 16 bits there) and bytes are extracted with `DIV`
 and `MOD`. Source text is not kept in memory for the listing but re-read
-from the file. Some of the code is shaped by what `oc816` cannot do yet:
+from the file. Two things are shaped by the target:
 
-- `ASSERT` traps when its condition holds, so there is none.
-- Two conditions cannot be compared with `=` or `#`.
-- Procedure variables take exported procedures only (`ASP.Expression`,
-  `ASP.Statement`).
-- A call cannot have more parameters than fit the register stack
-  (`ASL.Text` and `ASL.Line` are two calls for that reason).
-- The loaders accept fewer than 1024 relocations a module, and every
-  call is one; the processor tables in `ASC` are therefore text.
+- A call cannot have more parameters than fit the 15 words of the
+  register stack (`ASL.Text` and `ASL.Line` are two calls for that
+  reason).
+- The processor tables in `ASC` are text, decoded at start-up; as
+  procedure calls they needed 1603 relocations, more than loaders took.
+
+Both need `oc816` and em16 as of October 2026: earlier ones lack
+`LONGINT` arithmetic, working `ASSERT`, relations between conditions,
+procedure variables for procedures that are not exported, and a stack
+clear of the floppy controller.
 
 What a port to OS16 still needs: its `Files` has `Read`/`Write` on bytes
 instead of `ReadByte`/`WriteByte` and positions are 16 bit, and `Env` and
@@ -153,6 +154,4 @@ the OS16 heap manager.
 
 Limits of the LLVM compiler that also shaped the code: constant
 expressions are not folded in declarations, `CASE` needs a simple
-variable, procedures take at most 8 parameters, and an exported record
-must not have a field of a private recursive pointer type (`oc816` shares
-that last one).
+variable, and procedures take at most 8 parameters.

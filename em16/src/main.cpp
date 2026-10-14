@@ -908,7 +908,7 @@ unsigned int loadMod(char * filename) {
   // 11. Read and process relocation table
   int32_t reloc_count;
   if (fread(&reloc_count, 4, 1, file) == 1) {
-    if (reloc_count >= 0 && reloc_count < 1024) {
+    if (reloc_count >= 0 && reloc_count < 65536) {
       printf("Processing %d relocations:\n", reloc_count);
 
       for (int i = 0; i < reloc_count; i++) {
@@ -1242,7 +1242,7 @@ int main(int argc, char **argv)
   // so that individual modules don't need a preamble
   if (emu816::getCpuType() != emu816::CPU_L28) {
     emu816::setNativeMode();
-    emu816::setSP(0x0845);
+    emu816::setSP(custom_sp >= 0 ? custom_sp : 0x07FF);
   }
 
   if (custom_dp >= 0) {

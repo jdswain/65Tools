@@ -64,8 +64,8 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
 
     Macro* = POINTER TO MacroDesc;
 
-    Op* = POINTER TO OpDesc;   (* exported in name only, see ASG.Block *)
-    OpDesc* = RECORD
+    Op = POINTER TO OpDesc;
+    OpDesc = RECORD
       next: Op;
       code: INTEGER;
       a, b: INTEGER;        (* instr: mnemonic, mode; directive: count, modifier *)
@@ -343,7 +343,7 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
   PROCEDURE Quot(x, y: LONGINT): LONGINT;
     VAR q: LONGINT;
   BEGIN q := ABS(x) DIV ABS(y);
-    IF (x < 0) & (y > 0) OR (x > 0) & (y < 0) THEN q := -q END;
+    IF (x < 0) # (y < 0) THEN q := -q END;
     RETURN q
   END Quot;
 
@@ -362,8 +362,7 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
   BEGIN Pop(y); Pop(x);
     IF (x.form = ASB.Str) & (y.form = ASB.Str) & ((code = eql) OR (code = neq) OR (code = add)) THEN
       IF code = add THEN ASB.SetStr(z, Concat(x.s, y.s))
-      ELSIF code = eql THEN ASB.SetInt(z, Bool(SameStr(x.s, y.s)))
-      ELSE ASB.SetInt(z, Bool(~SameStr(x.s, y.s)))
+      ELSE ASB.SetInt(z, Bool(SameStr(x.s, y.s) = (code = eql)))
       END
     ELSIF ((x.form = ASB.Real) OR (y.form = ASB.Real)) &
           ((code <= div) OR (code >= eql) & (code <= geq)) THEN
