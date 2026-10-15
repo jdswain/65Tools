@@ -7,7 +7,7 @@
 > plus the OO (L16) and interface (L17) goldens. Keep this C compiler buildable
 > for `bin/disasm` and side-by-side comparison; it is baseline Oberon-07 +
 > LONGINT only (no methods/interfaces). The em16 emulator's `.816` loader lives
-> in `../em16/src/main.cpp`.
+> in `../em16/src/EmLoad.Mod` (C++ original: `../em16-c/src/main.cpp`).
 
 This project is written in C.
 There is a Makefile for building.

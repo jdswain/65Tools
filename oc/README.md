@@ -44,9 +44,12 @@ relative to this directory. To build it:
 
 ```bash
 cd ../em16
-make -f Makefile.macos    # macOS
-make                      # Linux
+make
 ```
+
+em16 is written in Oberon and needs the LLVM Oberon compiler (`../../../oc`);
+the C++ version it was ported from is in `../em16-c` (`make -f Makefile.macos`,
+builds `../bin/em16-c`).
 
 To run a compiled module:
 

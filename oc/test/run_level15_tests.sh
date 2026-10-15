@@ -22,7 +22,7 @@ fi
 
 if [ ! -x "$EM16" ]; then
   echo "ERROR: Emulator not found at $EM16"
-  echo "Build with: cd ../em16 && make -f Makefile.macos"
+  echo "Build with: cd ../em16 && make"
   exit 1
 fi
 

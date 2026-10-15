@@ -7,7 +7,7 @@ EM16 is a portable C++ emulator for the WDC 65C816 processor, used for testing c
 - **Source**: `src/` directory contains C++ implementation files
 - **Headers**: `include/` directory contains header files
 - **Build**: Uses Makefile that depends on `BUILD_BASE` environment variable pointing to `..`
-- **Target**: Builds to `../bin/em16`
+- **Target**: `make -f Makefile.macos` builds `../bin/em16-c`. This is the C++ original; em16 itself is now the Oberon port in `../em16`.
 
 ## Build Requirements
 - Environment variable `BUILD_BASE` must be set to `..`
@@ -95,4 +95,4 @@ This emulator is part of a larger toolchain for Oberon development targeting 65C
 - Uses shared build rules from `$(BUILD_BASE)/build/rules/`
 - Links with libutil and SDL2
 - Generates object files in `obj/` directory
-- Final executable: `../bin/em16`
+- Final executable: `../bin/em16-c`
