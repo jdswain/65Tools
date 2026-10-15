@@ -483,6 +483,7 @@ MODULE ASO; (* Output of the 65xx assembler.
     IF legacy THEN version := LegacySymVersion ELSE version := SymVersion END;
     WriteSymbols(smb, modid, exports, version, key);
     IF init # NIL THEN entry := init.val.i - text.org ELSE entry := 0 END;
+    IF ASG.RelocOverflow() THEN ASS.Error(NIL, 0, "too many relocatable calls", "") END;
     IF (ASS.errcnt = 0) & Create(name) THEN
       WString(modid);
       FOR i := 0 TO 3 DO W1(key[i]) END;

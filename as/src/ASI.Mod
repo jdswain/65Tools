@@ -907,7 +907,6 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
       END;
       Pass(TRUE, size);
       IF changed THEN ASS.Error(NIL, 0, "a label moved in the final pass", "") END;
-      IF ASG.RelocOverflow() THEN ASS.Error(NIL, 0, "too many relocatable calls", "") END;
       ASL.Symbols; ASL.Close
     END
   END Assemble;
