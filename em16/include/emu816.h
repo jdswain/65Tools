@@ -340,23 +340,29 @@ private:
   }
 
   // Direct Page Indexed X - d,X
+  // In emulation mode with the low byte of D zero the index wraps in the
+  // direct page, as on the 6502; otherwise it does not.
   INLINE static Addr am_dpgx()
   {
-    Byte offset = getByte(bank(pbr) | pc) + x.b;
-    
+    Byte disp = getByte(bank(pbr) | pc);
+
     BYTES(1);
     cycles += 1;
-    return (bank(0) | (Word)(dp.w + offset));
+    if (e && !(dp.w & 0xFF))
+      return (bank(0) | dp.w | (Byte)(disp + x.b));
+    return (bank(0) | (Word)(dp.w + disp + x.w));
   }
 
   // Direct Page Indexed Y - d,Y
   INLINE static Addr am_dpgy()
   {
-    Byte offset = getByte(bank(pbr) | pc) + y.b;
-    
+    Byte disp = getByte(bank(pbr) | pc);
+
     BYTES(1);
     cycles += 1;
-    return (bank(0) | (Word)(dp.w + offset));
+    if (e && !(dp.w & 0xFF))
+      return (bank(0) | dp.w | (Byte)(disp + y.b));
+    return (bank(0) | (Word)(dp.w + disp + y.w));
   }
 
   // Direct Page Indirect - (d)
@@ -376,6 +382,8 @@ private:
 
     BYTES(1);
     cycles += 3;
+    if (e && !(dp.w & 0xFF))
+      return (bank(dbr) | getWord(bank(0) | dp.w | (Byte)(disp + x.b)));
     return (bank(dbr) | getWord(bank(0) | (Word)(dp.w + disp + x.w)));
   }
 
@@ -578,6 +586,33 @@ private:
     setz(value == 0);
   }
 
+  // Decimal mode arithmetic, a digit at a time. The carry of a digit must
+  // come from the sum of the two digits: correcting the binary sum
+  // afterwards misses it when the sum is 16 or more (8 + 8).
+  INLINE static unsigned bcd_add(unsigned a, unsigned b, unsigned &c, int digits)
+  {
+    unsigned r = 0;
+    for (int i = 0; i < digits; i++) {
+      unsigned d = ((a >> (4 * i)) & 0x0f) + ((b >> (4 * i)) & 0x0f) + c;
+      if (d > 9) d += 6;
+      c = d > 0x0f;
+      r |= (d & 0x0f) << (4 * i);
+    }
+    return r;
+  }
+
+  // c is the carry in and out: 1 = no borrow
+  INLINE static unsigned bcd_sub(unsigned a, unsigned b, unsigned &c, int digits)
+  {
+    unsigned r = 0;
+    for (int i = 0; i < digits; i++) {
+      int d = (int)((a >> (4 * i)) & 0x0f) - (int)((b >> (4 * i)) & 0x0f) - (c ? 0 : 1);
+      if (d < 0) { d += 10; c = 0; } else c = 1;
+      r |= ((unsigned)d & 0x0f) << (4 * i);
+    }
+    return r;
+  }
+
   INLINE static void op_adc(Addr ea)
   {
     TRACE("ADC");
@@ -587,8 +622,8 @@ private:
       Word	temp = a.b + data + p.f_c;
 			
       if (p.f_d) {
-	if ((temp & 0x0f) > 0x09) temp += 0x06;
-	if ((temp & 0xf0) > 0x90) temp += 0x60;
+	unsigned c = p.f_c;
+	temp = bcd_add(a.b, data, c, 2) | (c << 8);
       }
 
       setc(temp & 0x100);
@@ -601,10 +636,8 @@ private:
       int	temp = a.w + data + p.f_c;
 
       if (p.f_d) {
-	if ((temp & 0x000f) > 0x0009) temp += 0x0006;
-	if ((temp & 0x00f0) > 0x0090) temp += 0x0060;
-	if ((temp & 0x0f00) > 0x0900) temp += 0x0600;
-	if ((temp & 0xf000) > 0x9000) temp += 0x6000;
+	unsigned c = p.f_c;
+	temp = bcd_add(a.w, data, c, 4) | (c << 16);
       }
 			
       setc(temp & 0x10000);
@@ -974,7 +1007,7 @@ private:
       Byte	data = getByte(ea);
       Word	temp = x.b - data;
 
-      setc(temp & 0x100);
+      setc(x.b >= data);
       setnz_b(lo(temp));
       cycles += 2;
     }
@@ -982,7 +1015,7 @@ private:
       Word	data = getWord(ea);
       Addr	temp = x.w - data;
 
-      setc(temp & 0x10000);
+      setc(x.w >= data);
       setnz_w((Word) temp);
       cycles += 3;
     }
@@ -996,7 +1029,7 @@ private:
       Byte	data = getByte(ea);
       Word	temp = y.b - data;
 
-      setc(temp & 0x100);
+      setc(y.b >= data);
       setnz_b(lo(temp));
       cycles += 2;
     }
@@ -1004,7 +1037,7 @@ private:
       Word	data = getWord(ea);
       Addr	temp = y.w - data;
 
-      setc(temp & 0x10000);
+      setc(y.w >= data);
       setnz_w((Word) temp);
       cycles += 3;
     }
@@ -1612,8 +1645,8 @@ private:
       Word	temp = a.b + data + p.f_c;
 	  
       if (p.f_d) {
-		if ((temp & 0x0f) > 0x09) temp += 0x06;
-		if ((temp & 0xf0) > 0x90) temp += 0x60;
+		unsigned c = p.f_c;
+		temp = bcd_sub(a.b, (Byte)~data, c, 2) | (c << 8);
       }
 
       setc(temp & 0x100);
@@ -1626,10 +1659,8 @@ private:
       int		temp = a.w + data + p.f_c;
 
       if (p.f_d) {
-		if ((temp & 0x000f) > 0x0009) temp += 0x0006;
-		if ((temp & 0x00f0) > 0x0090) temp += 0x0060;
-		if ((temp & 0x0f00) > 0x0900) temp += 0x0600;
-		if ((temp & 0xf000) > 0x9000) temp += 0x6000;
+		unsigned c = p.f_c;
+		temp = bcd_sub(a.w, (Word)~data, c, 4) | (c << 16);
       }
 
       setc(temp & 0x10000);

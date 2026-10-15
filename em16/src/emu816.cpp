@@ -213,7 +213,7 @@ void emu816::step_wdc()
   case 0x54:	op_mvn(am_immw());	break;
   case 0x55:	op_eor(am_dpgx());	break;
   case 0x56:	op_lsr(am_dpgx());	break;
-  case 0x57:	op_eor(am_dpil());	break;
+  case 0x57:	op_eor(am_dily());	break;
   case 0x58:	op_cli(am_impl());	break;
   case 0x59:	op_eor(am_absy());	break;
   case 0x5a:	op_phy(am_impl());	break;

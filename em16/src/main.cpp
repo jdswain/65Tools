@@ -233,6 +233,10 @@ unsigned int loadELF(char * filename) {
 			SegInfo tmp = segs[i]; segs[i] = segs[j]; segs[j] = tmp;
 		  }
 	  for (int s = 0; s < nseg; s++) {
+		if (segs[s].len > 16 * 1024) {          // the buffer holds 16K
+		  delete[] buffer;
+		  buffer = new wdc816::Byte[segs[s].len];
+		}
 		lseek(fd, segs[s].offset, SEEK_SET);
 		int r = read(fd, buffer, segs[s].len);
 		if (r == (int)segs[s].len) {

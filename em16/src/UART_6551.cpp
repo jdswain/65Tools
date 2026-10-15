@@ -35,9 +35,11 @@ UART::UART() {
     signal(SIGINT, sigint_handler);
 
     if (!isatty(STDIN_FILENO)) {
-        // Piped mode: output via stdout, no input
+        // Piped mode: output via stdout, input from the pipe. Non-blocking,
+        // or a program that polls for a key stops until one is sent.
         use_stdout = true;
         interactive = false;
+        fcntl(STDIN_FILENO, F_SETFL, fcntl(STDIN_FILENO, F_GETFL) | O_NONBLOCK);
     } else {
         // Interactive mode: stdin/stdout in raw mode (deferred)
         use_stdout = false;
