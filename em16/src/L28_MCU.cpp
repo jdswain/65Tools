@@ -166,19 +166,25 @@ void L28_MCU::setTimerBByte(wdc816::Addr offset, wdc816::Byte data)
 wdc816::Byte L28_MCU::getPortByte(wdc816::Addr offset)
 {
     switch (offset) {
-    case 0x00: return portA;
+    case 0x00: { // Port A — bit 1 = PA1 (matrix MRT8 modifier-column return)
+        wdc816::Byte result = portA & ~0x02;
+        if (keyboardEnabled && (portC & keyMatrixPa1))
+            result |= 0x02;
+        return result;
+    }
     case 0x01: return portB;
-    case 0x02: // Port C — keyboard column read
+    case 0x02: // Port C — now a select-output, just echo what ROM wrote
+        return portC;
+    case 0x03: // Port D — matrix returns MRT0..MRT7
         if (keyboardEnabled) {
             wdc816::Byte result = 0;
-            for (int row = 0; row < 8; row++) {
-                if (portD & (1 << row))
-                    result |= keyMatrix[row];
+            for (int sel = 0; sel < 8; sel++) {
+                if (portC & (1 << sel))
+                    result |= keyMatrix[sel];
             }
             return result;
         }
-        return portC;
-    case 0x03: return portD;
+        return portD;
     case 0x04: return portADir;
     case 0x05: return portBSel;
     case 0x06: return portCDir;
@@ -207,10 +213,9 @@ void L28_MCU::setPortByte(wdc816::Addr offset, wdc816::Byte data)
     case 0x0A: eirReg = data; break;
     case 0x0B: // CIR — clear interrupt register
         if (!(data & 0x40)) {
-            // Bit 6 written as 0: clear PA0 edge flag
+            // Bit 6 written as 0: clear PA0 edge flag (keyboard now polled,
+            // no IRQ release of matrix bits — done by keyPressTtl instead)
             eirReg &= ~0x40;
-            pa0_irq_pending = false;
-            releaseAllKeys();
         }
         if (!(data & 0x20)) {
             // Bit 5 written as 0: clear PD7 flag
@@ -225,22 +230,31 @@ void L28_MCU::setPortByte(wdc816::Addr offset, wdc816::Byte data)
 // Keyboard Matrix Emulation
 //------------------------------------------------------------------------------
 
+// row = which PC select drives this key's row (0..7)
+// col = which return wire reads this key (0..7 = PD0..PD7, 8 = PA1)
 void L28_MCU::pressKey(int row, int col)
 {
-    if (row >= 0 && row < 8 && col >= 0 && col < 8)
+    if (row < 0 || row >= 8) return;
+    if (col >= 0 && col < 8)
         keyMatrix[row] |= (1 << col);
+    else if (col == 8)
+        keyMatrixPa1 |= (1 << row);
 }
 
 void L28_MCU::releaseKey(int row, int col)
 {
-    if (row >= 0 && row < 8 && col >= 0 && col < 8)
+    if (row < 0 || row >= 8) return;
+    if (col >= 0 && col < 8)
         keyMatrix[row] &= ~(1 << col);
+    else if (col == 8)
+        keyMatrixPa1 &= ~(1 << row);
 }
 
 void L28_MCU::releaseAllKeys()
 {
     for (int i = 0; i < 8; i++)
         keyMatrix[i] = 0;
+    keyMatrixPa1 = 0;
 }
 
 bool L28_MCU::irq0Pending() const
@@ -249,6 +263,9 @@ bool L28_MCU::irq0Pending() const
 }
 
 // Reverse lookup: ASCII → {row, col, shift, ctrl}
+// Matrix (post-swap): row = PC select bit (0..7), col = return wire
+//   col 0..7 = PD0..PD7 (MRT0..MRT7)
+//   col 8    = PA1      (MRT8 — modifier column)
 struct KeyEntry {
     int8_t row;
     int8_t col;
@@ -260,110 +277,114 @@ static const KeyEntry INVALID_KEY = {-1, -1, false, false};
 
 static KeyEntry asciiToKey(unsigned char ch)
 {
-    // Control characters
-    if (ch == 0x0D) return {3, 4, false, false};  // CR
-    if (ch == 0x08) return {1, 4, false, false};  // BS
-    if (ch == 0x09) return {1, 5, false, false};  // TAB
-    if (ch == 0x1B) return {6, 5, false, false};  // ESC
-    if (ch == 0x7F) return {6, 6, false, false};  // DEL
-    if (ch == 0x20) return {6, 4, false, false};  // SPACE
-    if (ch == 0x0A) return {3, 4, false, false};  // LF → CR
+    // Specials (per keymatrix.md, post-swap layout)
+    if (ch == 0x0D) return {5, 7, false, false};  // CR / ENTR
+    if (ch == 0x0A) return {5, 7, false, false};  // LF → ENTR
+    if (ch == 0x08) return {1, 5, false, false};  // BS
+    if (ch == 0x09) return {6, 8, false, false};  // TAB (PA1 column)
+    if (ch == 0x1B) return {7, 7, false, false};  // ESC
+    if (ch == 0x20) return {6, 7, false, false};  // SPC
 
-    // Control chars (Ctrl+A..Z = 0x01..0x1A)
+    // Ctrl+A..Z (0x01..0x1A): use lowercase letter pos + ctrl flag
     if (ch >= 0x01 && ch <= 0x1A) {
-        // Map to the letter's position + ctrl flag
-        // A=0x01 → row 3 col 5, B=0x02 → row 5 col 4, etc.
-        return asciiToKey(ch + 0x40);  // get letter position
-        // Actually need to return with ctrl flag — do it properly:
+        KeyEntry e = asciiToKey(ch + 0x60);
+        e.ctrl = true;
+        e.shift = false;
+        return e;
     }
 
-    // Uppercase letters (unshifted = uppercase in Forth convention)
-    if (ch >= 'A' && ch <= 'Z') {
-        // Layout:  Q W E R T Y U I  (row 2)
-        //          O P [ ] CR A S D  (row 3, A at col 5)
-        //          F G H J K L ; '  (row 4)
-        //          Z X C V B N M ,  (row 5)
-        static const KeyEntry letters[26] = {
-            {3, 5, false, false},  // A
-            {5, 4, false, false},  // B
-            {5, 2, false, false},  // C
-            {3, 7, false, false},  // D
-            {2, 2, false, false},  // E
-            {4, 0, false, false},  // F
-            {4, 1, false, false},  // G
-            {4, 2, false, false},  // H
-            {2, 7, false, false},  // I
-            {4, 3, false, false},  // J
-            {4, 4, false, false},  // K
-            {4, 5, false, false},  // L
-            {5, 6, false, false},  // M
-            {5, 5, false, false},  // N
-            {3, 0, false, false},  // O
-            {3, 1, false, false},  // P
-            {2, 0, false, false},  // Q
-            {2, 3, false, false},  // R
-            {3, 6, false, false},  // S
-            {2, 4, false, false},  // T
-            {2, 6, false, false},  // U
-            {5, 3, false, false},  // V
-            {2, 1, false, false},  // W
-            {5, 1, false, false},  // X
-            {2, 5, false, false},  // Y
-            {5, 0, false, false},  // Z
-        };
-        return letters[ch - 'A'];
-    }
-
-    // Lowercase letters (shifted = lowercase in Forth convention)
+    // Lowercase letters (unshifted = lowercase by Forth convention)
     if (ch >= 'a' && ch <= 'z') {
-        KeyEntry e = asciiToKey(ch - 0x20);  // get uppercase position
+        static const KeyEntry letters[26] = {
+            {6, 0, false, false},  // a
+            {7, 2, false, false},  // b
+            {7, 1, false, false},  // c
+            {6, 1, false, false},  // d
+            {4, 0, false, false},  // e
+            {1, 1, false, false},  // f
+            {6, 2, false, false},  // g
+            {1, 2, false, false},  // h
+            {5, 3, false, false},  // i
+            {6, 3, false, false},  // j
+            {1, 3, false, false},  // k
+            {6, 4, false, false},  // l
+            {7, 3, false, false},  // m
+            {0, 2, false, false},  // n
+            {4, 3, false, false},  // o
+            {5, 4, false, false},  // p
+            {6, 5, false, false},  // q
+            {5, 1, false, false},  // r
+            {1, 0, false, false},  // s
+            {4, 1, false, false},  // t
+            {4, 2, false, false},  // u
+            {0, 1, false, false},  // v
+            {5, 0, false, false},  // w
+            {0, 0, false, false},  // x
+            {5, 2, false, false},  // y
+            {7, 0, false, false},  // z
+        };
+        return letters[ch - 'a'];
+    }
+
+    // Uppercase letters: shift + lowercase position
+    if (ch >= 'A' && ch <= 'Z') {
+        KeyEntry e = asciiToKey(ch + 0x20);
         e.shift = true;
         return e;
     }
 
-    // Digits
-    if (ch >= '1' && ch <= '8') return {0, (int8_t)(ch - '1'), false, false};
-    if (ch == '9') return {1, 0, false, false};
-    if (ch == '0') return {1, 1, false, false};
+    // Digits 0-9
+    switch (ch) {
+    case '0': return {2, 0, false, false};
+    case '1': return {7, 5, false, false};
+    case '2': return {3, 3, false, false};
+    case '3': return {3, 2, false, false};
+    case '4': return {3, 1, false, false};
+    case '5': return {3, 0, false, false};
+    case '6': return {2, 4, false, false};
+    case '7': return {2, 3, false, false};
+    case '8': return {2, 2, false, false};
+    case '9': return {2, 1, false, false};
+    }
 
     // Unshifted punctuation
     switch (ch) {
-    case '-':  return {1, 2, false, false};
-    case '=':  return {1, 3, false, false};
-    case '.':  return {1, 6, false, false};
-    case '/':  return {1, 7, false, false};
-    case '[':  return {3, 2, false, false};
-    case ']':  return {3, 3, false, false};
-    case ';':  return {4, 6, false, false};
-    case '\'': return {4, 7, false, false};
-    case ',':  return {5, 7, false, false};
-    case '`':  return {6, 2, false, false};
-    case '\\': return {6, 3, false, false};
+    case ',':  return {0, 3, false, false};
+    case '/':  return {0, 4, false, false};
+    case '\\': return {0, 5, false, false};
+    case '=':  return {1, 4, false, false};
+    case '\'': return {2, 5, false, false};
+    case ';':  return {3, 4, false, false};
+    case '`':  return {3, 5, false, false};
+    case '-':  return {4, 4, false, false};
+    case '[':  return {4, 5, false, false};
+    case ']':  return {5, 5, false, false};
+    case '.':  return {7, 4, false, false};
     }
 
-    // Shifted symbols
+    // Shifted symbols (per keymatrix.md)
     switch (ch) {
-    case '!':  return {0, 0, true, false};
-    case '@':  return {0, 1, true, false};
-    case '#':  return {0, 2, true, false};
-    case '$':  return {0, 3, true, false};
-    case '%':  return {0, 4, true, false};
-    case '^':  return {0, 5, true, false};
-    case '&':  return {0, 6, true, false};
-    case '*':  return {0, 7, true, false};
-    case '(':  return {1, 0, true, false};
-    case ')':  return {1, 1, true, false};
-    case '_':  return {1, 2, true, false};
-    case '+':  return {1, 3, true, false};
-    case '>':  return {1, 6, true, false};
-    case '?':  return {1, 7, true, false};
-    case '{':  return {3, 2, true, false};
-    case '}':  return {3, 3, true, false};
-    case ':':  return {4, 6, true, false};
-    case '"':  return {4, 7, true, false};
-    case '<':  return {5, 7, true, false};
-    case '~':  return {6, 2, true, false};
-    case '|':  return {6, 3, true, false};
+    case '<':  return {0, 3, true, false};   // , shifted
+    case '?':  return {0, 4, true, false};   // / shifted
+    case '|':  return {0, 5, true, false};   // \ shifted
+    case '+':  return {1, 4, true, false};   // = shifted
+    case '"':  return {2, 5, true, false};   // ' shifted
+    case ':':  return {3, 4, true, false};   // ; shifted
+    case '~':  return {3, 5, true, false};   // ` shifted
+    case '_':  return {4, 4, true, false};   // - shifted
+    case '{':  return {4, 5, true, false};   // [ shifted
+    case '}':  return {5, 5, true, false};   // ] shifted
+    case '>':  return {7, 4, true, false};   // . shifted
+    case ')':  return {2, 0, true, false};   // 0 shifted
+    case '(':  return {2, 1, true, false};   // 9 shifted
+    case '*':  return {2, 2, true, false};   // 8 shifted
+    case '&':  return {2, 3, true, false};   // 7 shifted
+    case '^':  return {2, 4, true, false};   // 6 shifted
+    case '%':  return {3, 0, true, false};   // 5 shifted
+    case '$':  return {3, 1, true, false};   // 4 shifted
+    case '#':  return {3, 2, true, false};   // 3 shifted
+    case '@':  return {3, 3, true, false};   // 2 shifted
+    case '!':  return {7, 5, true, false};   // 1 shifted (assumed)
     }
 
     return INVALID_KEY;
@@ -381,7 +402,14 @@ void L28_MCU::injectChar(unsigned char ch)
 void L28_MCU::pollKeyboard()
 {
     if (!keyboardEnabled) return;
-    if (pa0_irq_pending) return;  // don't stack up keys
+
+    // Auto-release a previously-pressed key after the TTL window expires.
+    // This gives the ROM scan loop enough cycles to observe the matrix bit
+    // without needing host keyUp events.
+    if (keyPressTtl > 0) {
+        if (--keyPressTtl == 0) releaseAllKeys();
+        return;
+    }
 
     unsigned char buf;
 
@@ -392,7 +420,6 @@ void L28_MCU::pollKeyboard()
         buf = keyBuf[r];
         keyBufRead.store((r + 1) % KEY_BUF_SIZE, std::memory_order_release);
     } else {
-        // Read from stdin
         if (interactive) enterRawMode();
         else fcntl(STDIN_FILENO, F_SETFL, fcntl(STDIN_FILENO, F_GETFL) | O_NONBLOCK);
 
@@ -400,24 +427,12 @@ void L28_MCU::pollKeyboard()
         if (n != 1) return;
     }
 
-    // Handle Ctrl+A..Z (0x01..0x1A) specially
-    if (buf >= 0x01 && buf <= 0x1A) {
-        KeyEntry e = asciiToKey(buf + 0x40);  // get letter position
-        if (e.row < 0) return;
-        pressKey(e.row, e.col);
-        pressKey(6, 1);  // CTRL
-        pa0_irq_pending = true;
-        eirReg |= 0x40;  // set PA0 edge flag (bit 6)
-        return;
-    }
-
     KeyEntry e = asciiToKey(buf);
     if (e.row < 0) return;
 
     pressKey(e.row, e.col);
-    if (e.shift) pressKey(6, 0);  // SHIFT
-    if (e.ctrl)  pressKey(6, 1);  // CTRL
+    if (e.shift) pressKey(0, 8);  // SHFT lives at (MSB0, MRT8)
+    if (e.ctrl)  pressKey(1, 8);  // CTRL lives at (MSB1, MRT8)
 
-    pa0_irq_pending = true;
-    eirReg |= 0x40;  // set PA0 edge flag (bit 6)
+    keyPressTtl = 4096;  // ~4096 instructions of matrix-hold per keypress
 }

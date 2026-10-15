@@ -164,9 +164,17 @@ class L28_MCU {
   wdc816::Byte eirReg = 0x00;        // External Interrupt Register
   wdc816::Byte cirReg = 0x00;        // Clear Interrupt Register
 
-  // Keyboard matrix state
-  wdc816::Byte keyMatrix[8] = {};    // one byte per row, bits = columns
-  bool pa0_irq_pending = false;      // PA0 edge detect → IRQ0
+  // Keyboard matrix state — selects on PC0..PC7, returns on PD0..PD7+PA1.
+  // keyMatrix[sel] holds the 8-bit PD return value when PC_sel is asserted.
+  // keyMatrixPa1 is packed: bit `sel` = PA1 return when PC_sel is asserted
+  // (this is the modifier column / MRT8).
+  wdc816::Byte keyMatrix[8] = {};
+  wdc816::Byte keyMatrixPa1 = 0;
+  // Auto-release timer: count down on every pollKeyboard call; release all
+  // matrix bits when it hits zero. Lets a single host keypress hold the
+  // matrix long enough for the ROM scan to detect it without a keyUp event.
+  int keyPressTtl = 0;
+  bool pa0_irq_pending = false;      // unused after IRQ→polling switch; kept for ABI
   bool keyboardEnabled = false;
   bool consoleMode = false;
   bool cocoaInput = false;

@@ -19,7 +19,7 @@ src_objects = \
  VIA_6522 \
  ADB_Controller \
  Video \
- LCD_ST7586S \
+ LCD_RA8889 \
  memory \
  main
 

@@ -158,25 +158,26 @@ static const uint8_t palette[16][3] = {
 - (void)drawRect:(NSRect)dirtyRect {
   (void)dirtyRect;
   uint8_t *mem = video->getMemory();
+  const uint8_t *pal = video->getPalette();   // programmable palette (RGB triples)
   int bpr = videoWidth / 2; // bytes per video row (320)
 
   // Convert 4bpp packed pixels to RGBA
   for (int y = 0; y < videoHeight; y++) {
     for (int x = 0; x < bpr; x++) {
       uint8_t byte = mem[y * bpr + x];
-      // High nibble = left pixel (even x), low nibble = right pixel (odd x)
-      int ci0 = (byte >> 4) & 0x0F;
-      int ci1 = byte & 0x0F;
+      // Low nibble = left pixel (even x), high nibble = right pixel (odd x)
+      int ci0 = byte & 0x0F;
+      int ci1 = (byte >> 4) & 0x0F;
       int off0 = (y * videoWidth + x * 2) * 4;
       int off1 = off0 + 4;
-      rgbaBuffer[off0 + 0] = palette[ci0][0]; // R
-      rgbaBuffer[off0 + 1] = palette[ci0][1]; // G
-      rgbaBuffer[off0 + 2] = palette[ci0][2]; // B
-      rgbaBuffer[off0 + 3] = 255;             // A
-      rgbaBuffer[off1 + 0] = palette[ci1][0]; // R
-      rgbaBuffer[off1 + 1] = palette[ci1][1]; // G
-      rgbaBuffer[off1 + 2] = palette[ci1][2]; // B
-      rgbaBuffer[off1 + 3] = 255;             // A
+      rgbaBuffer[off0 + 0] = pal[ci0 * 3 + 0]; // R
+      rgbaBuffer[off0 + 1] = pal[ci0 * 3 + 1]; // G
+      rgbaBuffer[off0 + 2] = pal[ci0 * 3 + 2]; // B
+      rgbaBuffer[off0 + 3] = 255;              // A
+      rgbaBuffer[off1 + 0] = pal[ci1 * 3 + 0]; // R
+      rgbaBuffer[off1 + 1] = pal[ci1 * 3 + 1]; // G
+      rgbaBuffer[off1 + 2] = pal[ci1 * 3 + 2]; // B
+      rgbaBuffer[off1 + 3] = 255;              // A
     }
   }
 
@@ -287,11 +288,17 @@ static const uint8_t palette[16][3] = {
 Video::Video()
   : _w(VIDEO_WIDTH), _h(VIDEO_HEIGHT), displayEnabled(false), nativeDelegate(nullptr)
 {
-  memset(mem, 0, sizeof(mem));
+  mem = (uint8_t *)calloc(VIDEO_MEM_SIZE, 1);
+  // Default the programmable palette to the standard VGA 16 colours so demos
+  // that don't program $0240 still show colour. (On the FPGA the palette is
+  // undefined at reset and the boot code must load it.)
+  for (int n = 0; n < 16; n++)
+    for (int c = 0; c < 3; c++) pal[n][c] = palette[n][c];
 }
 
 Video::~Video()
 {
+  free(mem);
 }
 
 void Video::reset()

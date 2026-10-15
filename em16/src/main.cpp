@@ -725,6 +725,19 @@ unsigned int loadMod(char * filename) {
   uint8_t *code_data = (uint8_t*)malloc(code_length);
   printf("Code length: %d bytes\n", code_length);
 
+  // Bank-aware placement: a module must fit wholly within one 64K bank. The
+  // 65C816 PC is 16-bit and wraps at a bank boundary, so no procedure (hence
+  // no module) may straddle one — an intra-module JSR/branch would wrap to the
+  // wrong bank. Bump to the next bank if the code would not fit in the current
+  // bank's remaining space. Mirrors Modules.LoadEx's own placement rule so the
+  // fake boot loader and the runtime loader agree.
+  if ((module_base & (BANK_SIZE - 1)) + code_length > BANK_SIZE) {
+    module_base = (module_base & ~(BANK_SIZE - 1)) + BANK_SIZE;
+    current_load_address = module_base;
+    printf("  (bumped to bank boundary: base now $%06X)\n",
+           (MODULE_BANK << 16) + module_base);
+  }
+
   if (fread(code_data, 1, code_length, file) != code_length) {
     printf("Error: Cannot read code section\n");
     free(code_data);
@@ -1022,14 +1035,27 @@ static void trap_handler(int trap_num) {
 int main(int argc, char **argv)
 {
   int index = 1;
-  unsigned int entry;
+  unsigned int entry = 0;
   int custom_dp = -1;    // -1 = use default (0), else custom DP address
   int custom_sp = -1;    // -1 = use default ($0100), else custom SP address
   bool video_enabled = false;
   bool test_pattern = false;
   bool console_mode = false;
+  const char *fbdump_file = nullptr;  // -fbdump: write framebuffer as PPM after run
+  const char *bootrom_file = nullptr; // -bootrom: 8 KB boot ROM image ($E000-$FFFF)
 
-  setup();
+  // Pre-scan for -fpga so RAM is sized (8 MB SDRAM) before files are loaded.
+  bool want_fpga = false;
+  for (int i = 1; i < argc; i++)
+    if (!strcmp(argv[i], "-fpga")) want_fpga = true;
+  if (want_fpga) {
+    mem816::enableFPGA();
+    emu816::setMemory(0x7FFFFF, 8 * 1024 * 1024, NULL);  // 8 MB SDRAM
+    // The framebuffer decode is always active in FPGA mode; add -video to open
+    // the live window, or -fbdump to snapshot headless.
+  } else {
+    setup();
+  }
 
   while (index < argc) {
     if (argv[index][0] != '-') break;
@@ -1086,6 +1112,23 @@ int main(int argc, char **argv)
       continue;
     }
 
+    if (!strcmp(argv[index], "-fbdump") && index + 1 < argc) {
+      fbdump_file = argv[index + 1];
+      index += 2;
+      continue;
+    }
+
+    if (!strcmp(argv[index], "-fpga")) {   // handled in the pre-scan above
+      ++index;
+      continue;
+    }
+
+    if (!strcmp(argv[index], "-bootrom") && index + 1 < argc) {
+      bootrom_file = argv[index + 1];
+      index += 2;
+      continue;
+    }
+
     if (!strcmp(argv[index], "-disk0") && index + 1 < argc) {
       mem816::getFDC().mountDisk(0, argv[index + 1]);
       index += 2;
@@ -1117,7 +1160,7 @@ int main(int argc, char **argv)
     }
 
     if (!strcmp(argv[index], "-?")) {
-      cerr << "Usage: em16 [-t] [-cpu l28|rockwell|wdc|816] [-dp addr] [-sp addr] [-video] [-test-pattern] [-console] [-I dir] [-disk0 file] [-disk1 file] file ..." << endl;
+      cerr << "Usage: em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-test-pattern] [-console] [-I dir] [-disk0 file] [-disk1 file] file ..." << endl;
       return (1);
     }
 
@@ -1143,13 +1186,15 @@ int main(int argc, char **argv)
       }
       index++;
     } while (index < argc);
-  else {
+  else if (!bootrom_file && !want_fpga) {
     cerr << "No ELF files specified" << endl;
     return (1);
   }
 
-  // Write boot manifest at $0D00 for Modules.Mod to discover pre-loaded modules
-  {
+  // Write boot manifest at $0D00 for Modules.Mod to discover pre-loaded modules.
+  // Skipped in FPGA mode: $0D00 is inside the FPGA I/O block, and a ROM boot
+  // does its own discovery — there is no host-side fake-boot manifest.
+  if (!want_fpga) {
     #define MANIFEST_BASE 0x0D00
     uint32_t maddr = MANIFEST_BASE;
     // Count loaded modules
@@ -1240,12 +1285,25 @@ int main(int argc, char **argv)
 
   mem816::initFlash();
 
-  emu816::reset(trace);
+  // Load the FPGA boot ROM ($E000-$FFFF) before reset so the reset vector at
+  // $FFFC comes out of ROM (the $0300 soft switch resets with ROM mapped in).
+  if (bootrom_file) {
+    FILE *rf = fopen(bootrom_file, "rb");
+    if (!rf) { cerr << "Cannot open boot ROM: " << bootrom_file << endl; return 1; }
+    static uint8_t rom[8192];
+    size_t n = fread(rom, 1, 8192, rf);
+    fclose(rf);
+    mem816::loadBootROM(rom, (int)n);
+    unsigned rv = rom[0x1FFC] | (rom[0x1FFD] << 8);
+    cout << "Boot ROM loaded (" << n << " bytes), reset vector -> $" << hex << rv << endl;
+  }
 
-  // Set up 65C816 native mode, 16-bit registers, and stack pointer
+  emu816::reset(trace);  // Set up 65C816 native mode, 16-bit registers, and stack pointer
   // so that individual modules don't need a preamble
-  if (emu816::getCpuType() != emu816::CPU_L28) {
+  if (!mem816::isFPGA() && emu816::getCpuType() != emu816::CPU_L28) {
     emu816::setNativeMode();
+    // The stack grows down from just below the floppy controller's
+    // registers at $0800-$080F; -sp moves it.
     emu816::setSP(custom_sp >= 0 ? custom_sp : 0x07FF);
   }
 
@@ -1264,7 +1322,10 @@ int main(int argc, char **argv)
 
   // Lambda to run module entry points
   auto run_modules = [&]() {
-    if (mod_count > 0) {
+    if (mem816::isFPGA()) {
+      // Boot from reset: PC already came from the ROM's $FFFC vector.
+      mem816::run();
+    } else if (mod_count > 0) {
       for (int i = 0; i < mod_count; i++) {
         if (mod_entries[i] != 0) {
           cout << "Initialising at " << hex << mod_entries[i] << endl;
@@ -1317,7 +1378,28 @@ int main(int argc, char **argv)
   } else {
     run_modules();
   }
-  
+
+  // -fbdump: decode the 4bpp framebuffer to a PPM for headless inspection.
+  // Low nibble = left (even x), high nibble = right (odd x); uses the live palette.
+  if (fbdump_file) {
+    const uint8_t *pal = mem816::getVideo().getPalette();
+    uint8_t *vm = mem816::getVideo().getMemory();
+    FILE *pf = fopen(fbdump_file, "wb");
+    if (pf) {
+      fprintf(pf, "P6\n%d %d\n255\n", VIDEO_WIDTH, VIDEO_HEIGHT);
+      int bpr = VIDEO_WIDTH / 2;
+      for (int y = 0; y < VIDEO_HEIGHT; y++) {
+        for (int x = 0; x < VIDEO_WIDTH; x++) {
+          uint8_t b = vm[y * bpr + (x >> 1)];
+          int ci = (x & 1) ? ((b >> 4) & 0x0F) : (b & 0x0F);
+          fputc(pal[ci*3+0], pf); fputc(pal[ci*3+1], pf); fputc(pal[ci*3+2], pf);
+        }
+      }
+      fclose(pf);
+      cout << "Framebuffer dumped to " << fbdump_file << endl;
+    }
+  }
+
 #ifdef __APPLE__
   clock_gettime(CLOCK_MONOTONIC, &end);
 #else

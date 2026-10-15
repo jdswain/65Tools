@@ -30,7 +30,7 @@
 #include "VIA_6522.h"
 
 #include "Video.h"
-#include "LCD_ST7586S.h"
+#include "LCD_RA8889.h"
 
 // The mem816 class defines a set of standard methods for defining and accessing
 // the emulated memory area.
@@ -55,6 +55,63 @@ public:
   // Enable L28 native USART at $0038-$003F
   static void enableL28MCU() { l28MCUEnabled = true; }
 
+  // ---- Tang Nano 20K FPGA SoC target ------------------------------------
+  // Memory map (Verilog65C816/fpga/README.md):
+  //   $00_0000-$7F_FFFF  8 MB SDRAM (framebuffer is plain SDRAM at $70_0000)
+  //   $00_0200-$00_0FFF  I/O block, bank 0 only
+  //   $00_E000-$00_FFFF  8 KB boot ROM, switchable via $0300 bit 0
+  //   $80_0000-$FF_FFFF  unmapped, reads $FF
+  static void enableFPGA() { fpgaMode = true; romMapped = true; }
+  static bool isFPGA() { return fpgaMode; }
+  // Load an 8 KB boot ROM image ($E000-$FFFF). Reset then vectors out of it.
+  static void loadBootROM(const Byte *src, int len) {
+    int n = len < 8192 ? len : 8192;
+    for (int i = 0; i < n; i++) bootROM[i] = src[i];  }
+
+  INLINE static Byte fpgaGetByte(Addr ea)
+  {
+    if (ea >= 0x700000 && ea < 0x700000 + VIDEO_MEM_SIZE)   // framebuffer (SDRAM)
+      return video.getByte(ea - 0x700000);
+    if (ea >= 0x800000) return 0xFF;                        // unmapped
+    if (ea >= 0x000200 && ea <= 0x000FFF) {                 // I/O block (bank 0)
+      if (ea <= 0x00023F) return uart.getByte((ea - 0x200) & 3);   // 6551 ACIA
+      if (ea <= 0x00027F) return 0xFF;                      // palette: write-only
+      if (ea <= 0x0002BF) return 0xFF;                      // ADB keyboard (stub)
+      if (ea <= 0x0002FF) return 0xFF;                      // SD card (not impl)
+      if (ea <= 0x00033F) return romMapped ? 0x01 : 0x00;   // $0300 soft switch
+      if (ea <= 0x00037F) return 0x00;                      // ext-bus ctrl: no IRQ
+      if (ea >= 0x000800) return fdc.getByte(ea);           // ext-bus card window
+      return 0xFF;                                          // unclaimed
+    }
+    if (ea >= 0x00E000 && ea <= 0x00FFFF)                   // boot ROM / RAM
+      return romMapped ? bootROM[ea - 0xE000] : pRAM[ea];
+    if (ea < ramSize) return pRAM[ea];                      // SDRAM
+    return 0xFF;
+  }
+
+  INLINE static void fpgaSetByte(Addr ea, Byte data)
+  {
+    if (ea >= 0x700000 && ea < 0x700000 + VIDEO_MEM_SIZE) { // framebuffer
+      video.setByte(ea - 0x700000, data); return;
+    }
+    if (ea >= 0x800000) return;                             // unmapped
+    if (ea >= 0x000200 && ea <= 0x000FFF) {                 // I/O block
+      if (ea <= 0x00023F) { uart.setByte((ea - 0x200) & 3, data); return; }
+      if (ea <= 0x00027F) {                                 // palette $0240: {r,g,b,-}
+        int off = ea - 0x240; if ((off & 3) != 3) video.setPaletteByte(off >> 2, off & 3, data);
+        return;
+      }
+      if (ea <= 0x0002BF) return;                           // ADB (stub)
+      if (ea <= 0x0002FF) return;                           // SD (not impl)
+      if (ea <= 0x00033F) { romMapped = (data & 1) != 0; return; }  // $0300 soft switch
+      if (ea <= 0x00037F) return;                           // ext-bus ctrl (RES#)
+      if (ea >= 0x000800) { fdc.setByte(ea, data); return; }
+      return;
+    }
+    // $E000-$FFFF writes ALWAYS go to RAM (enables the ROM->RAM shadow handover)
+    if (ea < ramSize) pRAM[ea] = data;
+  }
+
   // Fetch a byte from RAM/ROM without triggering I/O side effects (for trace display)
   INLINE static Byte peekByte(Addr ea)
   {
@@ -77,6 +134,8 @@ public:
   // Fetch a byte from memory
   INLINE static Byte getByte(Addr ea)
   {
+	if (fpgaMode) return fpgaGetByte(ea);
+
 	if ((ea >= VIDEO_BASE_ADDR) && (ea < VIDEO_BASE_ADDR + VIDEO_MEM_SIZE))
 	  return video.getByte(ea - VIDEO_BASE_ADDR);
 
@@ -145,6 +204,8 @@ public:
   // Write a byte to memory
   INLINE static void setByte(Addr ea, Byte data)
   {
+	if (fpgaMode) { fpgaSetByte(ea, data); return; }
+
 	if ((ea >= VIDEO_BASE_ADDR) && (ea < VIDEO_BASE_ADDR + VIDEO_MEM_SIZE)) {
 	  video.setByte(ea - VIDEO_BASE_ADDR, data);
 	  return;
@@ -230,7 +291,7 @@ public:
   }
 
   static Video& getVideo() { return video; }
-  static LCD_ST7586S& getLCD() { return lcd; }
+  static LCD_RA8889& getLCD() { return lcd; }
   static WD1793& getFDC() { return fdc; }
   static VIA_6522& getVIA() { return via; }
 
@@ -246,6 +307,9 @@ private:
   static Addr viaBase;		// VIA base address ($C020 default, 0 = disabled)
   static bool l28MCUEnabled;	// L28 MCU peripherals enabled
   static bool flashInitialized;	// ES2/ES3 flash intercepts active
+  static bool fpgaMode;		// Tang Nano 20K FPGA SoC memory map
+  static bool romMapped;	// $0300 bit 0: boot ROM mapped at $E000-$FFFF
+  static Byte bootROM[8192];	// 8 KB boot ROM ($E000-$FFFF)
 
   static Byte *pRAM;		// Base of RAM memory array
   static const Byte *pROM;      // Base of ROM memory array
@@ -253,7 +317,7 @@ private:
   static UART uart;
   static L28_MCU l28mcu;
   static Video video;
-  static LCD_ST7586S lcd;
+  static LCD_RA8889 lcd;
   static WD1793 fdc;
   static VIA_6522 via;
 };
