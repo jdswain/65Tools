@@ -41,6 +41,7 @@ This port is a derivative of it and under the same licence.
     EmCore    its processor, cpu_65c816.v state for state
     EmSDRAM   the 8 MB, the cache, the SDRAM port's time
     EmACIA    the 6551 of rtl/acia_6551.v
+    EmSCC     the emulated Z85C30 SCC of rtl/scc_85c30.v
     EmADB     the ADB host, with a keyboard and a mouse
     EmBlit    the blitter
     EmHarte   -harte: the Harte single-step tests on EmCore
@@ -99,7 +100,12 @@ rather than em16's default machine:
 - the map: 8 MB of SDRAM through the cache, the I/O block at
   $0200-$0FFF (ACIA, palette, ADB, system control, external bus, video
   control, blitter; the floppy controller is card 0 of the external
-  bus), the 8K boot ROM at $E000 until system control bit 0 is cleared;
+  bus, and the SCC answers at $0820-$082F in place of card 2), the 8K
+  boot ROM at $E000 until system control bit 0 is cleared;
+- the serial port, on standard input and output, through either the
+  ACIA or channel A of the SCC. They share it as on the board; input
+  waiting to be read goes to whichever of the two the program touched
+  last;
 - the display: 640 x 480 in 16 colours at $70_0000, or 80 x 30 text
   (video control bit 0) drawn with the board's font, read at start from
   the Verilog repository's `fpga/rom/font_st8x16.hex` (or `-font`). The
@@ -121,7 +127,8 @@ core takes what the board would take:
 - the display's line fetches (about 210 cycles of each 800 cycle line in
   graphics, 105 in text) and refresh (6 of every 190) take the port
   first, phased as on the board after the SDRAM's initialisation;
-- the ACIA 2340 cycles a character (115200 baud), each way;
+- the ACIA and the SCC 2340 cycles a character (115200 baud), each way;
+  an SCC access 3 cycles;
 - the blitter busy for a time fitted to the test bench's 409 timed blits
   (median error 6%); the pixels change when it finishes.
 
