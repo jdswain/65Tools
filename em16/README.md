@@ -167,5 +167,6 @@ they write:
 
 The port found two faults of the Oberon compiler: two procedures of
 the same name in one module are accepted, and a call from another
-module can then reach the wrong one; and a long string literal is cut
-short without a word (EmCore's mnemonics are assigned 64 at a time).
+module can then reach the wrong one; and a string literal of more than
+255 characters was cut short without a word (fixed: the limit is now
+1023, and a longer one is an error).
