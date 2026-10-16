@@ -1,6 +1,6 @@
 MODULE EmSCC; (* The SoC's emulated Z85C30 SCC, rtl/scc_85c30.v, with
-   channel A on standard input and output and the same timing as EmACIA:
-   2340 cycles a character at 25.2 MHz (115200 baud).
+   channel A on standard input and output, with its timing: 2340 cycles
+   a character at 25.2 MHz (115200 baud).
 
    Registers at $0820-$082F, mirrored every 4 bytes: 0 B control, 1 B data,
    2 A control, 3 A data. Each channel's control port has the SCC's
@@ -18,9 +18,10 @@ MODULE EmSCC; (* The SoC's emulated Z85C30 SCC, rtl/scc_85c30.v, with
    5), MIE (WR9 bit 3), RR3, RR2 from channel B with the status in it (WR9
    bits 0 and 4), and the resets in WR9 bits 7-6. Channel B has no pins.
 
-   As in EmACIA, a character typed reaches the FIFO no sooner than a
-   character time after the one before, and only if there is room: the
-   host holds it back rather than overrunning. *)
+   A character typed reaches the FIFO no sooner than a character time
+   after the one before, and only if there is room: on the board a fourth
+   character waiting is lost (overrun); here the host holds it back, as a
+   terminal with flow control would. *)
 
   IMPORT EmHost;
 
