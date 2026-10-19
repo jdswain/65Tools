@@ -1,4 +1,4 @@
-; UIGraphics.s
+; Graphics.s
     cpu="816"
     longa=on
     longi=on
@@ -13,9 +13,8 @@
 	.proc DrawGlyph(INTEGER, INTEGER, INTEGER, INTEGER, INTEGER, INTEGER): INTEGER
 
 ; SetPixel(x, y, c) - R[0]=x, R[1]=y, R[2]=c
-; Video: framebuffer at $70_0000, 640x480, 320 bytes/row, 2 pixels/byte
-; (4-bit color). Low nibble = left (even x), high nibble = right (odd x).
-; addr = y * 320 + x DIV 2
+; Video: bank 2, 160 bytes/row, 4 pixels/byte (2-bit color)
+; addr = y * 160 + x DIV 4
 SetPixel*:
     ; Save params to temp DP regs
     lda $02             ; x
@@ -23,169 +22,222 @@ SetPixel*:
     lda $04             ; y
     sta $0A             ; R[4] = y
     lda $06             ; c
-    and #$000F          ; c MOD 16
+    and #$0003          ; c MOD 4
     sta $0C             ; R[5] = c (masked)
 
-    ; Compute addr = y * 320 + x DIV 2
-    ; y * 320 = y * 5 * 64
+    ; Compute addr = y * 160 + x DIV 4
+    ; y * 160 = y * 128 + y * 32 = y<<7 + y<<5
     lda $0A             ; y
-    asl                 ; y*2
-    asl                 ; y*4
+    asl
+    asl
+    asl
+    asl
+    asl                 ; y * 32
+    sta $02             ; temp = y*32
+    asl
+    asl                 ; y * 128
     clc
-    adc $0A             ; y*5
-    sta $02             ; row_base low = y*5
-    stz $0E             ; bank overflow accumulator = 0
-    asl $02             ; y*320 = y*5 << 6, carrying overflow into $0E
-    rol $0E
-    asl $02
-    rol $0E
-    asl $02
-    rol $0E
-    asl $02
-    rol $0E
-    asl $02
-    rol $0E
-    asl $02
-    rol $0E
-    lda $0E
-    clc
-    adc #$70            ; bank = $70 + overflow (0..2)
-    sta $0E             ; temp bank
+    adc $02             ; y*128 + y*32 = y*160
+    sta $02             ; R[0] = y*160
 
-    ; x DIV 2
+    ; x DIV 4
     lda $08             ; x
-    lsr                 ; x / 2
+    lsr
+    lsr                 ; x / 4
     clc
-    adc $02             ; addr = row_base + x/2
-    bcc .sp_noc
-    inc $0E             ; carry into bank
-.sp_noc:
-    sta $02             ; addr low
-    lda $0E
-    sta $04             ; bank
+    adc $02             ; addr = y*160 + x/4
+    sta $0E             ; R[6] = addr (low 16 bits)
+
+    ; Set up bank: 2 (video starts at bank 2)
+    ; For y > 409: bank 3, else bank 2
+    lda $0A             ; y
+    cmp #410
+    lda #$02            ; default bank 2
+    bcc .bank_ok
+    lda #$03            ; bank 3
+.bank_ok:
+    sta $10             ; bank byte at $10 (16-bit store, high byte=0)
 
     ; Read byte at [bank:addr]
     ldy #0
     longa=off
     sep #$20            ; 8-bit to read one byte
-    lda [$02],y         ; read pixel byte
+    lda [$0E],y         ; read pixel byte
     rep #$20
     longa=on
     and #$00FF          ; zero-extend
-    sta $0E             ; val (current byte)
+    sta $02             ; R[0] = val (current byte)
 
-    ; Compute pos = x MOD 2
+    ; Compute pos = x MOD 4
     lda $08             ; x
-    and #$0001          ; pos = x MOD 2
-    bne .sp_pos1
+    and #$0003          ; pos = x MOD 4
+    ; Branch on pos
+    cmp #0
+    beq .pos0
+    cmp #1
+    beq .pos1
+    cmp #2
+    beq .pos2
+    bra .pos3
 
-    ; pos 0 (even x): low nibble, keep high nibble
-    lda $0E
-    and #$00F0          ; keep high nibble
-    ora $0C             ; | c
-    sta $0E
-    bra .sp_write
-
-.sp_pos1:
-    ; pos 1 (odd x): high nibble, keep low nibble
-    lda $0E
-    and #$000F          ; keep low nibble
-    sta $0E
+.pos0:
+    ; val = val MOD $40 + c * $40
+    lda $02
+    and #$003F          ; val MOD $40
+    sta $02
     lda $0C             ; c
     asl
     asl
     asl
-    asl                 ; c << 4
-    ora $0E
-    sta $0E
+    asl
+    asl
+    asl                 ; c * $40
+    ora $02
+    sta $02
+    bra .write
 
-.sp_write:
+.pos1:
+    ; val = (val DIV $40) * $40 + c * $10 + val MOD $10
+    lda $02
+    and #$00C0          ; val DIV $40 * $40 (keep top 2 bits)
+    sta $04             ; temp high
+    lda $02
+    and #$000F          ; val MOD $10
+    ora $04             ; high + low
+    sta $02
+    lda $0C             ; c
+    asl
+    asl
+    asl
+    asl                 ; c * $10
+    ora $02
+    sta $02
+    bra .write
+
+.pos2:
+    ; val = (val DIV $10) * $10 + c * 4 + val MOD 4
+    lda $02
+    and #$00F0          ; val DIV $10 * $10 (keep top 4 bits)
+    sta $04             ; temp high
+    lda $02
+    and #$0003          ; val MOD 4
+    ora $04             ; high + low
+    sta $02
+    lda $0C             ; c
+    asl
+    asl                 ; c * 4
+    ora $02
+    sta $02
+    bra .write
+
+.pos3:
+    ; val = (val DIV 4) * 4 + c
+    lda $02
+    and #$00FC          ; val DIV 4 * 4 (keep top 6 bits)
+    ora $0C             ; + c
+    sta $02
+
+.write:
     ; Write byte back at [bank:addr]
-    lda $0E
+    lda $02
     ldy #0
     longa=off
     sep #$20            ; 8-bit store
-    sta [$02],y
+    sta [$0E],y
     rep #$20
     longa=on
     rtl
 
 ; GetPixel(x, y): BYTE - R[0]=x, R[1]=y, result in R[0]
-; Returns the 4-bit color value at pixel (x, y)
+; Returns the 2-bit color value at pixel (x, y)
 GetPixel*:
-    ; Save x
+    ; Compute addr = y * 160 + x DIV 4
     lda $02
     sta $08             ; R[3] = x
-
-    ; Compute addr = y * 320 + x DIV 2
-    ; y * 320 = y * 5 * 64
     lda $04             ; y
-    asl                 ; y*2
-    asl                 ; y*4
+    asl
+    asl
+    asl
+    asl
+    asl                 ; y * 32
+    sta $02             ; temp
+    asl
+    asl                 ; y * 128
     clc
-    adc $04             ; y*5
-    sta $02             ; row_base low = y*5
-    stz $0E             ; bank overflow accumulator = 0
-    asl $02             ; y*320 = y*5 << 6, carrying overflow into $0E
-    rol $0E
-    asl $02
-    rol $0E
-    asl $02
-    rol $0E
-    asl $02
-    rol $0E
-    asl $02
-    rol $0E
-    asl $02
-    rol $0E
-    lda $0E
-    clc
-    adc #$70            ; bank = $70 + overflow (0..2)
-    sta $0E             ; temp bank
-
-    ; x DIV 2
+    adc $02             ; y * 160
+    sta $02
     lda $08             ; x
-    lsr                 ; x / 2
+    lsr
+    lsr                 ; x / 4
     clc
-    adc $02             ; addr = row_base + x/2
-    bcc .gp_noc
-    inc $0E
-.gp_noc:
-    sta $02             ; addr
-    lda $0E
-    sta $04             ; bank
+    adc $02             ; addr = y*160 + x/4
+    sta $0E             ; R[6] = addr
+
+    ; Bank
+    lda $04             ; y
+    cmp #410
+    lda #$02            ; default bank 2
+    bcc .gbank_ok
+    lda #$03            ; bank 3
+.gbank_ok:
+    sta $10             ; 16-bit store, high byte=0
 
     ; Read byte
     ldy #0
     longa=off
-    sep #$20            ; 8-bit
-    lda [$02],y
+    sep #$20            ; 8-bit to read one byte
+    lda [$0E],y
     rep #$20
     longa=on
     and #$00FF
     sta $02             ; val
 
-    ; Extract pixel at pos = x MOD 2
+    ; Extract pixel at pos = x MOD 4
     lda $08             ; x
-    and #$0001
-    bne .gp_pos1
+    and #$0003
+    cmp #0
+    beq .gpos0
+    cmp #1
+    beq .gpos1
+    cmp #2
+    beq .gpos2
+    bra .gpos3
 
-    ; pos 0 (even): low nibble
+.gpos0:
     lda $02
-    and #$000F
+    lsr
+    lsr
+    lsr
+    lsr
+    lsr
+    lsr                 ; val DIV $40
     sta $02
-    bra .gp_done
+    bra .gdone
 
-.gp_pos1:
-    ; pos 1 (odd): high nibble >> 4
+.gpos1:
     lda $02
     lsr
     lsr
     lsr
-    lsr                 ; val >> 4
+    lsr                 ; val DIV $10
+    and #$0003          ; MOD 4
+    sta $02
+    bra .gdone
+
+.gpos2:
+    lda $02
+    lsr
+    lsr                 ; val DIV 4
+    and #$0003          ; MOD 4
+    sta $02
+    bra .gdone
+
+.gpos3:
+    lda $02
+    and #$0003          ; val MOD 4
     sta $02
 
-.gp_done:
+.gdone:
     rtl
 
 ; DrawLine(x1, y1, x2, y2, width, color)
@@ -216,8 +268,8 @@ DrawLine*:
     lda $0A
     sta $26             ; width
     lda $0C
-    and #$000F
-    sta $24             ; color (4-bit)
+    and #$0003
+    sta $24             ; color (2-bit)
 
     ; Compute dx = abs(x2 - x1)
     lda $2C
@@ -301,7 +353,7 @@ DrawLine*:
     lda $12
     cmp $16
     beq .dl_vert        ; cx == end_x: vertical
-    brl .dl_bres        ; Bresenham line
+    brl .dl_wu          ; Wu's antialiased line
 
 ; ---- Horizontal line (cy == end_y) ----
 .dl_horiz:
@@ -359,73 +411,92 @@ DrawLine*:
 .dl_vend:
     brl .dl_wnext
 
-; ---- Bresenham line (no anti-aliasing) ----
-.dl_bres:
+; ---- Wu's Antialiased Line ----
+; Wu's algorithm: step along major axis, draw 2 pixels per step
+; with intensity based on fractional distance from ideal line.
+;
+; gradient = (minor_delta * 256) / major_delta  (0..255 fixed-point)
+; For each major step:
+;   main pixel  intensity = color * (256 - frac) / 256
+;   secondary pixel intensity = color * frac / 256
+;
+; Intensity mapping for 2-bit color (0-3):
+;   color * (256-frac)/256 rounded:
+;     result = (color * coverage + 128) >> 8
+;   With 4 levels we use: 0 -> draw nothing, 1/2/3 -> draw that color
+;
+.dl_wu:
     ; Compute sx = sign(end_x - cx)
     lda $16
     cmp $12
-    bcc .bres_sxn
-    beq .bres_sxn
+    bcc .wu_sxn
+    beq .wu_sxn
     lda #1
     sta $1E             ; sx = +1
-    bra .bres_sy
-.bres_sxn:
+    bra .wu_sy
+.wu_sxn:
     lda #$FFFF
     sta $1E             ; sx = -1
 
-.bres_sy:
+.wu_sy:
     ; Compute sy = sign(end_y - cy)
     lda $18
     cmp $14
-    bcc .bres_syn
-    beq .bres_syn
+    bcc .wu_syn
+    beq .wu_syn
     lda #1
     sta $20             ; sy = +1
-    bra .bres_major
-.bres_syn:
+    bra .wu_major
+.wu_syn:
     lda #$FFFF
     sta $20             ; sy = -1
 
-.bres_major:
+.wu_major:
     ; Determine major axis: x-major if dx >= dy, else y-major
     lda $1A             ; dx
     cmp $1C             ; dy
-    bcs .bres_xmajor
-    brl .bres_ymajor
+    bcs .wu_xmajor
+    brl .wu_ymajor
+.wu_xmajor:
+    ; ---- X-MAJOR Wu's line ----
+    lda #1
+    sta $3A             ; is_x_major = 1
 
-.bres_xmajor:
     ; major_steps = dx
     lda $1A
     sta $34
 
     ; Compute gradient = (dy * 256) / dx  (8-bit fixed-point)
+    ; Binary long division: gradient = 0, rem = dy
+    ; for i = 7 downto 0: rem*=2; if rem>=dx: rem-=dx, gradient|=(1<<i)
     stz $22             ; gradient = 0
     lda $1C             ; remainder = dy
-    sta $3C
+    sta $3C             ; remainder in DP (preserved across mask update)
     ldx #$0080          ; bit mask starting at bit 7
 
-.bres_xdiv:
-    asl $3C             ; rem *= 2
-    lda $3C
+.wu_xdiv:
+    asl $3C             ; rem *= 2 (memory-mode ASL)
+    lda $3C             ; A = rem
     cmp $1A             ; rem >= dx?
-    bcc .bres_xdnext
-    sbc $1A             ; rem -= dx
-    sta $3C
+    bcc .wu_xdnext
+    sbc $1A             ; rem -= dx (carry already set from cmp)
+    sta $3C             ; save updated remainder
     txa
     ora $22
     sta $22             ; gradient |= bit
-.bres_xdnext:
+.wu_xdnext:
     txa
     lsr                 ; shift bit mask right
     tax
-    bne .bres_xdiv
+    bne .wu_xdiv        ; loop while bits remain
 
+    ; $22 = gradient (0..255), $12=cx, $14=cy=start y
     ; minor_int = cy, minor_frac = 0
     lda $14
-    sta $36
-    stz $38
+    sta $36             ; minor_int = cy (y integer part)
+    stz $38             ; minor_frac = 0
 
-    ; Draw first endpoint
+    ; Draw first endpoint at full intensity
     lda $12
     sta $02             ; x = cx
     lda $36
@@ -434,85 +505,111 @@ DrawLine*:
     sta $06             ; color
     jsl SetPixel
 
+    ; major_steps counter
     lda $34
-    beq .bres_xdone
+    beq .wu_xdone       ; dx == 0, skip
     sta $34
 
-.bres_xloop:
+.wu_xloop:
     ; Step major axis: cx += sx
     lda $12
     clc
     adc $1E
     sta $12
 
-    ; Step minor axis fractionally
-    lda $38
+    ; Step minor axis fractionally: minor_frac += gradient
+    lda $38             ; minor_frac
     clc
     adc $22             ; + gradient
     cmp #256
-    bcc .bres_xnowrap
+    bcc .wu_xnowrap
+    ; Overflow: frac >= 256, step minor_int, wrap frac
     sec
     sbc #256
     sta $38
-    lda $36
+    lda $36             ; minor_int
     clc
     adc $20             ; += sy
     sta $36
-    bra .bres_xdraw
-.bres_xnowrap:
+    bra .wu_xdraw
+.wu_xnowrap:
     sta $38
 
-.bres_xdraw:
+.wu_xdraw:
+    ; Main pixel: always at full base color
     lda $24
-    sta $06             ; color
+    sta $06             ; color = base color
     lda $12
     sta $02             ; x = cx
     lda $36
     sta $04             ; y = minor_int
     jsl SetPixel
 
+    ; Secondary (fringe) pixel: drawn at color-1 when frac > 64
+    ; This gives smooth edges without dimming the main line
+    lda $38             ; frac
+    cmp #64
+    bcc .wu_xskip2      ; frac too small, skip fringe
+    lda $24             ; base color
+    dec a               ; fringe = base_color - 1
+    beq .wu_xskip2      ; if base was 1, fringe=0, skip
+    sta $06             ; fringe color
+    lda $12
+    sta $02             ; x = cx
+    lda $36
+    clc
+    adc $20             ; y = minor_int + sy
+    sta $04
+    jsl SetPixel
+.wu_xskip2:
+
+    ; Decrement step counter
     lda $34
     dec a
     sta $34
-    bne .bres_xloop
+    bne .wu_xloop
 
-.bres_xdone:
+.wu_xdone:
     brl .dl_wnext
 
-    ; ---- Y-MAJOR Bresenham ----
-.bres_ymajor:
+    ; ---- Y-MAJOR Wu's line ----
+.wu_ymajor:
+    stz $3A             ; is_x_major = 0
+
     ; major_steps = dy
     lda $1C
     sta $34
 
     ; Compute gradient = (dx * 256) / dy
-    stz $22
+    ; Same 8-iteration binary division: gradient = 0, rem = dx
+    stz $22             ; gradient = 0
     lda $1A             ; remainder = dx
-    sta $3C
-    ldx #$0080
+    sta $3C             ; remainder in DP (preserved across mask update)
+    ldx #$0080          ; bit mask
 
-.bres_ydiv:
-    asl $3C
-    lda $3C
+.wu_ydiv:
+    asl $3C             ; rem *= 2 (memory-mode ASL)
+    lda $3C             ; A = rem
     cmp $1C             ; rem >= dy?
-    bcc .bres_ydnext
-    sbc $1C
-    sta $3C
+    bcc .wu_ydnext
+    sbc $1C             ; rem -= dy
+    sta $3C             ; save updated remainder
     txa
     ora $22
-    sta $22
-.bres_ydnext:
+    sta $22             ; gradient |= bit
+.wu_ydnext:
     txa
     lsr
     tax
-    bne .bres_ydiv
+    bne .wu_ydiv
 
-    ; minor_int = cx, minor_frac = 0
+    ; $22 = gradient, $12=cx, $14=cy
+    ; minor_int = cx (x integer part), minor_frac = 0
     lda $12
-    sta $36
-    stz $38
+    sta $36             ; minor_int = cx
+    stz $38             ; minor_frac = 0
 
-    ; Draw first endpoint
+    ; Draw first endpoint at full intensity
     lda $36
     sta $02             ; x = minor_int (cx)
     lda $14
@@ -521,23 +618,24 @@ DrawLine*:
     sta $06             ; color
     jsl SetPixel
 
+    ; major_steps counter
     lda $34
-    beq .bres_ydone
+    beq .wu_ydone
     sta $34
 
-.bres_yloop:
+.wu_yloop:
     ; Step major axis: cy += sy
     lda $14
     clc
     adc $20
     sta $14
 
-    ; Step minor axis fractionally
+    ; Step minor axis fractionally: minor_frac += gradient
     lda $38
     clc
-    adc $22
+    adc $22             ; + gradient
     cmp #256
-    bcc .bres_ynowrap
+    bcc .wu_ynowrap
     sec
     sbc #256
     sta $38
@@ -545,25 +643,43 @@ DrawLine*:
     clc
     adc $1E             ; minor_int += sx
     sta $36
-    bra .bres_ydraw
-.bres_ynowrap:
+    bra .wu_ydraw
+.wu_ynowrap:
     sta $38
 
-.bres_ydraw:
+.wu_ydraw:
+    ; Main pixel: always at full base color
     lda $24
-    sta $06             ; color
+    sta $06             ; color = base color
     lda $36
     sta $02             ; x = minor_int
     lda $14
     sta $04             ; y = cy
     jsl SetPixel
 
+    ; Secondary (fringe) pixel: drawn at color-1 when frac > 64
+    lda $38             ; frac
+    cmp #64
+    bcc .wu_yskip2      ; frac too small, skip fringe
+    lda $24             ; base color
+    dec a               ; fringe = base_color - 1
+    beq .wu_yskip2      ; if base was 1, fringe=0, skip
+    sta $06             ; fringe color
+    lda $36
+    clc
+    adc $1E             ; x = minor_int + sx
+    sta $02
+    lda $14
+    sta $04             ; y = cy
+    jsl SetPixel
+.wu_yskip2:
+
     lda $34
     dec a
     sta $34
-    bne .bres_yloop
+    bne .wu_yloop
 
-.bres_ydone:
+.wu_ydone:
     brl .dl_wnext
 
 ; ---- Width loop continuation ----
@@ -574,7 +690,7 @@ DrawLine*:
     brl .dl_wloop
 
 ; ============================================================
-; FillRect(x, y, w, h, color) — fill a w*h rectangle at (x,y)
+; FillRect(x, y, w, h, color) — fill a w×h rectangle at (x,y)
 ; R[0]=$02=x, R[1]=$04=y, R[2]=$06=w, R[3]=$08=h, R[4]=$0A=color
 ;
 ; DP working storage ($0C-$28):
@@ -608,9 +724,13 @@ FillRect*:
     lda $08
     sta $20             ; rows_left
 
-    ; Build fill_byte: c | (c<<4)
+    ; Build fill_byte: c | (c<<2) | (c<<4) | (c<<6)
     lda $0A
-    and #$000F
+    and #$0003
+    sta $0C
+    asl
+    asl
+    ora $0C
     sta $0C
     asl
     asl
@@ -619,41 +739,64 @@ FillRect*:
     ora $0C
     sta $0C             ; fill_byte
 
-    ; left_col = x DIV 2
+    ; left_col = x DIV 4
     lda $26
+    lsr
     lsr
     sta $0E
 
-    ; right_col = (x + w - 1) DIV 2
+    ; right_col = (x + w - 1) DIV 4
     lda $26
     clc
     adc $28
     dec a
     sta $02             ; temp = x+w-1
     lsr
+    lsr
     sta $10
 
-    ; Left mask: bits to KEEP for left_pos = x MOD 2 (low nibble = even/left px)
-    ; pos 0: $00, pos 1: $0F  (odd start -> keep the even/left pixel = low nibble)
+    ; Left mask: bits to KEEP for left_pos = x MOD 4
+    ; pos 0: $00, pos 1: $C0, pos 2: $F0, pos 3: $FC
     lda $26
-    and #$0001
+    and #$0003
     beq .fr_lm0
-    lda #$000F
+    cmp #1
+    beq .fr_lm1
+    cmp #2
+    beq .fr_lm2
+    lda #$00FC
     bra .fr_lmd
 .fr_lm0:
     lda #$0000
+    bra .fr_lmd
+.fr_lm1:
+    lda #$00C0
+    bra .fr_lmd
+.fr_lm2:
+    lda #$00F0
 .fr_lmd:
     sta $16             ; left_mask
 
-    ; Right mask: bits to KEEP for right_pos = (x+w-1) MOD 2
-    ; pos 0: $F0, pos 1: $00  (even end -> keep the odd/right pixel = high nibble)
+    ; Right mask: bits to KEEP for right_pos = (x+w-1) MOD 4
+    ; pos 0: $3F, pos 1: $0F, pos 2: $03, pos 3: $00
     lda $02
-    and #$0001
-    bne .fr_rm1
-    lda #$00F0
+    and #$0003
+    cmp #3
+    beq .fr_rm3
+    cmp #2
+    beq .fr_rm2
+    cmp #1
+    beq .fr_rm1
+    lda #$003F
+    bra .fr_rmd
+.fr_rm3:
+    lda #$0000
+    bra .fr_rmd
+.fr_rm2:
+    lda #$0003
     bra .fr_rmd
 .fr_rm1:
-    lda #$0000
+    lda #$000F
 .fr_rmd:
     sta $1A             ; right_mask
 
@@ -695,38 +838,33 @@ FillRect*:
 
 ; ---- Row loop ----
 .fr_rowloop:
-    ; row_base = cur_y * 320 = cur_y * 5 * 64
-    lda $24             ; cur_y
-    asl                 ; y*2
-    asl                 ; y*4
+    ; row_base = cur_y * 160 (y<<5 + y<<7)
+    lda $24
+    asl
+    asl
+    asl
+    asl
+    asl                 ; y*32
+    sta $1C
+    asl
+    asl                 ; y*128
     clc
-    adc $24             ; y*5
-    sta $1C             ; row_base low = y*5
-    stz $1E             ; bank overflow accumulator = 0
-    asl $1C             ; y*320 = y*5 << 6, carrying overflow into $1E
-    rol $1E
-    asl $1C
-    rol $1E
-    asl $1C
-    rol $1E
-    asl $1C
-    rol $1E
-    asl $1C
-    rol $1E
-    asl $1C
-    rol $1E
-    lda $1E
-    clc
-    adc #$70            ; bank = $70 + overflow (0..2)
+    adc $1C
+    sta $1C             ; row_base
+
+    ; Bank: 2 if y<410, else 3
+    lda $24
+    cmp #410
+    lda #$02
+    bcc .fr_bok
+    lda #$03
+.fr_bok:
     sta $1E
 
     ; Set pointer: [row_base + left_col, bank]
     lda $1C
     clc
     adc $0E
-    bcc .fr_bok
-    inc $1E
-.fr_bok:
     sta $02
     lda $1E
     sta $04
@@ -873,7 +1011,7 @@ FillRect*:
 ;   $0C      cur_screen_x
 ;   $0E      video_addr / row_base
 ;   $10      row_base (persistent within row)
-;   $12      pixel temp / pos / bank
+;   $12      pixel temp / pos
 ;   $14      bit_mask (persistent within byte)
 ;   $16      byte_counter
 ;   $18      raster_y_offset
@@ -891,8 +1029,8 @@ DrawGlyph*:
     lda $0A
     sta $28             ; draw_y (baseline)
     lda $0C
-    and #$000F
-    sta $2A             ; color (4-bit)
+    and #$0003
+    sta $2A             ; color (2-bit)
 
     ; 2. Read T[ch]: Y = ch * 2, LDA [$20],Y
     lda $24             ; ch
@@ -1020,30 +1158,19 @@ DrawGlyph*:
     brl .dg_nextrow     ; >= 480 -> skip row
 .dg_yinrange:
 
-    ; row_base = screen_y * 320 = screen_y * 5 * 64
+    ; row_base = screen_y * 160
     lda $06
-    asl                 ; *2
-    asl                 ; *4
+    asl
+    asl
+    asl
+    asl
+    asl                 ; * 32
+    sta $10             ; temp
+    asl
+    asl                 ; * 128
     clc
-    adc $06             ; *5
-    sta $10             ; row_base low = y*5
-    stz $12             ; bank overflow accumulator = 0
-    asl $10             ; *320 = y*5 << 6, carrying overflow into $12
-    rol $12
-    asl $10
-    rol $12
-    asl $10
-    rol $12
-    asl $10
-    rol $12
-    asl $10
-    rol $12
-    asl $10
-    rol $12
-    lda $12
-    clc
-    adc #$70            ; bank = $70 + overflow (0..2)
-    sta $12             ; bank for this row
+    adc $10             ; * 160
+    sta $10             ; row_base
 
     ; Compute raster byte offset for this row = cur_row * bytes_per_row
     lda $40             ; cur_row
@@ -1053,11 +1180,11 @@ DrawGlyph*:
     cpx #2
     beq .dg_bpr2
     ; General: repeated addition
-    sta $0E             ; temp = cur_row
+    sta $12             ; temp = cur_row
     lda #0
 .dg_bpr_mul:
     clc
-    adc $0E
+    adc $12
     dex
     bne .dg_bpr_mul
     bra .dg_bpr_done
@@ -1130,17 +1257,27 @@ DrawGlyph*:
 .dg_xinrange:
 
     ; ---- Inline pixel write at ($0C, $06) ----
-    ; video_addr = row_base + screen_x / 2
+    ; video_addr = row_base + screen_x / 4
     lda $0C             ; screen_x
-    lsr                 ; / 2
+    lsr
+    lsr                 ; / 4
     clc
     adc $10             ; + row_base
     sta $02             ; video ptr addr
-    lda $12             ; bank (from row calc)
+
+    ; Bank: 2 if screen_y < 410, else 3
+    lda $06             ; screen_y
+    cmp #410
+    lda #$02
     bcc .dg_bok
-    inc a               ; carry from column add
+    lda #$03
 .dg_bok:
     sta $04             ; video ptr bank
+
+    ; pixel pos = screen_x MOD 4
+    lda $0C
+    and #$0003
+    sta $12             ; pos
 
     ; Read current video byte
     ldy #0
@@ -1150,30 +1287,58 @@ DrawGlyph*:
     rep #$20
     longa=on
     and #$00FF
-    sta $0E             ; save current byte
+    ; A = current pixel byte
 
-    ; pixel pos = screen_x MOD 2
-    lda $0C
-    and #$0001
-    bne .dg_pp1
+    ldx $12             ; pos
+    cpx #0
+    beq .dg_pp0
+    cpx #1
+    beq .dg_pp1
+    cpx #2
+    beq .dg_pp2
+    bra .dg_pp3
 
-    ; pos 0 (even x): low nibble
-    lda $0E
-    and #$00F0          ; keep high nibble
-    ora $2A             ; | color
+.dg_pp0:
+    ; pos 0: bits 7-6, clear mask=$3F
+    and #$003F
+    sta $12
+    lda $2A             ; color
+    asl
+    asl
+    asl
+    asl
+    asl
+    asl                 ; << 6
+    ora $12
     bra .dg_pwrite
 
 .dg_pp1:
-    ; pos 1 (odd x): high nibble
-    lda $0E
-    and #$000F          ; keep low nibble
-    sta $0E
+    ; pos 1: bits 5-4, clear mask=$CF
+    and #$00CF
+    sta $12
     lda $2A             ; color
     asl
     asl
     asl
     asl                 ; << 4
-    ora $0E
+    ora $12
+    bra .dg_pwrite
+
+.dg_pp2:
+    ; pos 2: bits 3-2, clear mask=$F3
+    and #$00F3
+    sta $12
+    lda $2A             ; color
+    asl
+    asl                 ; << 2
+    ora $12
+    bra .dg_pwrite
+
+.dg_pp3:
+    ; pos 3: bits 1-0, clear mask=$FC
+    and #$00FC
+    ora $2A             ; | color
+    ; fall through
 
 .dg_pwrite:
     ldy #0
@@ -1232,14 +1397,14 @@ InitGraphics*:
     longa=on
     and #$00FF          ; zero-extend bank to 16-bit
     sta $04             ; R[1] = bank
-    lda #23             ; length incl. null terminator
+    lda #21             ; length incl. null terminator
     sta $06             ; R[2] = length
     jsl Out.String
     jsl Out.Ln
     rtl
 
 msg:
-    text "UIGraphics Initialised"
+    text "Graphics Initialised"
     byte 0
 
 _init:

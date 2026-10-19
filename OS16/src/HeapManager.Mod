@@ -45,7 +45,8 @@ MODULE HeapManager;
   BEGIN
     bank := p DIV 10000H; ofs := p MOD 10000H;
     SYSTEM.GET(bank, ofs, v);
-    r := v;                       (* INTEGER->LONGINT widen zero-extends *)
+    r := v;                       (* INTEGER->LONGINT sign-extends: undo it *)
+    IF r < 0 THEN r := r + 10000H END;
     RETURN r
   END getW;
 

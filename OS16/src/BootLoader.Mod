@@ -1,5 +1,5 @@
-MODULE Boot;
-(* Minimal dependency-free floppy boot (B2): read a named file from the FAT12
+MODULE BootLoader;
+(* The boot loader (model: BootLoader). Minimal dependency-free floppy boot (B2): read a named file from the FAT12
    root directory of the WD1773 floppy at the FPGA ext-bus card window $0800 and
    serial-dump it. IMPORT SYSTEM only, fixed buffers (no NEW). Geometry + reloc
    handled by MakeROM; this runs from the boot ROM. AND/LSR/ASL/ORA are oc816
@@ -309,4 +309,4 @@ BEGIN
     END
   ELSE Str("BPB fail"); Ln
   END
-END Boot.
+END BootLoader.

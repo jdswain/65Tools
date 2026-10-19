@@ -1,22 +1,32 @@
-MODULE Driver;
+MODULE Driver; (* The base of every device driver (model: Driver).
 
-TYPE
-  CharDriver* = POINTER TO CharDriverDesc;
-  CharDriverDesc* = RECORD
-    name*: ARRAY 16 OF CHAR;
-    read*: PROCEDURE(d: CharDriver): INTEGER;
-    write*: PROCEDURE(d: CharDriver; c: CHAR): INTEGER;
-    get*: PROCEDURE(d: CharDriver; key: INTEGER; VAR val: INTEGER);
-    set*: PROCEDURE(d: CharDriver; key: INTEGER; val: INTEGER);
-  END;
+   A driver has a name and two control calls, Get and Set, that take a
+   key defined by the driver (an error code, a track, a baud rate, ...).
+   CharacterDriver, BlockDriver, BusDriver and NetworkInterface extend
+   it. *)
 
-  BlockDriver* = POINTER TO BlockDriverDesc;
-  BlockDriverDesc* = RECORD
-    name*: ARRAY 16 OF CHAR;
-    read*: PROCEDURE(d: BlockDriver; block: INTEGER; VAR buf: ARRAY OF BYTE): INTEGER;
-    write*: PROCEDURE(d: BlockDriver; block: INTEGER; VAR buf: ARRAY OF BYTE): INTEGER;
-    get*: PROCEDURE(d: BlockDriver; key: INTEGER; VAR val: INTEGER);
-    set*: PROCEDURE(d: BlockDriver; key: INTEGER; val: INTEGER);
-  END;
+  CONST NameLen* = 16;
+
+  TYPE
+    Driver* = POINTER TO DriverDesc;
+    DriverDesc* = RECORD
+      name*: ARRAY NameLen OF CHAR
+    END;
+
+  (* the value of a control parameter; -1 for a key the driver lacks *)
+  PROCEDURE (d: Driver) Get*(key: INTEGER; VAR val: INTEGER);
+  BEGIN val := -1
+  END Get;
+
+  PROCEDURE (d: Driver) Set*(key, val: INTEGER);
+  BEGIN
+  END Set;
+
+  PROCEDURE SetName*(d: Driver; name: ARRAY OF CHAR);
+    VAR i: INTEGER;
+  BEGIN i := 0;
+    WHILE (i < LEN(name)) & (i < NameLen - 1) & (name[i] # 0X) DO d.name[i] := name[i]; INC(i) END;
+    d.name[i] := 0X
+  END SetName;
 
 END Driver.

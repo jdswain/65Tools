@@ -1,0 +1,8 @@
+driver FD0
+formatted, mounted
+synced
+length 1514
+hello, os16 1234
+bytes ok 1500
+delete 0
+gone

@@ -1,5 +1,7 @@
-MODULE ADBManager;
-  IMPORT SYSTEM, EventManager, InterruptManager;
+MODULE ADBManager; (* The Apple Desktop Bus through the 6522 VIA (model:
+   ADBManager, a BusDriver): polls the keyboard and the mouse and posts
+   their events to the EventManager. *)
+  IMPORT SYSTEM, Driver, BusDriver, EventManager, InterruptManager;
 
   CONST
     (* VIA 6522 register addresses *)
@@ -72,6 +74,10 @@ MODULE ADBManager;
       (* $70-$7F *)
         0,  0,  0,  0,   0,127,  0,  0,   0,  0,  0,  0,   0,  0,  0,  0
     };
+
+  TYPE
+    ADBManager* = POINTER TO ADBManagerDesc;
+    ADBManagerDesc* = RECORD (BusDriver.BusDriverDesc) END;
 
   VAR
     mods: INTEGER;      (* current modifier state *)
@@ -273,6 +279,21 @@ MODULE ADBManager;
     mods := 0;
     prevButton := 0
   END Init;
+
+  (* --- The BusDriver object --- *)
+
+  PROCEDURE (b: ADBManager) Reset* OVERRIDE;
+  BEGIN Init
+  END Reset;
+
+  PROCEDURE (b: ADBManager) Poll* OVERRIDE;
+  BEGIN Poll
+  END Poll;
+
+  PROCEDURE New*(): ADBManager;
+    VAR b: ADBManager;
+  BEGIN NEW(b); Driver.SetName(b, "ADB"); RETURN b
+  END New;
 
 BEGIN
   mods := 0;

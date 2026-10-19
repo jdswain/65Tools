@@ -1,6 +1,6 @@
 MODULE Terminal;
-  IMPORT UIGraphics, UIMenuBar, UIWindow, UIText, UIKit, Helve12,
-         EventManager, ADBManager, UIMouse;
+  IMPORT EventManager, ADBManager, Graphics, MenuManager, Window,
+         FontManager, UIKit, Helve12, UIMouse;
 
   CONST
     lineHeight = 14;
@@ -11,8 +11,8 @@ MODULE Terminal;
     charWidth = 6;
 
   VAR
-    menubar: UIMenuBar.UIMenuBar;
-    window: UIWindow.UIWindow;
+    menubar: MenuManager.MenuBar;
+    window: Window.Window;
     ev: EventManager.Event;
     curX, curY: INTEGER;
     dx: INTEGER;
@@ -29,11 +29,11 @@ MODULE Terminal;
   END NewLine;
 
 BEGIN
-  UIGraphics.InitGraphics;
-  menubar := UIMenuBar.New();
-  window := UIWindow.New("Terminal", 20, 20, 600, 350);
-  UIMenuBar.Draw(menubar);
-  UIWindow.Draw(window);
+  Graphics.InitGraphics;
+  menubar := MenuManager.New();
+  window := Window.New("Terminal", 20, 20, 600, 350);
+  MenuManager.Draw(menubar);
+  window.Draw;
 
   ADBManager.Init;
   (* Flush accumulated mouse deltas from before app start *)
@@ -59,9 +59,9 @@ BEGIN
         ELSIF ev.ch = 8 THEN
           curX := curX - charWidth;
           IF curX < contentLeft THEN curX := contentLeft END;
-          UIGraphics.FillRect(curX, curY - 2, charWidth, lineHeight, UIKit.White)
+          Graphics.FillRect(curX, curY - 2, charWidth, lineHeight, UIKit.White)
         ELSIF ev.ch > 31 THEN
-          dx := UIText.DrawChar(Helve12.T, ev.ch, curX, curY, UIKit.Black);
+          dx := FontManager.DrawChar(Helve12.T, ev.ch, curX, curY, UIKit.Black);
           curX := curX + dx;
           IF curX > contentRight THEN
             NewLine
