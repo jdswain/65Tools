@@ -43,6 +43,8 @@ This port is a derivative of it and under the same licence.
     EmSCC     the emulated Z85C30 SCC of rtl/scc_85c30.v
     EmADB     the ADB host, with a keyboard and a mouse
     EmBlit    the blitter
+    Em82077   the carrier's 82077AA floppy controller, two drives
+    EmSCSI    the carrier's 53C80 SCSI controller and a disk at ID 0
     EmHarte   -harte: the Harte single-step tests on EmCore
 
 What Oberon cannot reach is in C: `EmHost_rt.c` (terminal modes,
@@ -85,7 +87,8 @@ descriptors.
 
 ## The SoC (-fpga)
 
-    em16 -fpga [-bootrom rom.bin] [-font font.hex] [-video] [-fbdump ppm] [file ...]
+    em16 -fpga [-bootrom rom.bin] [-font font.hex] [-video] [-fbdump ppm]
+               [-disk0 img] [-disk1 img] [-wd1793] [-scsi img] [file ...]
 
 `-fpga` emulates the SoC of `../../Verilog65C816/fpga` as its RTL
 describes it (`rtl/soc.v` and the modules below it, and `fpga/README.md`)
@@ -110,6 +113,13 @@ rather than em16's default machine:
   defines it, its writes dropping the cache lines they touch;
 - the ADB host with a keyboard and a mouse that the `-video` window
   feeds;
+- the disk controllers of the carrier board that `docs/Hardware.md`
+  describes, at the addresses it gives: an 82077AA at $0800 (card 0)
+  and the SCSI half of the Z85C80, a 53C80, at $0830 (card 3), with
+  their interrupts on the card `IRQ#` that bit 0 of $0340 reads (and the
+  CPU's IRQ), and bit 0 of $0340 resetting them; below;
+- with `-wd1793`, the WD1793 card that OS16's `Boot.Mod` was written
+  for at $0800 instead of the 82077AA, as before;
 - a program ends with STP or a fetch from 00:0000.
 
 Time is counted in the SoC's 25.2 MHz cycles, and each bus cycle of the
@@ -135,6 +145,43 @@ which SDRAM rows are open (a cycle or two on some misses), the
 display's fetch arbitration beyond its fixed windows, and a typed
 character arriving while one waits: on the board it overruns, here it
 is held back, as if by flow control.
+
+### Disks under -fpga
+
+Both controllers are polled: there is no DMA yet. The comments at the
+top of `Em82077.Mod` and `EmSCSI.Mod` list what they do and leave out.
+
+- **Floppy**, `-disk0` and `-disk1`: 720K, 1.44M or 2.88M images, the
+  sectors in the order track, side, sector. The 82077AA is in PC/AT
+  mode. Set ND with SPECIFY: without DMA a read or write ends at once
+  with an overrun. The data rate (CCR or DSR) must suit the disk, 500K
+  for 1.44M and 250K for 720K, and a polled transfer ends after the
+  sector EOT names with ST0 $40, ST1 $80, as on a PC without TC.
+  Seeks take the step rate SPECIFY sets.
+- **SCSI**, `-scsi`: one disk at ID 0, as large as its image, in 512
+  byte blocks from block 0. The 53C80's registers are those of the 5380;
+  the disk answers arbitration, selection with or without ATN, and the
+  common commands of a SCSI-2 disk (INQUIRY, TEST UNIT READY, REQUEST
+  SENSE, READ CAPACITY, READ and WRITE 6 and 10, MODE SENSE, ...), with
+  UNIT ATTENTION after power on and a bus reset.
+
+`tools/mkdisk.sh` makes FAT images with the Mac's `hdiutil`, and opens
+them in the Finder to copy files in and out, as the floppy images were:
+
+    tools/mkdisk.sh create hd.img 5m file ...    a 5 MB FAT16 disk for -scsi
+    tools/mkdisk.sh create fd.img 1440k file ... a 1.44M FAT12 floppy for -disk0
+    tools/mkdisk.sh mount hd.img                 /Volumes/EM16
+    tools/mkdisk.sh unmount hd.img               before em16 uses it again
+
+The volume starts at block 0, with no partition map. The floppies' boot
+sectors give their real geometry, which hdiutil does not write.
+
+`test/disks.sh` runs a boot ROM, `test/disks.s`, that drives both by
+polling (reset and SENSE INTERRUPT STATUS, SPECIFY, RECALIBRATE, SEEK,
+READ and WRITE DATA, a wrong data rate, a wrong cylinder, READ ID;
+arbitration, selection, IDENTIFY, the SCSI commands above, a check
+condition and its sense, a selection nobody answers, a bus reset) and
+compares what it prints with `test/disks.expected`.
 
 `fpga/rom`'s `blttest`, `fbtest`, `texttest` and `adbtest` behave as on
 the board (`as -o X.mem`, the image made an 8K binary for `-bootrom`;
@@ -165,7 +212,9 @@ they write:
 - the L28's USART, LCD and banked memory, the VIA's timer interrupts
   and ADB.
 
-314 comparisons, all the same. The oc816 golden suite (146 pass,
+314 comparisons, all the same (except Business BASIC since its
+console moved to the SCC, which em16-c does not have). `test/disks.sh`
+covers the disk controllers, which em16-c does not have either. The oc816 golden suite (146 pass,
 2 skipped), `as/test816` and Business BASIC's tests pass with it.
 
 The port found two faults of the Oberon compiler: two procedures of

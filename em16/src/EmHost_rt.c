@@ -142,7 +142,9 @@ void EmHost__Report(int64_t cycles, int hex) {
 
 /* --- disk images --- */
 
-static FILE *disk[2];
+/* 0 and 1 the floppy drives, 2 the SCSI disk */
+#define NDISK 3
+static FILE *disk[NDISK];
 
 static void cname(const char *name, int len, char *path, int size) {
     int n = 0;
@@ -154,7 +156,7 @@ int EmHost__DiskOpen(int drive, const char *name, int len) {
     char path[1024];
     FILE *f;
     int ro = 0;
-    if (drive < 0 || drive > 1) return 0;
+    if (drive < 0 || drive >= NDISK) return 0;
     if (disk[drive]) { fclose(disk[drive]); disk[drive] = NULL; }
     cname(name, len, path, sizeof(path));
     f = fopen(path, "r+b");
@@ -165,14 +167,22 @@ int EmHost__DiskOpen(int drive, const char *name, int len) {
 }
 
 int EmHost__DiskRead(int drive, int offset, uint8_t *buf, int len) {
-    if (drive < 0 || drive > 1 || !disk[drive]) return 0;
+    if (drive < 0 || drive >= NDISK || !disk[drive]) return 0;
     fseek(disk[drive], offset, SEEK_SET);
     return (int)fread(buf, 1, (size_t)len, disk[drive]);
 }
 
 void EmHost__DiskWrite(int drive, int offset, uint8_t *buf, int len) {
-    if (drive < 0 || drive > 1 || !disk[drive]) return;
+    if (drive < 0 || drive >= NDISK || !disk[drive]) return;
     fseek(disk[drive], offset, SEEK_SET);
     fwrite(buf, 1, (size_t)len, disk[drive]);
     fflush(disk[drive]);
+}
+
+int EmHost__DiskSize(int drive) {
+    long n;
+    if (drive < 0 || drive >= NDISK || !disk[drive]) return 0;
+    fseek(disk[drive], 0, SEEK_END);
+    n = ftell(disk[drive]);
+    return n > 0x7FFFFFFF ? 0x7FFFFFFF : (int)n;
 }

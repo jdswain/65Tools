@@ -72,7 +72,8 @@ MODULE EmHost; (* The host side of em16: standard output and error, the
   BEGIN RETURN 0
   END FileExists;
 
-  (* Disk images: open returns 0 failed, 1 read-write, 2 read-only. *)
+  (* Disk images, by number: 0 and 1 the floppy drives, 2 the SCSI disk.
+     Open returns 0 failed, 1 read-write, 2 read-only. *)
   PROCEDURE DiskOpen*(drive: INTEGER; name: ARRAY OF CHAR): INTEGER;
   BEGIN RETURN 0
   END DiskOpen;
@@ -83,6 +84,10 @@ MODULE EmHost; (* The host side of em16: standard output and error, the
 
   PROCEDURE DiskWrite*(drive, offset: INTEGER; VAR buf: ARRAY OF BYTE);
   END DiskWrite;
+
+  PROCEDURE DiskSize*(drive: INTEGER): INTEGER;      (* in bytes, 0: none *)
+  BEGIN RETURN 0
+  END DiskSize;
 
   (* Run the CPU (Em16.CpuThread) on a second thread and the window of
      the video display or the LCD on this one, until it is closed. *)

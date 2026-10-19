@@ -4,7 +4,11 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
 
    em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin]
         [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-test-pattern]
-        [-console] [-I dir] [-disk0 file] [-disk1 file] file ...
+        [-console] [-I dir] [-disk0 file] [-disk1 file] [-wd1793]
+        [-scsi file] file ...
+
+   Under -fpga the floppy disks are the 82077AA's, or the WD1793 card's
+   with -wd1793, and -scsi puts a disk at ID 0 on the SCSI bus.
 
    A file with no extension, or one other than .816, is an ELF
    executable; a .816 file an Oberon module. Ported from the C++ em16
@@ -14,7 +18,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
      EmLoad   ELF and .816 loading   EmHost  the host (C side: EmHost_rt.c)
      EmUART EmVIA EmFDC EmL28 EmVideo EmLCD  the devices *)
 
-  IMPORT Env, Files, EmHost, EmMem, EmCPU, EmLoad, EmFDC, EmL28, EmVideo, EmLCD, EmCore, EmSoC, EmHarte;
+  IMPORT Env, Files, EmHost, EmMem, EmCPU, EmLoad, EmFDC, Em82077, EmSCSI, EmL28, EmVideo, EmLCD, EmCore, EmSoC, EmHarte;
 
   VAR
     trace, videoEnabled, testPattern, consoleMode, wantFpga, bad: BOOLEAN;
@@ -87,17 +91,22 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       ELSIF Equal(arg, "-fpga") THEN INC(index)
       ELSIF Equal(arg, "-bootrom") & (index + 1 < n) THEN Env.Arg(index + 1, bootrom); INC(index, 2)
       ELSIF Equal(arg, "-font") & (index + 1 < n) THEN Env.Arg(index + 1, font); INC(index, 2)
-      ELSIF Equal(arg, "-disk0") & (index + 1 < n) THEN Env.Arg(index + 1, val);
-        IF EmFDC.Mount(0, val) THEN END; INC(index, 2)
-      ELSIF Equal(arg, "-disk1") & (index + 1 < n) THEN Env.Arg(index + 1, val);
-        IF EmFDC.Mount(1, val) THEN END; INC(index, 2)
+      ELSIF (Equal(arg, "-disk0") OR Equal(arg, "-disk1")) & (index + 1 < n) THEN Env.Arg(index + 1, val);
+        k := ORD(arg[5]) - ORD("0");
+        IF wantFpga & ~EmSoC.wd1793 THEN IF Em82077.Mount(k, val) THEN END
+        ELSIF EmFDC.Mount(k, val) THEN
+        END;
+        INC(index, 2)
+      ELSIF Equal(arg, "-wd1793") THEN INC(index)
+      ELSIF Equal(arg, "-scsi") & (index + 1 < n) THEN Env.Arg(index + 1, val);
+        IF EmSCSI.Mount(val) THEN END; INC(index, 2)
       ELSIF Equal(arg, "-I") & (index + 1 < n) THEN Env.Arg(index + 1, val); EmLoad.AddPath(val); INC(index, 2)
       ELSIF (arg[1] = "I") & (arg[2] # 0X) THEN
         k := 0; WHILE arg[k + 2] # 0X DO val[k] := arg[k + 2]; INC(k) END; val[k] := 0X;
         EmLoad.AddPath(val); INC(index)
       ELSIF Equal(arg, "-console") THEN consoleMode := TRUE; INC(index)
       ELSIF Equal(arg, "-?") THEN
-        ErrStr("Usage: em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-test-pattern] [-console] [-I dir] [-disk0 file] [-disk1 file] file ...");
+        ErrStr("Usage: em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-test-pattern] [-console] [-I dir] [-disk0 file] [-disk1 file] [-wd1793] [-scsi file] file ...");
         EmHost.Ln(EmHost.err); bad := TRUE
       ELSE ErrStr("Invalid: option '"); ErrStr(arg); ErrStr("'"); EmHost.Ln(EmHost.err); bad := TRUE
       END
@@ -202,7 +211,9 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
     n := Env.ArgCount();
     (* -fpga first, so that the memory has its size before files are loaded *)
     wantFpga := FALSE;
-    FOR i := 1 TO n - 1 DO Env.Arg(i, arg); IF Equal(arg, "-fpga") THEN wantFpga := TRUE END END;
+    FOR i := 1 TO n - 1 DO Env.Arg(i, arg);
+      IF Equal(arg, "-fpga") THEN wantFpga := TRUE ELSIF Equal(arg, "-wd1793") THEN EmSoC.UseWD1793 END
+    END;
     IF wantFpga THEN EmMem.EnableFPGA; EmMem.SetMemory(7FFFFFH, 800000H)
     ELSE EmMem.SetMemory(0FFFFFH, 100000H)
     END;

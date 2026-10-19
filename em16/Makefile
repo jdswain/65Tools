@@ -24,7 +24,7 @@ BINDIR := ../bin
 TARGET := $(BINDIR)/em16
 
 # In order of import
-MODS := EmHost EmSym EmUART EmVIA EmFDC EmL28 EmVideo EmLCD EmCore EmSDRAM EmSCC EmADB EmBlit EmSoC EmMem EmCPU EmLoad EmHarte Em16
+MODS := EmHost EmSym EmUART EmVIA EmFDC Em82077 EmSCSI EmL28 EmVideo EmLCD EmCore EmSDRAM EmSCC EmADB EmBlit EmSoC EmMem EmCPU EmLoad EmHarte Em16
 OBJS := $(MODS:%=$(OBJDIR)/%.o)
 CSRC := $(SRCDIR)/EmHost_rt.c $(SRCDIR)/EmFont.c $(SRCDIR)/EmCocoa.m
 
@@ -60,10 +60,11 @@ $(OBJDIR)/%.o: $(OBJDIR)/%.Mod $(RT_SMB)
 
 $(OBJDIR)/EmUART.o $(OBJDIR)/EmFDC.o $(OBJDIR)/EmL28.o $(OBJDIR)/EmLCD.o: $(OBJDIR)/EmHost.o
 $(OBJDIR)/EmSDRAM.o: $(OBJDIR)/EmVideo.o
-$(OBJDIR)/EmSCC.o $(OBJDIR)/EmADB.o: $(OBJDIR)/EmHost.o
+$(OBJDIR)/EmSCC.o $(OBJDIR)/EmADB.o $(OBJDIR)/Em82077.o $(OBJDIR)/EmSCSI.o: $(OBJDIR)/EmHost.o
 $(OBJDIR)/EmBlit.o: $(OBJDIR)/EmSDRAM.o
 $(OBJDIR)/EmSoC.o: $(OBJDIR)/EmCore.o $(OBJDIR)/EmSDRAM.o $(OBJDIR)/EmSCC.o $(OBJDIR)/EmADB.o \
-                   $(OBJDIR)/EmBlit.o $(OBJDIR)/EmFDC.o $(OBJDIR)/EmVideo.o
+                   $(OBJDIR)/EmBlit.o $(OBJDIR)/EmFDC.o $(OBJDIR)/Em82077.o $(OBJDIR)/EmSCSI.o \
+                   $(OBJDIR)/EmVideo.o
 $(OBJDIR)/EmMem.o: $(OBJDIR)/EmUART.o $(OBJDIR)/EmVIA.o $(OBJDIR)/EmFDC.o $(OBJDIR)/EmL28.o \
                    $(OBJDIR)/EmVideo.o $(OBJDIR)/EmLCD.o $(OBJDIR)/EmSoC.o
 $(OBJDIR)/EmCPU.o: $(OBJDIR)/EmMem.o $(OBJDIR)/EmSym.o
@@ -71,14 +72,14 @@ $(OBJDIR)/EmSym.o: $(OBJDIR)/EmHost.o
 $(OBJDIR)/EmLoad.o: $(OBJDIR)/EmCPU.o
 $(OBJDIR)/EmCore.o: $(OBJDIR)/EmSym.o
 $(OBJDIR)/EmHarte.o: $(OBJDIR)/EmCore.o
-$(OBJDIR)/Em16.o: $(OBJDIR)/EmLoad.o $(OBJDIR)/EmHarte.o $(OBJDIR)/EmSoC.o
+$(OBJDIR)/Em16.o: $(OBJDIR)/EmLoad.o $(OBJDIR)/EmHarte.o $(OBJDIR)/EmSoC.o $(OBJDIR)/Em82077.o $(OBJDIR)/EmSCSI.o
 
 $(TARGET): $(OBJS) $(CSRC) | $(BINDIR)
 	cd $(OBJDIR) && $(OC) -o $(abspath $(TARGET)) Em16.Mod \
 	    $(abspath $(CSRC)) -framework Cocoa
 
 test: $(TARGET)
-	@sh test/run.sh
+	@sh test/disks.sh
 
 compare: $(TARGET)
 	@sh test/compare.sh
