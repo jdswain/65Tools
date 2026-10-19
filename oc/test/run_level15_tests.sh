@@ -2,7 +2,7 @@
 # Level 15 DrawGlyph + bank-aware data access tests
 # Compiles L15_*.Mod files, runs them through the emulator, compares UART output
 # These tests require modules from multiple directories:
-#   test/Out.816, ../OS16/src/UIGraphics.816, ../FontTool/fonts/*.816
+#   test/Out.816, ../OS16/build/Graphics.816, ../FontTool/fonts/*.816
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -54,7 +54,7 @@ for expected_file in "$SCRIPT_DIR"/L15_*.expected; do
   fi
 
   # Compile with search paths for Graphics and font modules
-  compile_output=$("$OC" "$modfile" -I "$PROJECT_DIR/../OS16/src" -I "$PROJECT_DIR/../FontTool/fonts" 2>&1)
+  compile_output=$("$OC" "$modfile" -I "$PROJECT_DIR/../OS16/build" -I "$PROJECT_DIR/../FontTool/fonts" 2>&1)
   if echo "$compile_output" | grep -q "  pos [0-9]"; then
     echo "FAIL  $basename (compilation error)"
     echo "$compile_output" | grep "  pos [0-9]" | head -3 | sed 's/^/      /'
@@ -68,10 +68,10 @@ for expected_file in "$SCRIPT_DIR"/L15_*.expected; do
     continue
   fi
 
-  # Collect dependency .816 files (Out, UIGraphics, fonts)
+  # Collect dependency .816 files (Out, Graphics, fonts)
   deps=""
   deps="$deps $SCRIPT_DIR/Out.816"
-  [ -f "$PROJECT_DIR/../OS16/src/UIGraphics.816" ] && deps="$deps $PROJECT_DIR/../OS16/src/UIGraphics.816"
+  [ -f "$PROJECT_DIR/../OS16/build/Graphics.816" ] && deps="$deps $PROJECT_DIR/../OS16/build/Graphics.816"
 
   # Add font modules referenced by the test (scan IMPORT list)
   for font_816 in "$PROJECT_DIR/../FontTool/fonts"/*.816; do

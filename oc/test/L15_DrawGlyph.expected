@@ -1,1 +1,1 @@
-!skip needs UIGraphics + Ohlfs10 dependency modules (not in the test tree)
+!skip needs Graphics + Ohlfs10 dependency modules (not in the test tree)

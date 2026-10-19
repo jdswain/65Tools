@@ -79,10 +79,12 @@ for f in ../oc/test/*.816; do
 done
 
 echo "boot"
+# OS16's boot loader, as `make` in ../OS16 builds it
+[ -f ../OS16/build/BootLoader.816 ] || echo "  (no ../OS16/build/BootLoader.816: run make in ../OS16)"
 cp ../OS16/images/BootDisk.img "$work/old.img"; cp ../OS16/images/BootDisk.img "$work/new.img"
 for v in old new; do
   if [ $v = old ]; then e=$OLD; else e=$NEW; fi
-  perl -e 'alarm 60; exec @ARGV' "$e" -t -disk0 "$work/$v.img" ../OS16/boot/Boot.816 \
+  perl -e 'alarm 60; exec @ARGV' "$e" -t -disk0 "$work/$v.img" ../OS16/build/BootLoader.816 \
     < /dev/null > "$work/boot.$v.out" 2> "$work/boot.$v.err"
   sed -i '' "s|$work/$v.img|disk.img|" "$work/boot.$v.out"
 done

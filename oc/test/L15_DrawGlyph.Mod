@@ -1,5 +1,5 @@
 MODULE L15_DrawGlyph;
-  IMPORT Out, UIGraphics, Ohlfs10, SYSTEM;
+  IMPORT Out, Graphics, Ohlfs10, SYSTEM;
 
   VAR fAddr, fBank, dx, p: INTEGER;
     s: ARRAY 16 OF CHAR;
@@ -20,24 +20,24 @@ BEGIN
   Out.String(s); Out.Int(Ohlfs10.height, 0); Out.Ln;
 
   (* Test 3: SetPixel/GetPixel roundtrip *)
-  UIGraphics.SetPixel(40, 10, 15);
-  p := UIGraphics.GetPixel(40, 10);
+  Graphics.SetPixel(40, 10, 15);
+  p := Graphics.GetPixel(40, 10);
   s := "pixel: ";
   Out.String(s); Out.Int(p, 0); Out.Ln;
 
   (* Test 4: DrawGlyph returns advance width *)
-  dx := UIGraphics.DrawGlyph(fAddr, fBank, 48H, 100, 100, 15);
+  dx := Graphics.DrawGlyph(fAddr, fBank, 48H, 100, 100, 15);
   s := "dx: ";
   Out.String(s); Out.Int(dx, 0); Out.Ln;
 
   (* Test 5: Verify a pixel was actually drawn *)
   (* With base_screen_y = y + yoff, glyph starts at y=100 upward *)
-  p := UIGraphics.GetPixel(100, 104);
+  p := Graphics.GetPixel(100, 104);
   s := "p100: ";
   Out.String(s); Out.Int(p, 0); Out.Ln;
 
   (* Test 6: Draw a second character *)
-  dx := UIGraphics.DrawGlyph(fAddr, fBank, 69H, 110, 100, 7);
+  dx := Graphics.DrawGlyph(fAddr, fBank, 69H, 110, 100, 7);
   s := "dx2: ";
   Out.String(s); Out.Int(dx, 0); Out.Ln
 END L15_DrawGlyph.
