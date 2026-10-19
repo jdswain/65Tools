@@ -13,7 +13,8 @@
 	.proc DrawGlyph(INTEGER, INTEGER, INTEGER, INTEGER, INTEGER, INTEGER): INTEGER
 
 ; SetPixel(x, y, c) - R[0]=x, R[1]=y, R[2]=c
-; Video: bank 2, 320 bytes/row, 2 pixels/byte (4-bit color)
+; Video: framebuffer at $70_0000, 640x480, 320 bytes/row, 2 pixels/byte
+; (4-bit color). Low nibble = left (even x), high nibble = right (odd x).
 ; addr = y * 320 + x DIV 2
 SetPixel*:
     ; Save params to temp DP regs
@@ -32,15 +33,23 @@ SetPixel*:
     asl                 ; y*4
     clc
     adc $0A             ; y*5
-    asl                 ; y*10
-    asl                 ; y*20
-    asl                 ; y*40
-    asl                 ; y*80
-    asl                 ; y*160
-    asl                 ; y*320, carry = overflow into bank
-    sta $02             ; row_base low 16 bits
-    lda #$02
-    adc #$00            ; bank = 2 + carry
+    sta $02             ; row_base low = y*5
+    stz $0E             ; bank overflow accumulator = 0
+    asl $02             ; y*320 = y*5 << 6, carrying overflow into $0E
+    rol $0E
+    asl $02
+    rol $0E
+    asl $02
+    rol $0E
+    asl $02
+    rol $0E
+    asl $02
+    rol $0E
+    asl $02
+    rol $0E
+    lda $0E
+    clc
+    adc #$70            ; bank = $70 + overflow (0..2)
     sta $0E             ; temp bank
 
     ; x DIV 2
@@ -70,7 +79,15 @@ SetPixel*:
     and #$0001          ; pos = x MOD 2
     bne .sp_pos1
 
-    ; pos 0 (even x): high nibble, clear mask=$0F
+    ; pos 0 (even x): low nibble, keep high nibble
+    lda $0E
+    and #$00F0          ; keep high nibble
+    ora $0C             ; | c
+    sta $0E
+    bra .sp_write
+
+.sp_pos1:
+    ; pos 1 (odd x): high nibble, keep low nibble
     lda $0E
     and #$000F          ; keep low nibble
     sta $0E
@@ -80,14 +97,6 @@ SetPixel*:
     asl
     asl                 ; c << 4
     ora $0E
-    sta $0E
-    bra .sp_write
-
-.sp_pos1:
-    ; pos 1 (odd x): low nibble, clear mask=$F0
-    lda $0E
-    and #$00F0          ; keep high nibble
-    ora $0C             ; | c
     sta $0E
 
 .sp_write:
@@ -115,15 +124,23 @@ GetPixel*:
     asl                 ; y*4
     clc
     adc $04             ; y*5
-    asl                 ; y*10
-    asl                 ; y*20
-    asl                 ; y*40
-    asl                 ; y*80
-    asl                 ; y*160
-    asl                 ; y*320, carry = overflow
-    sta $02             ; row_base
-    lda #$02
-    adc #$00            ; bank = 2 + carry
+    sta $02             ; row_base low = y*5
+    stz $0E             ; bank overflow accumulator = 0
+    asl $02             ; y*320 = y*5 << 6, carrying overflow into $0E
+    rol $0E
+    asl $02
+    rol $0E
+    asl $02
+    rol $0E
+    asl $02
+    rol $0E
+    asl $02
+    rol $0E
+    asl $02
+    rol $0E
+    lda $0E
+    clc
+    adc #$70            ; bank = $70 + overflow (0..2)
     sta $0E             ; temp bank
 
     ; x DIV 2
@@ -153,19 +170,19 @@ GetPixel*:
     and #$0001
     bne .gp_pos1
 
-    ; pos 0 (even): high nibble >> 4
+    ; pos 0 (even): low nibble
+    lda $02
+    and #$000F
+    sta $02
+    bra .gp_done
+
+.gp_pos1:
+    ; pos 1 (odd): high nibble >> 4
     lda $02
     lsr
     lsr
     lsr
     lsr                 ; val >> 4
-    sta $02
-    bra .gp_done
-
-.gp_pos1:
-    ; pos 1 (odd): low nibble
-    lda $02
-    and #$000F
     sta $02
 
 .gp_done:
@@ -616,12 +633,12 @@ FillRect*:
     lsr
     sta $10
 
-    ; Left mask: bits to KEEP for left_pos = x MOD 2
-    ; pos 0: $00, pos 1: $F0
+    ; Left mask: bits to KEEP for left_pos = x MOD 2 (low nibble = even/left px)
+    ; pos 0: $00, pos 1: $0F  (odd start -> keep the even/left pixel = low nibble)
     lda $26
     and #$0001
     beq .fr_lm0
-    lda #$00F0
+    lda #$000F
     bra .fr_lmd
 .fr_lm0:
     lda #$0000
@@ -629,11 +646,11 @@ FillRect*:
     sta $16             ; left_mask
 
     ; Right mask: bits to KEEP for right_pos = (x+w-1) MOD 2
-    ; pos 0: $0F, pos 1: $00
+    ; pos 0: $F0, pos 1: $00  (even end -> keep the odd/right pixel = high nibble)
     lda $02
     and #$0001
     bne .fr_rm1
-    lda #$000F
+    lda #$00F0
     bra .fr_rmd
 .fr_rm1:
     lda #$0000
@@ -684,15 +701,23 @@ FillRect*:
     asl                 ; y*4
     clc
     adc $24             ; y*5
-    asl                 ; y*10
-    asl                 ; y*20
-    asl                 ; y*40
-    asl                 ; y*80
-    asl                 ; y*160
-    asl                 ; y*320, carry = overflow
-    sta $1C             ; row_base
-    lda #$02
-    adc #$00            ; bank = 2 + carry
+    sta $1C             ; row_base low = y*5
+    stz $1E             ; bank overflow accumulator = 0
+    asl $1C             ; y*320 = y*5 << 6, carrying overflow into $1E
+    rol $1E
+    asl $1C
+    rol $1E
+    asl $1C
+    rol $1E
+    asl $1C
+    rol $1E
+    asl $1C
+    rol $1E
+    asl $1C
+    rol $1E
+    lda $1E
+    clc
+    adc #$70            ; bank = $70 + overflow (0..2)
     sta $1E
 
     ; Set pointer: [row_base + left_col, bank]
@@ -986,13 +1011,13 @@ DrawGlyph*:
     adc $40
     sta $06             ; cur_screen_y
 
-    ; Skip if screen_y < 0 or >= 400
+    ; Skip if screen_y < 0 or >= 480
     bpl .dg_ynotminus
     brl .dg_nextrow     ; negative -> skip row
 .dg_ynotminus:
-    cmp #400
+    cmp #480
     bcc .dg_yinrange
-    brl .dg_nextrow     ; >= 400 -> skip row
+    brl .dg_nextrow     ; >= 480 -> skip row
 .dg_yinrange:
 
     ; row_base = screen_y * 320 = screen_y * 5 * 64
@@ -1001,15 +1026,23 @@ DrawGlyph*:
     asl                 ; *4
     clc
     adc $06             ; *5
-    asl                 ; *10
-    asl                 ; *20
-    asl                 ; *40
-    asl                 ; *80
-    asl                 ; *160
-    asl                 ; *320, carry = overflow
-    sta $10             ; row_base
-    lda #$02
-    adc #$00
+    sta $10             ; row_base low = y*5
+    stz $12             ; bank overflow accumulator = 0
+    asl $10             ; *320 = y*5 << 6, carrying overflow into $12
+    rol $12
+    asl $10
+    rol $12
+    asl $10
+    rol $12
+    asl $10
+    rol $12
+    asl $10
+    rol $12
+    asl $10
+    rol $12
+    lda $12
+    clc
+    adc #$70            ; bank = $70 + overflow (0..2)
     sta $12             ; bank for this row
 
     ; Compute raster byte offset for this row = cur_row * bytes_per_row
@@ -1124,7 +1157,14 @@ DrawGlyph*:
     and #$0001
     bne .dg_pp1
 
-    ; pos 0 (even x): high nibble
+    ; pos 0 (even x): low nibble
+    lda $0E
+    and #$00F0          ; keep high nibble
+    ora $2A             ; | color
+    bra .dg_pwrite
+
+.dg_pp1:
+    ; pos 1 (odd x): high nibble
     lda $0E
     and #$000F          ; keep low nibble
     sta $0E
@@ -1134,13 +1174,6 @@ DrawGlyph*:
     asl
     asl                 ; << 4
     ora $0E
-    bra .dg_pwrite
-
-.dg_pp1:
-    ; pos 1 (odd x): low nibble
-    lda $0E
-    and #$00F0          ; keep high nibble
-    ora $2A             ; | color
 
 .dg_pwrite:
     ldy #0

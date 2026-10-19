@@ -1,0 +1,14 @@
+MODULE TestFB;
+  IMPORT SYSTEM;
+  CONST Serial=0200H; FBBase=700000H;
+  VAR i: INTEGER; a: LONGINT;
+  PROCEDURE Wr(ch: CHAR); BEGIN SYSTEM.PUT(0,Serial,ORD(ch)) END Wr;
+  PROCEDURE PutB(a: LONGINT; val: INTEGER);
+    VAR b: BYTE;
+  BEGIN b := val; SYSTEM.PUT(a DIV 10000H, a MOD 10000H, b) END PutB;
+BEGIN
+  Wr("A");
+  a := FBBase; i := 0;
+  WHILE i < 160 DO PutB(a + i DIV 2, 011H); INC(i) END;
+  Wr("B")
+END TestFB.

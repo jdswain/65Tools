@@ -307,6 +307,7 @@ MODULE Modules;
         tdFixupCount, byteOffset, fixMno: INTEGER;
         lo, hi, tdAddr: INTEGER;
         fixVarBase: INTEGER;
+        vtFixCount, vtExno, vtIdx, vtBase: INTEGER;
         depRes: INTEGER;
   BEGIN
     res := 0;
@@ -490,6 +491,33 @@ MODULE Modules;
             PutWord(0, modVarBase + byteOffset, tdAddr);
             (* hi word gets fixVarBase high bits if needed (usually 0) *)
             PutWord(0, modVarBase + byteOffset + 2, hi);
+            INC(i)
+          END;
+
+          (* Process vtable fixups (v2+): each fills a method slot with the
+             absolute in-bank code address of its implementation. Entry layout
+             offset(4) mno(2) exno(2). This section must be consumed even when
+             empty, otherwise the relocation count below is read from the wrong
+             file offset (leaving the module unrelocated). mno=0: own method,
+             the slot holds a code offset -> add this module's base. mno>0:
+             imported inherited method -> resolve via (mno, exno). *)
+          ReadLong16(r, vtFixCount);
+          i := 0;
+          WHILE (i < vtFixCount) & ~r.eof DO
+            ReadLong16(r, byteOffset);         (* offset written as 4 bytes *)
+            Files.ReadInt(r, fixMno);
+            Files.ReadInt(r, vtExno);
+            IF fixMno = 0 THEN
+              lo := GetWord(0, modVarBase + byteOffset);
+              vtBase := modBase MOD 10000H;
+              PutWord(0, modVarBase + byteOffset, vtBase + lo)
+            ELSIF (fixMno <= impCount) & (impMap[fixMno] >= 0) THEN
+              vtIdx := impMap[fixMno];
+              IF (vtExno > 0) & (vtExno < exportCounts[vtIdx]) THEN
+                vtBase := baseAddrs[vtIdx] MOD 10000H;
+                PutWord(0, modVarBase + byteOffset, vtBase + exports[vtIdx, vtExno])
+              END
+            END;
             INC(i)
           END;
 
