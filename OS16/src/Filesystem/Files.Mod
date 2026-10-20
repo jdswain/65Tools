@@ -5,7 +5,8 @@ MODULE Files; (* The Oberon file interface: Files, Riders and a directory
    overriding its methods. One is in use at a time, the mounted one, which
    Old, New and the directory procedures work on; a file goes on working
    on the one it came from. Riders are kept here: a file system reads and
-   writes a file a byte at a time, at a position.
+   writes a file a byte at a time, at a position. Positions and lengths
+   are LONGINTs.
 
    Init and Format work on a device with the file system installed (FatFS
    installs itself when it is loaded). *)
@@ -29,7 +30,7 @@ MODULE Files; (* The Oberon file interface: Files, Riders and a directory
       eof*: BOOLEAN;    (* a Read was past the end *)
       res*: INTEGER;    (* ReadBytes: how many were not read; Write: -1 failed *)
       file: File;
-      pos: INTEGER
+      pos: LONGINT
     END;
 
     FileSystemDesc* = RECORD
@@ -82,7 +83,7 @@ MODULE Files; (* The Oberon file interface: Files, Riders and a directory
   BEGIN res := -1
   END Rename;
 
-  PROCEDURE (fs: FileSystem) Length*(f: File): INTEGER;
+  PROCEDURE (fs: FileSystem) Length*(f: File): LONGINT;
   BEGIN RETURN 0
   END Length;
 
@@ -99,12 +100,12 @@ MODULE Files; (* The Oberon file interface: Files, Riders and a directory
   END RemoveDir;
 
   (* byte pos of f into x: FALSE at or past the end, or failed *)
-  PROCEDURE (fs: FileSystem) ReadByte*(f: File; pos: INTEGER; VAR x: BYTE): BOOLEAN;
+  PROCEDURE (fs: FileSystem) ReadByte*(f: File; pos: LONGINT; VAR x: BYTE): BOOLEAN;
   BEGIN RETURN FALSE
   END ReadByte;
 
   (* x at byte pos of f, pos at most its length (which it then grows) *)
-  PROCEDURE (fs: FileSystem) WriteByte*(f: File; pos: INTEGER; x: BYTE): BOOLEAN;
+  PROCEDURE (fs: FileSystem) WriteByte*(f: File; pos: LONGINT; x: BYTE): BOOLEAN;
   BEGIN RETURN FALSE
   END WriteByte;
 
@@ -173,8 +174,8 @@ MODULE Files; (* The Oberon file interface: Files, Riders and a directory
     IF mounted # NIL THEN mounted.Rename(old, new, res) ELSE res := -1 END
   END Rename;
 
-  PROCEDURE Length*(f: File): INTEGER;
-    VAR n: INTEGER;
+  PROCEDURE Length*(f: File): LONGINT;
+    VAR n: LONGINT;
   BEGIN
     IF f # NIL THEN n := f.fs.Length(f) ELSE n := 0 END
   RETURN n
@@ -201,7 +202,7 @@ MODULE Files; (* The Oberon file interface: Files, Riders and a directory
 
   (* --- Riders --- *)
 
-  PROCEDURE Set*(VAR r: Rider; f: File; pos: INTEGER);
+  PROCEDURE Set*(VAR r: Rider; f: File; pos: LONGINT);
   BEGIN
     r.file := f; r.eof := FALSE; r.res := 0;
     IF pos < 0 THEN r.pos := 0
@@ -210,7 +211,7 @@ MODULE Files; (* The Oberon file interface: Files, Riders and a directory
     END
   END Set;
 
-  PROCEDURE Pos*(VAR r: Rider): INTEGER;
+  PROCEDURE Pos*(VAR r: Rider): LONGINT;
   BEGIN RETURN r.pos
   END Pos;
 
@@ -220,7 +221,7 @@ MODULE Files; (* The Oberon file interface: Files, Riders and a directory
 
   PROCEDURE Read*(VAR r: Rider; VAR x: BYTE);
   BEGIN
-    IF (r.file # NIL) & r.file.fs.ReadByte(r.file, r.pos, x) THEN INC(r.pos)
+    IF (r.file # NIL) & r.file.fs.ReadByte(r.file, r.pos, x) THEN r.pos := r.pos + 1
     ELSE x := 0; r.eof := TRUE
     END
   END Read;
@@ -254,7 +255,7 @@ MODULE Files; (* The Oberon file interface: Files, Riders and a directory
   PROCEDURE Write*(VAR r: Rider; x: BYTE);
   BEGIN
     IF r.file # NIL THEN
-      IF r.file.fs.WriteByte(r.file, r.pos, x) THEN INC(r.pos) ELSE r.res := -1 END
+      IF r.file.fs.WriteByte(r.file, r.pos, x) THEN r.pos := r.pos + 1 ELSE r.res := -1 END
     END
   END Write;
 

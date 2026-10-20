@@ -149,7 +149,12 @@ number of clusters as the FAT specification has it, and keeps sector
 numbers in LONGINTs and cluster numbers in INTEGERs: a volume has at
 most 32765 clusters, of up to 64 sectors, about 1 GB. It reads the FAT
 through a cache of 4 of its sectors, since a FAT16 FAT can have 64K.
-Files are still at most 32767 bytes.
+File positions and lengths are LONGINTs, in Files (Set, Pos, Length,
+the ReadByte and WriteByte a file system implements) and in FatFS, so a
+file can be as large as the volume; ModuleManager, which already counted
+in LONGINTs, so loads modules over 32K. A file remembers which of its
+sectors its buffer holds: reading or writing within it takes no search
+of the cluster chain.
 
 FatFS.Format sizes the volume to the device's Blocks(), up to that 1 GB
 (a larger device gets a volume of 1 GB at its start): clusters of the
@@ -177,8 +182,9 @@ both partitions) run as .816 modules, which em16 loads only on its
 default machine; it has the 82077AA at $0800 and the 53C80 at $0830 as
 the SoC does. After DiskTest, `mkgpt.py --fill` gives partition 2's
 clusters up to volume sector 40000 to a FILLER.BIN, and DiskTest2
-writes a file beyond it and reads it back; `mkgpt.py --check` then
-follows its FAT16 chain itself.
+writes a file beyond it and reads it back, and a 70000 byte BIG.BIN,
+past 16-bit positions; `mkgpt.py --check` then follows their FAT16
+chains itself.
 
 ## The attic
 

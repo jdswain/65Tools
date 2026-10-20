@@ -24,7 +24,7 @@ MODULE FatFS; (* The FAT12/FAT16 file system with VFAT long names (model:
     deEXT = 8;           (* 3 bytes *)
     deATTR = 11;
     deCLUSTER = 26;      (* 2 bytes LE *)
-    deSIZE = 28;         (* 4 bytes LE, we use low 2 *)
+    deSIZE = 28;         (* 4 bytes LE *)
     DirEntrySize = 32;
     EntriesPerSector = 16; (* 512 / 32 *)
 
@@ -81,7 +81,7 @@ MODULE FatFS; (* The FAT12/FAT16 file system with VFAT long names (model:
     FileDesc = RECORD (Files.FileDesc)
       name: FileName;
       fatName: ARRAY 12 OF CHAR;
-      len: INTEGER;
+      len: LONGINT;
       startCluster: INTEGER;
       dirEntry: INTEGER;
       dirCluster: INTEGER;
@@ -91,6 +91,7 @@ MODULE FatFS; (* The FAT12/FAT16 file system with VFAT long names (model:
       bufCluster: INTEGER;
       bufSecOfs: INTEGER;
       bufDirty: BOOLEAN;
+      bufIdx: LONGINT;      (* the sector of the file buf holds, -1: none *)
       cluster: INTEGER;     (* the cluster last read or written, 0: none *)
       clusterIdx: INTEGER   (* its place in the chain *)
     END;
@@ -829,16 +830,16 @@ MODULE FatFS; (* The FAT12/FAT16 file system with VFAT long names (model:
   RETURN ReadEntryClusterIn(-1, idx)
   END ReadEntryCluster;
 
-  PROCEDURE ReadEntrySizeIn(dirCluster, idx: INTEGER): INTEGER;
+  PROCEDURE ReadEntrySizeIn(dirCluster, idx: INTEGER): LONGINT;
     VAR sec, ofs, res: INTEGER;
   BEGIN
     sec := idx DIV EntriesPerSector;
     ofs := (idx MOD EntriesPerSector) * DirEntrySize;
     res := ReadDirSectorAt(dirCluster, sec)
-  RETURN GetWord(dirBuf, ofs + deSIZE)
+  RETURN GetLong(dirBuf, ofs + deSIZE)
   END ReadEntrySizeIn;
 
-  PROCEDURE ReadEntrySize(idx: INTEGER): INTEGER;
+  PROCEDURE ReadEntrySize(idx: INTEGER): LONGINT;
   BEGIN
   RETURN ReadEntrySizeIn(-1, idx)
   END ReadEntrySize;
@@ -854,7 +855,7 @@ MODULE FatFS; (* The FAT12/FAT16 file system with VFAT long names (model:
   END ReadEntryAttrIn;
 
   PROCEDURE WriteEntryIn(dirCluster, idx: INTEGER; VAR fatName: ARRAY OF CHAR;
-                         cluster, size, attr: INTEGER);
+                         cluster: INTEGER; size: LONGINT; attr: INTEGER);
     VAR sec, ofs, j, res: INTEGER;
   BEGIN
     sec := idx DIV EntriesPerSector;
@@ -869,12 +870,12 @@ MODULE FatFS; (* The FAT12/FAT16 file system with VFAT long names (model:
     END;
     dirBuf[ofs + deATTR] := attr;
     PutWord(dirBuf, ofs + deCLUSTER, cluster);
-    PutWord(dirBuf, ofs + deSIZE, size);
+    PutLong(dirBuf, ofs + deSIZE, size);
     res := WriteDirSectorAt(dirCluster, sec)
   END WriteEntryIn;
 
   PROCEDURE WriteEntry(idx: INTEGER; VAR fatName: ARRAY OF CHAR;
-                       cluster, size: INTEGER);
+                       cluster: INTEGER; size: LONGINT);
   BEGIN
     WriteEntryIn(-1, idx, fatName, cluster, size, 0)
   END WriteEntry;
@@ -1195,14 +1196,15 @@ MODULE FatFS; (* The FAT12/FAT16 file system with VFAT long names (model:
   RETURN newc >= 2
   END AppendCluster;
 
-  (* The cluster holding byte pos of f into f.cluster, and the sector of it
-     into secOfs: FALSE if f has none there. extend: one is added when pos
-     is just past the end of the chain (a write at the end). *)
-  PROCEDURE Locate(f: File; pos: INTEGER; extend: BOOLEAN; VAR secOfs: INTEGER): BOOLEAN;
-    VAR secIdx, target, c: INTEGER; ok: BOOLEAN;
+  (* The cluster holding sector secIdx of f into f.cluster, and the sector
+     of it into secOfs: FALSE if f has none there. extend: one is added
+     when the sector is just past the end of the chain (a write at the
+     end). The place in the chain is an INTEGER: a volume has at most
+     MaxClusters. *)
+  PROCEDURE Locate(f: File; secIdx: LONGINT; extend: BOOLEAN; VAR secOfs: INTEGER): BOOLEAN;
+    VAR target, c: INTEGER; t: LONGINT; ok: BOOLEAN;
   BEGIN
-    secIdx := pos DIV SectorSize;   (* a cluster of 64 sectors has 32768 bytes *)
-    target := secIdx DIV secsPerCluster;
+    t := secIdx DIV secsPerCluster; target := t;
     IF f.startCluster < 2 THEN ok := extend & AppendCluster(f)
     ELSE
       ok := TRUE;
@@ -1216,9 +1218,22 @@ MODULE FatFS; (* The FAT12/FAT16 file system with VFAT long names (model:
       ELSE ok := extend & AppendCluster(f)
       END
     END;
-    secOfs := secIdx MOD secsPerCluster
+    t := secIdx MOD secsPerCluster; secOfs := t
   RETURN ok
   END Locate;
+
+  (* The sector of f holding byte pos in f.buf: TRUE if it is there. Only
+     moving to another sector looks for its cluster. *)
+  PROCEDURE Buffer(f: File; pos: LONGINT; extend: BOOLEAN): BOOLEAN;
+    VAR secIdx: LONGINT; secOfs: INTEGER; ok: BOOLEAN;
+  BEGIN
+    secIdx := pos DIV SectorSize; ok := TRUE;
+    IF secIdx # f.bufIdx THEN
+      ok := Locate(f, secIdx, extend, secOfs) & EnsureSector(f, f.cluster, secOfs);
+      IF ok THEN f.bufIdx := secIdx ELSE f.bufIdx := -1 END
+    END
+  RETURN ok
+  END Buffer;
 
   (* ---- Initialization ---- *)
 
@@ -1256,7 +1271,7 @@ MODULE FatFS; (* The FAT12/FAT16 file system with VFAT long names (model:
         CopyName(bn, f.name);
         f.registered := TRUE;
         f.modified := FALSE;
-        f.bufCluster := -1;
+        f.bufCluster := -1; f.bufIdx := -1;
         f.bufSecOfs := 0;
         f.bufDirty := FALSE
       END
@@ -1287,7 +1302,7 @@ MODULE FatFS; (* The FAT12/FAT16 file system with VFAT long names (model:
         f.dirCluster := dc;
         f.registered := FALSE;
         f.modified := FALSE;
-        f.bufCluster := -1;
+        f.bufCluster := -1; f.bufIdx := -1;
         f.bufSecOfs := 0;
         f.bufDirty := FALSE
       END
@@ -1388,7 +1403,8 @@ MODULE FatFS; (* The FAT12/FAT16 file system with VFAT long names (model:
 
   PROCEDURE (fs: FatFS) Rename*(old, new: ARRAY OF CHAR; VAR res: INTEGER) OVERRIDE;
     VAR idx, dummy, i, dc1, dc2: INTEGER;
-        numLFN, startIdx, nameLen, cluster, size, attr: INTEGER;
+        numLFN, startIdx, nameLen, cluster, attr: INTEGER;
+        size: LONGINT;
         fatNm, shortNm: ARRAY 12 OF CHAR;
         oldNm, newNm, bn1, bn2: ARRAY MaxNameLen OF CHAR;
         ok, useLFN: BOOLEAN;
@@ -1442,7 +1458,7 @@ MODULE FatFS; (* The FAT12/FAT16 file system with VFAT long names (model:
     END
   END Rename;
 
-  PROCEDURE (fs: FatFS) Length*(f: Files.File): INTEGER OVERRIDE;
+  PROCEDURE (fs: FatFS) Length*(f: Files.File): LONGINT OVERRIDE;
   BEGIN RETURN f(File).len
   END Length;
 
@@ -1544,24 +1560,22 @@ MODULE FatFS; (* The FAT12/FAT16 file system with VFAT long names (model:
 
   (* --- Bytes --- *)
 
-  PROCEDURE (fs: FatFS) ReadByte*(file: Files.File; pos: INTEGER; VAR x: BYTE): BOOLEAN OVERRIDE;
-    VAR f: File; secOfs: INTEGER; ok: BOOLEAN;
+  PROCEDURE (fs: FatFS) ReadByte*(file: Files.File; pos: LONGINT; VAR x: BYTE): BOOLEAN OVERRIDE;
+    VAR f: File; i: INTEGER; ok: BOOLEAN;
   BEGIN
     f := file(File);
-    ok := (pos >= 0) & (pos < f.len) & Locate(f, pos, FALSE, secOfs)
-      & EnsureSector(f, f.cluster, secOfs);
-    IF ok THEN x := f.buf[pos MOD SectorSize] END
+    ok := (pos >= 0) & (pos < f.len) & Buffer(f, pos, FALSE);
+    IF ok THEN i := pos MOD SectorSize; x := f.buf[i] END
   RETURN ok
   END ReadByte;
 
-  PROCEDURE (fs: FatFS) WriteByte*(file: Files.File; pos: INTEGER; x: BYTE): BOOLEAN OVERRIDE;
-    VAR f: File; secOfs: INTEGER; ok: BOOLEAN;
+  PROCEDURE (fs: FatFS) WriteByte*(file: Files.File; pos: LONGINT; x: BYTE): BOOLEAN OVERRIDE;
+    VAR f: File; i: INTEGER; ok: BOOLEAN;
   BEGIN
     f := file(File);
-    ok := (pos >= 0) & (pos <= f.len) & Locate(f, pos, TRUE, secOfs)
-      & EnsureSector(f, f.cluster, secOfs);
+    ok := (pos >= 0) & (pos <= f.len) & Buffer(f, pos, TRUE);
     IF ok THEN
-      f.buf[pos MOD SectorSize] := x; f.bufDirty := TRUE;
+      i := pos MOD SectorSize; f.buf[i] := x; f.bufDirty := TRUE;
       IF pos >= f.len THEN f.len := pos + 1; f.modified := TRUE END
     END
   RETURN ok

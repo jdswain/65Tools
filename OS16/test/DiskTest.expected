@@ -16,7 +16,9 @@ length 20000, bytes ok 20000
 done
 partition 2 mounted, FILLER.BIN there
 DATA.BIN length 20000, bytes ok 20000
+BIG.BIN written to 70000
 FAR.BIN length 20000, bytes ok 20000
+BIG.BIN length 70000, bytes ok 70000, at 66000 238, eof at the end
 done
 image: GPT valid
 image: partition 1 boot sector OEM 'OS16', signature 55aa
@@ -24,6 +26,7 @@ image: partition 1 2880 sectors, clusters of 2, FAT of 5, root of 224
 image: partition 1 root: KEEP.TXT 17
 image: partition 2 boot sector OEM 'OS16', signature 55aa
 image: partition 2 126943 sectors, clusters of 4, FAT of 124, root of 512
-image: partition 2 root: DATA.BIN 20000, FILLER.BIN 20314112, FAR.BIN 20000
+image: partition 2 root: DATA.BIN 20000, FILLER.BIN 20314112, FAR.BIN 20000, BIG.BIN 70000
 image: partition 2 FAT16, FAR.BIN from sector 39997, holds what was written
+image: partition 2 BIG.BIN 70000 bytes, as written
 image: outside the partitions untouched

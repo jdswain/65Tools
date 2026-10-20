@@ -16,8 +16,8 @@
 
 --check prints that the GPT is still valid, what each partition holds (the
 OEM name and layout of a FAT boot sector, and the files of its root
-directory), where partition 2's FAR.BIN starts and whether it holds what
-DiskTest2 wrote, and whether anything outside the partitions was
+directory), where partition 2's FAR.BIN starts and whether it and BIG.BIN
+hold what DiskTest2 wrote, and whether anything outside the partitions was
 written.
 """
 import contextlib
@@ -179,6 +179,9 @@ def check(path):
             print(f"image: partition {p} root:", ", ".join(names) if names else "(empty)")
     v = Fat(bytearray(img), PARTS[1][0])
     for _, name, start, size in v.entries():
+        if name == "BIG.BIN":
+            ok = v.read(start, size) == bytes(i % 251 for i in range(size))
+            print(f"image: partition 2 BIG.BIN {size} bytes,", "as written" if ok else "not as written")
         if name == "FAR.BIN":
             data = v.read(start, size)
             ok = data == bytes(i % 253 for i in range(size))
