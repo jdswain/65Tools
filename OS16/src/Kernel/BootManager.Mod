@@ -1,5 +1,5 @@
-MODULE BootLoader;
-(* The boot loader (model: BootLoader), run from the boot ROM: reads
+MODULE BootManager;
+(* The boot loader (model: BootManager), run from the boot ROM: reads
    PAYLOAD.816 from the root directory of the FAT12 floppy in drive 0 of
    the carrier's 82077AA, loads it and runs it, reporting on the serial
    port, channel A of the SoC's Z85C30 SCC. IMPORT SYSTEM only, fixed
@@ -346,4 +346,4 @@ BEGIN
     END
   ELSE Str("BPB fail"); Ln
   END
-END BootLoader.
+END BootManager.

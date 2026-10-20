@@ -1,7 +1,8 @@
 # Makefile for OS16.
 #
-# The sources in src/ (a module for each class of the OS16 model, and
-# the support modules beside them), the fonts used, the applications,
+# The sources in src/, a directory for each package of the OS16 model
+# (Kernel, Driver, Filesystem, UI) with a module for each of its classes
+# and the support modules beside them, the fonts used, the applications,
 # the sample and the tests are copied to build/ and compiled there in
 # the order they import each other: Oberon with oc816 (the self-hosted
 # 65C816 compiler of the oc repository), assembly with as. Edit the
@@ -14,10 +15,14 @@
 #                 .816 modules, on em16's default machine, which has the
 #                 WD1793, not the 82077AA, so it needs an em16 that has
 #                 the 82077AA there: make test-fs EM16=...
+#   make test-disk  DiskTest: SCSIManager, SCSIDisk and DiskPartition on
+#                 the 53C80, a GPT disk (tools/mkgpt.py) with FatFS on its
+#                 first partition. As test-fs it needs an em16 with the
+#                 53C80 on its default machine: make test-disk EM16=...
 #   make fonts    every font of fonts/, not only those used
 #   make clean
 #
-# The boot ROM: python3 tools/makerom.py build/BootLoader.816 boot.rom
+# The boot ROM: python3 tools/makerom.py build/BootManager.816 boot.rom
 
 OC   ?= ../../../oc/self/s816/oc816
 ASM  ?= ../bin/as
@@ -27,24 +32,25 @@ OUT  ?= ../oc/test/Out.Mod
 B := build
 
 # In order of import. Out comes from the oc test library.
+PACKAGES := Kernel Driver Filesystem UI
 SYSTEM  := Out MemoryManager HeapManager InterruptManager EventManager \
            Driver CharacterDriver BlockDriver BusDriver NetworkInterface \
-           Serial Floppy HardDisk SCSIManager ADBManager \
-           FileSystem FatFS ModuleLoader MakeImage BootLoader \
+           Serial Floppy SCSIManager SCSIDisk DiskPartition ADBManager \
+           Files FatFS ModuleManager MakeImage BootManager \
            ProcessManager Numerics
 FONTS   ?= Ohlfs9 Helve12
 UI      := Graphics UIKit $(FONTS) FontManager InputManager WindowManager \
            ClipboardManager MenuManager View Control Button TextView \
            TextField Switch Select ListView ScrollView Window Dialog FileDialog
 APPS    := UIMouse Terminal GraphicsWindow
-TESTS   := FatFSTest Payload GfxDemo TestFB
+TESTS   := FatFSTest DiskTest Payload GfxDemo TestFB
 MODULES := $(SYSTEM) $(UI) $(APPS) $(TESTS)
 
-.PHONY: all test test-fs fonts clean
+.PHONY: all test test-fs test-disk fonts clean
 
 all:
 	@mkdir -p $(B)
-	@cp src/*.Mod src/*.s app/*/*.Mod app/*/*.s sample/*.Mod test/*.Mod $(B)/
+	@cp $(PACKAGES:%=src/%/*.Mod) src/UI/*.s app/*/*.Mod app/*/*.s sample/*.Mod test/*.Mod $(B)/
 	@cp $(OUT) $(B)/Out.Mod
 	@for f in $(FONTS); do cp fonts/$$f.Mod $(B)/; done
 	@cd $(B) && for m in $(MODULES); do \
@@ -57,7 +63,7 @@ all:
 	@echo "OS16 built in $(B)/"
 
 test: all
-	@cd $(B) && python3 ../tools/makerom.py BootLoader.816 boot.rom > /dev/null && \
+	@cd $(B) && python3 ../tools/makerom.py BootManager.816 boot.rom > /dev/null && \
 	  python3 ../tools/makepayload.py Payload.816 PAYLOAD.816 > /dev/null && \
 	  rm -f floppy.dmg && hdiutil create -size 720k -fs "MS-DOS FAT12" -layout NONE -o floppy > /dev/null && \
 	  att=$$(hdiutil attach -imagekey diskimage-class=CRawDiskImage floppy.dmg) && \
@@ -74,6 +80,14 @@ test-fs: all
 	    | sed -nE '/^driver /,/^(gone|still there)$$/p' > FatFSTest.out; \
 	  if cmp -s FatFSTest.out ../test/FatFSTest.expected; then echo "PASS FatFSTest"; \
 	  else echo "FAIL FatFSTest"; diff ../test/FatFSTest.expected FatFSTest.out; exit 1; fi
+
+test-disk: all
+	@cd $(B) && python3 ../tools/mkgpt.py disk.img > /dev/null && \
+	  echo "" | perl -e 'alarm 120; exec @ARGV' $(abspath $(EM16)) -scsi disk.img DiskTest.816 2> /dev/null \
+	    | sed -nE '/^bus /,/^(gone|still there)$$/p' > DiskTest.out; \
+	  python3 ../tools/mkgpt.py --check disk.img >> DiskTest.out; \
+	  if cmp -s DiskTest.out ../test/DiskTest.expected; then echo "PASS DiskTest"; \
+	  else echo "FAIL DiskTest"; diff ../test/DiskTest.expected DiskTest.out; exit 1; fi
 
 fonts:
 	@mkdir -p $(B)

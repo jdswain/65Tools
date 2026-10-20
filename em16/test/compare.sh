@@ -81,7 +81,7 @@ done
 
 echo "boot"
 # OS16's boot loader of the WD1793 (the default machine's floppy
-# controller), kept for this in ../OS16/attic; OS16's BootLoader now
+# controller), kept for this in ../OS16/attic; OS16's BootManager now
 # works the SoC's 82077AA and SCC
 cp ../OS16/attic/src/BootWD1793.Mod "$work/" && (cd "$work" && "$OC816" BootWD1793.Mod -s > /dev/null)
 cp ../OS16/images/BootDisk.img "$work/old.img"; cp ../OS16/images/BootDisk.img "$work/new.img"

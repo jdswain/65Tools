@@ -1,6 +1,6 @@
-MODULE ModuleLoader; (* Loads, relocates and links .816 modules from the file
-   system at run time (model: ModuleLoader). *)
-  IMPORT SYSTEM, FatFS, Out;
+MODULE ModuleManager; (* Loads, relocates and links .816 modules from the file
+   system at run time (model: ModuleManager). *)
+  IMPORT SYSTEM, Files, Out;
 
   CONST
     MaxModules* = 16;
@@ -98,11 +98,11 @@ MODULE ModuleLoader; (* Loads, relocates and links .816 modules from the file
   (* Read a 32-bit little-endian .816 field as a full LONGINT — used for the
      section sizes (td/var/str/code), which can exceed 64 KB, so read loops and
      cross-section file positioning stay correct. *)
-  PROCEDURE ReadLong(VAR r: FatFS.Rider; VAR x: LONGINT);
+  PROCEDURE ReadLong(VAR r: Files.Rider; VAR x: LONGINT);
     VAR lo, hi: INTEGER; xh: LONGINT;
   BEGIN
-    FatFS.ReadInt(r, lo);
-    FatFS.ReadInt(r, hi);
+    Files.ReadInt(r, lo);
+    Files.ReadInt(r, hi);
     x := lo;                    (* sign-extends: undo it (sizes are >= 0) *)
     IF x < 0 THEN x := x + 10000H END;
     xh := hi; x := x + xh * 10000H
@@ -110,22 +110,22 @@ MODULE ModuleLoader; (* Loads, relocates and links .816 modules from the file
 
   (* Read a 32-bit field but keep only the low 16 bits — for values the loader
      handles as 16-bit within-bank quantities (offsets, counts, identity). *)
-  PROCEDURE ReadLong16(VAR r: FatFS.Rider; VAR x: INTEGER);
+  PROCEDURE ReadLong16(VAR r: Files.Rider; VAR x: INTEGER);
     VAR hi: INTEGER;
-  BEGIN FatFS.ReadInt(r, x); FatFS.ReadInt(r, hi)
+  BEGIN Files.ReadInt(r, x); Files.ReadInt(r, hi)
   END ReadLong16;
 
-  PROCEDURE SkipLong(VAR r: FatFS.Rider);
+  PROCEDURE SkipLong(VAR r: Files.Rider);
     VAR dummy: INTEGER;
   BEGIN ReadLong16(r, dummy)
   END SkipLong;
 
-  PROCEDURE SkipBytes(VAR r: FatFS.Rider; n: INTEGER);
+  PROCEDURE SkipBytes(VAR r: Files.Rider; n: INTEGER);
     VAR b: BYTE; i: INTEGER;
   BEGIN
     i := 0;
     WHILE (i < n) & ~r.eof DO
-      FatFS.Read(r, b); INC(i)
+      Files.Read(r, b); INC(i)
     END
   END SkipBytes;
 
@@ -285,8 +285,8 @@ MODULE ModuleLoader; (* Loads, relocates and links .816 modules from the file
   END BuildPath;
 
   PROCEDURE LoadEx(name: ARRAY OF CHAR; VAR res: INTEGER; exec: BOOLEAN);
-    VAR f: FatFS.File;
-        r: FatFS.Rider;
+    VAR f: Files.File;
+        r: Files.Rider;
         nm: ARRAY 64 OF CHAR;
         path: ARRAY 64 OF CHAR;
         modName: ModName;
@@ -309,7 +309,7 @@ MODULE ModuleLoader; (* Loads, relocates and links .816 modules from the file
         tdFixupCount, byteOffset, fixMno: INTEGER;
         lo, hi, tdAddr: INTEGER;
         fixVarBase: INTEGER;
-        vtFixCount, vtExno, vtIdx, vtBase: INTEGER;
+        vtFixCount, vtExno, vtIdx, vtBase, vtBank: INTEGER;
         depRes: INTEGER;
   BEGIN
     res := 0;
@@ -328,7 +328,7 @@ MODULE ModuleLoader; (* Loads, relocates and links .816 modules from the file
       pi := 0;
       WHILE (pi < pathCount) & (f = NIL) DO
         BuildPath(paths[pi], nm, path);
-        f := FatFS.Old(path);
+        f := Files.Old(path);
         INC(pi)
       END;
 
@@ -336,16 +336,16 @@ MODULE ModuleLoader; (* Loads, relocates and links .816 modules from the file
         Out.String("Module not found: "); Out.String(nm); Out.Ln;
         res := -1
       ELSE
-        FatFS.Set(r, f, 0);
+        Files.Set(r, f, 0);
 
         (* Read module name *)
-        FatFS.ReadString(r, modName);
+        Files.ReadString(r, modName);
 
         (* Read key (4 bytes) *)
         ReadLong16(r, key);
 
         (* Read version (1 byte) *)
-        FatFS.Read(r, b);
+        Files.Read(r, b);
         version := b;
 
         (* Read size (4 bytes) *)
@@ -356,7 +356,7 @@ MODULE ModuleLoader; (* Loads, relocates and links .816 modules from the file
         i := 0;
         WHILE i < MaxImports DO impMap[i] := -1; INC(i) END;
 
-        FatFS.Read(r, b);
+        Files.Read(r, b);
         WHILE (b # 0) & ~r.eof DO
           INC(impCount);
           (* Read import name - first byte already in b *)
@@ -364,14 +364,14 @@ MODULE ModuleLoader; (* Loads, relocates and links .816 modules from the file
             i := 0;
             impNames[impCount][0] := CHR(b);
             i := 1;
-            FatFS.Read(r, b);
+            Files.Read(r, b);
             WHILE (b # 0) & ~r.eof & (i < 31) DO
               impNames[impCount][i] := CHR(b);
               INC(i);
-              FatFS.Read(r, b)
+              Files.Read(r, b)
             END;
             (* Skip remaining name chars if longer than 31 *)
-            WHILE (b # 0) & ~r.eof DO FatFS.Read(r, b) END;
+            WHILE (b # 0) & ~r.eof DO Files.Read(r, b) END;
             impNames[impCount][i] := 0X;
             (* Skip key (4 bytes) *)
             SkipLong(r);
@@ -395,10 +395,10 @@ MODULE ModuleLoader; (* Loads, relocates and links .816 modules from the file
             END
           ELSE
             (* Skip this import entry *)
-            WHILE (b # 0) & ~r.eof DO FatFS.Read(r, b) END;
+            WHILE (b # 0) & ~r.eof DO Files.Read(r, b) END;
             SkipLong(r)
           END;
-          FatFS.Read(r, b)  (* Read first byte of next import or 0 *)
+          Files.Read(r, b)  (* Read first byte of next import or 0 *)
         END;
 
         IF res = 0 THEN
@@ -411,7 +411,7 @@ MODULE ModuleLoader; (* Loads, relocates and links .816 modules from the file
           IF tdSize > 0 THEN
             bi := 0;
             WHILE (bi < tdSize) & ~r.eof DO
-              FatFS.Read(r, b);
+              Files.Read(r, b);
               PutByte(0, modVarBase + bi, b);
               INC(bi)
             END
@@ -425,7 +425,7 @@ MODULE ModuleLoader; (* Loads, relocates and links .816 modules from the file
           IF strSize > 0 THEN
             bi := 0;
             WHILE (bi < strSize) & ~r.eof DO
-              FatFS.Read(r, b);
+              Files.Read(r, b);
               PutByte(0, modVarBase + tdSize + varSize + bi, b);
               INC(bi)
             END
@@ -442,19 +442,19 @@ MODULE ModuleLoader; (* Loads, relocates and links .816 modules from the file
           modBase := loadAddr;
           bi := 0;
           WHILE (bi < codeLen) & ~r.eof DO
-            FatFS.Read(r, b);
+            Files.Read(r, b);
             PutB(modBase + bi, b);              (* 24-bit placement *)
             INC(bi)
           END;
 
           (* Skip export procedures (name + value pairs until null) *)
-          FatFS.Read(r, b);
+          Files.Read(r, b);
           WHILE (b # 0) & ~r.eof DO
             (* Skip procedure name *)
-            WHILE (b # 0) & ~r.eof DO FatFS.Read(r, b) END;
+            WHILE (b # 0) & ~r.eof DO Files.Read(r, b) END;
             (* Skip value (4 bytes) *)
             SkipLong(r);
-            FatFS.Read(r, b)
+            Files.Read(r, b)
           END;
 
           (* Read nofent and entry point *)
@@ -478,8 +478,8 @@ MODULE ModuleLoader; (* Loads, relocates and links .816 modules from the file
           ReadLong16(r, tdFixupCount);
           i := 0;
           WHILE (i < tdFixupCount) & ~r.eof DO
-            FatFS.ReadInt(r, byteOffset);
-            FatFS.ReadInt(r, fixMno);
+            Files.ReadInt(r, byteOffset);
+            Files.ReadInt(r, fixMno);
             lo := GetWord(0, modVarBase + byteOffset);
             hi := GetWord(0, modVarBase + byteOffset + 2);
             IF fixMno = 0 THEN
@@ -502,22 +502,26 @@ MODULE ModuleLoader; (* Loads, relocates and links .816 modules from the file
              empty, otherwise the relocation count below is read from the wrong
              file offset (leaving the module unrelocated). mno=0: own method,
              the slot holds a code offset -> add this module's base. mno>0:
-             imported inherited method -> resolve via (mno, exno). *)
+             imported inherited method -> resolve via (mno, exno). v3 slots
+             are 4 bytes: the address, then the bank of the module it is in. *)
           ReadLong16(r, vtFixCount);
           i := 0;
           WHILE (i < vtFixCount) & ~r.eof DO
             ReadLong16(r, byteOffset);         (* offset written as 4 bytes *)
-            FatFS.ReadInt(r, fixMno);
-            FatFS.ReadInt(r, vtExno);
+            Files.ReadInt(r, fixMno);
+            Files.ReadInt(r, vtExno);
             IF fixMno = 0 THEN
               lo := GetWord(0, modVarBase + byteOffset);
               vtBase := modBase MOD 10000H;
-              PutWord(0, modVarBase + byteOffset, vtBase + lo)
+              PutWord(0, modVarBase + byteOffset, vtBase + lo);
+              vtBank := modBase DIV 10000H;
+              IF version >= 3 THEN PutWord(0, modVarBase + byteOffset + 2, vtBank) END
             ELSIF (fixMno <= impCount) & (impMap[fixMno] >= 0) THEN
               vtIdx := impMap[fixMno];
               IF (vtExno > 0) & (vtExno < exportCounts[vtIdx]) THEN
                 vtBase := baseAddrs[vtIdx] MOD 10000H;
-                PutWord(0, modVarBase + byteOffset, vtBase + exports[vtIdx, vtExno])
+                PutWord(0, modVarBase + byteOffset, vtBase + exports[vtIdx, vtExno]);
+                IF version >= 3 THEN PutWord(0, modVarBase + byteOffset + 2, banks[vtIdx]) END
               END
             END;
             INC(i)
@@ -537,8 +541,8 @@ MODULE ModuleLoader; (* Loads, relocates and links .816 modules from the file
           ReadLong16(r, relocCount);
           i := 0;
           WHILE (i < relocCount) & ~r.eof DO
-            FatFS.ReadInt(r, relocAddr);
-            FatFS.ReadInt(r, relocHi);
+            Files.ReadInt(r, relocAddr);
+            Files.ReadInt(r, relocHi);
             isBankReloc := (relocHi < 0);
             actualAddr := relocAddr;
             bankAddr := modBase + actualAddr;
@@ -555,7 +559,7 @@ MODULE ModuleLoader; (* Loads, relocates and links .816 modules from the file
           varAddr := varAddr + tdSize + varSize + strSize;
           INC(count);
 
-          FatFS.Close(f);
+          Files.Close(f);
 
           (* Execute module initialization (skipped when only linking) *)
           IF exec THEN
@@ -565,7 +569,7 @@ MODULE ModuleLoader; (* Loads, relocates and links .816 modules from the file
             SYSTEM.EXEC((modBase + entryPoint) MOD 10000H, (modBase + entryPoint) DIV 10000H)
           END
         ELSE
-          FatFS.Close(f)
+          Files.Close(f)
         END
       END
     END
@@ -602,13 +606,13 @@ MODULE ModuleLoader; (* Loads, relocates and links .816 modules from the file
   BEGIN loadAddr := code; varAddr := var
   END SetLinkAddr;
 
-  PROCEDURE Wr(VAR r: FatFS.Rider; v: INTEGER);
+  PROCEDURE Wr(VAR r: Files.Rider; v: INTEGER);
     VAR b: BYTE;
-  BEGIN b := v; FatFS.Write(r, b)
+  BEGIN b := v; Files.Write(r, b)
   END Wr;
 
-  PROCEDURE Put4(VAR r: FatFS.Rider; v: LONGINT);   (* 32-bit LE *)
-  BEGIN FatFS.WriteInt(r, v MOD 10000H); FatFS.WriteInt(r, v DIV 10000H MOD 10000H)
+  PROCEDURE Put4(VAR r: Files.Rider; v: LONGINT);   (* 32-bit LE *)
+  BEGIN Files.WriteInt(r, v MOD 10000H); Files.WriteInt(r, v DIV 10000H MOD 10000H)
   END Put4;
 
   (* Snapshot the modules linked in [firstMod..count) into an OS16 kernel image:
@@ -617,17 +621,17 @@ MODULE ModuleLoader; (* Loads, relocates and links .816 modules from the file
      back to those same addresses at boot — no relocation. *)
   PROCEDURE WriteImage*(fname: ARRAY OF CHAR; firstMod: INTEGER; codeBase: LONGINT;
                         varBase: INTEGER; VAR res: INTEGER);
-    VAR f: FatFS.File; r: FatFS.Rider;
+    VAR f: Files.File; r: Files.Rider;
         i, j, varLen: INTEGER; ci, codeLen, entry: LONGINT;
   BEGIN
     res := 0;
     codeLen := loadAddr - codeBase;
     varLen := varAddr - varBase;
     entry := baseAddrs[count - 1] + entries[count - 1];  (* last linked = main *)
-    f := FatFS.New(fname);
+    f := Files.New(fname);
     IF f = NIL THEN res := -1
     ELSE
-      FatFS.Set(r, f, 0);
+      Files.Set(r, f, 0);
       Wr(r, ORD("O")); Wr(r, ORD("S")); Wr(r, ORD("1")); Wr(r, ORD("6"));
       Wr(r, 1);                              (* version *)
       Put4(r, entry);
@@ -635,25 +639,25 @@ MODULE ModuleLoader; (* Loads, relocates and links .816 modules from the file
       Put4(r, varBase);  Put4(r, varLen);
       (* manifest: kernel modules [firstMod..count) in $0D00 shape; base_addr and
          the trailing next-code pointer are 24-bit (two words: low, high). *)
-      FatFS.WriteInt(r, count - firstMod);
+      Files.WriteInt(r, count - firstMod);
       i := firstMod;
       WHILE i < count DO
-        FatFS.WriteString(r, names[i]);
-        FatFS.WriteInt(r, banks[i]);
+        Files.WriteString(r, names[i]);
+        Files.WriteInt(r, banks[i]);
         Put4(r, baseAddrs[i]);               (* 24-bit *)
-        FatFS.WriteInt(r, varAddrs[i]);
-        FatFS.WriteInt(r, exportCounts[i] - 1);
+        Files.WriteInt(r, varAddrs[i]);
+        Files.WriteInt(r, exportCounts[i] - 1);
         j := 1;
-        WHILE j < exportCounts[i] DO FatFS.WriteInt(r, exports[i, j]); INC(j) END;
+        WHILE j < exportCounts[i] DO Files.WriteInt(r, exports[i, j]); INC(j) END;
         INC(i)
       END;
       Put4(r, loadAddr);                     (* next free code addr (24-bit) *)
-      FatFS.WriteInt(r, varAddr);            (* next free var addr *)
+      Files.WriteInt(r, varAddr);            (* next free var addr *)
       ci := 0;
       WHILE ci < codeLen DO Wr(r, GetB(codeBase + ci)); INC(ci) END;
       i := 0;
       WHILE i < varLen DO Wr(r, GetByte(0, varBase + i)); INC(i) END;
-      FatFS.Register(f)
+      Files.Register(f)
     END
   END WriteImage;
 
@@ -715,4 +719,4 @@ BEGIN
   paths[0] := "Library/Modules/";
   pathCount := 1;
   ReadManifest
-END ModuleLoader.
+END ModuleManager.

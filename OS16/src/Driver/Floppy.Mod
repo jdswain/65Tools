@@ -8,6 +8,8 @@ MODULE Floppy; (* The floppy drives of the carrier's Intel 82077AA, card 0
    or write moves the head itself), then READ and WRITE DATA a sector at
    a time. Each drive is recalibrated, and its density found by reading
    sector 0 at each data rate in turn, the first time it is used.
+   ReadBlock and WriteBlock give BlockDriver's errors; Get(keyError) the
+   floppy's own, below.
    Without a terminal count a one sector transfer ends "end of
    cylinder" (ST0 $40, ST1 $80): that is success. *)
   IMPORT SYSTEM, Driver, BlockDriver;
@@ -25,7 +27,7 @@ MODULE Floppy; (* The floppy drives of the carrier's Intel 82077AA, card 0
     cmdConfigure = 13H; cmdWrite = 45H; cmdRead = 46H;   (* MFM *)
 
     BlockSize* = BlockDriver.BlockSize;
-    SidesPerDisk* = 2;
+    SidesPerDisk* = 2; Tracks* = 80;
     MaxWait = 30000;   (* 816 INTEGER is 16-bit signed *)
 
     (* Get/Set keys *)
@@ -39,6 +41,7 @@ MODULE Floppy; (* The floppy drives of the carrier's Intel 82077AA, card 0
     errRead* = 3;        (* the sector was not read *)
     errWrite* = 4;       (* the sector was not written *)
     errProtected* = 5;   (* the disk is write protected *)
+    errRange* = 6;       (* no such block *)
 
   TYPE
     Floppy* = POINTER TO FloppyDesc;
@@ -134,9 +137,10 @@ MODULE Floppy; (* The floppy drives of the carrier's Intel 82077AA, card 0
   END Recalibrate;
 
   (* READ or WRITE DATA of one sector, the bytes through buf *)
-  PROCEDURE Transfer(d: Floppy; cmd, block: INTEGER; VAR buf: ARRAY OF BYTE): BOOLEAN;
-    VAR c, h, r, i, v: INTEGER; ok: BOOLEAN;
+  PROCEDURE Transfer(d: Floppy; cmd: INTEGER; n: LONGINT; VAR buf: ARRAY OF BYTE): BOOLEAN;
+    VAR c, h, r, i, v, block: INTEGER; ok: BOOLEAN;
   BEGIN
+    block := n;   (* below 5760 *)
     c := block DIV (SidesPerDisk * d.spt); h := block DIV d.spt MOD SidesPerDisk; r := block MOD d.spt + 1;
     Select(d); PutReg(CCR, d.rate);
     ok := Cmd(cmd) & Cmd(h * 4 + d.drive) & Cmd(c) & Cmd(h) & Cmd(r)
@@ -176,27 +180,49 @@ MODULE Floppy; (* The floppy drives of the carrier's Intel 82077AA, card 0
 
   (* --- Block I/O --- *)
 
-  PROCEDURE (d: Floppy) ReadBlock*(blockNum: INTEGER; VAR buf: ARRAY OF BYTE): INTEGER OVERRIDE;
+  (* 0, or BlockDriver's error for d.error *)
+  PROCEDURE Status(d: Floppy): INTEGER;
     VAR res: INTEGER;
   BEGIN
-    d.error := 0; res := 0;
-    IF (d.spt = 0) & ~Prepare(d) THEN res := -d.error
-    ELSIF ~Transfer(d, cmdRead, blockNum, buf) THEN d.error := errRead; res := -errRead
+    IF d.error = 0 THEN res := 0
+    ELSIF (d.error = errController) OR (d.error = errNoDisk) THEN res := -BlockDriver.errMedium
+    ELSIF d.error = errProtected THEN res := -BlockDriver.errProtected
+    ELSIF d.error = errRange THEN res := -BlockDriver.errRange
+    ELSE res := -BlockDriver.errIO
     END
   RETURN res
+  END Status;
+
+  PROCEDURE (d: Floppy) ReadBlock*(n: LONGINT; VAR buf: ARRAY OF BYTE): INTEGER OVERRIDE;
+  BEGIN
+    d.error := 0;
+    IF (d.spt # 0) OR Prepare(d) THEN
+      IF (n < 0) OR (n >= d.Blocks()) THEN d.error := errRange
+      ELSIF ~Transfer(d, cmdRead, n, buf) THEN d.error := errRead
+      END
+    END
+  RETURN Status(d)
   END ReadBlock;
 
-  PROCEDURE (d: Floppy) WriteBlock*(blockNum: INTEGER; VAR buf: ARRAY OF BYTE): INTEGER OVERRIDE;
-    VAR res: INTEGER;
+  PROCEDURE (d: Floppy) WriteBlock*(n: LONGINT; VAR buf: ARRAY OF BYTE): INTEGER OVERRIDE;
   BEGIN
-    d.error := 0; res := 0;
-    IF (d.spt = 0) & ~Prepare(d) THEN res := -d.error
-    ELSIF ~Transfer(d, cmdWrite, blockNum, buf) THEN
-      IF ODD(st[1] DIV 2) THEN d.error := errProtected ELSE d.error := errWrite END;  (* ST1 NW *)
-      res := -d.error
+    d.error := 0;
+    IF (d.spt # 0) OR Prepare(d) THEN
+      IF (n < 0) OR (n >= d.Blocks()) THEN d.error := errRange
+      ELSIF ~Transfer(d, cmdWrite, n, buf) THEN
+        IF ODD(st[1] DIV 2) THEN d.error := errProtected ELSE d.error := errWrite END  (* ST1 NW *)
+      END
     END
-  RETURN res
+  RETURN Status(d)
   END WriteBlock;
+
+  (* 80 tracks of 2 sides: 1440, 2880 or 5760; 0 with no disk *)
+  PROCEDURE (d: Floppy) Blocks*(): LONGINT OVERRIDE;
+    VAR n: LONGINT;
+  BEGIN
+    IF (d.spt = 0) & ~Prepare(d) THEN n := 0 ELSE n := d.spt * SidesPerDisk * Tracks END
+  RETURN n
+  END Blocks;
 
   (* --- Get/Set control parameters --- *)
 

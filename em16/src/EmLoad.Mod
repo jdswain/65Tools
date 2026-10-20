@@ -499,7 +499,8 @@ MODULE EmLoad; (* Loading programs: ELF executables of the assembler, and
         END
       END
     END;
-    (* method tables (v2): own methods by offset, inherited ones by export *)
+    (* method tables (v2): own methods by offset, inherited ones by export;
+       v3 slots are 4 bytes, the address and then its bank *)
     IF ~bad & (version >= 2) THEN
       vtFixups := Word32(r, ok); Check(ok, "Error reading vtable fixup count", bad);
       IF ~bad & (vtFixups > 0) THEN
@@ -512,6 +513,7 @@ MODULE EmLoad; (* Loading programs: ELF executables of the assembler, and
             IF mno = 0 THEN
               w := EmMem.GetWord(varBase + offset); addr := AND(base + w, 0FFFFH);
               EmMem.SetWord(varBase + offset, addr);
+              IF version >= 3 THEN EmMem.SetWord(varBase + offset + 2, AND((moduleBank * bankSize + base) DIV 10000H, 0FFH)) END;
               Str("  vtable fixup["); Int(i); Str("]: offset="); Int(offset); Str(" own off=$"); Hex(w, 4);
               Str(" -> $"); Hex(addr, 4); Ln
             ELSE m := ImportName(import, mno, nofImports);
@@ -519,6 +521,7 @@ MODULE EmLoad; (* Loading programs: ELF executables of the assembler, and
                 IF (exno > 0) & (exno < m.nofExports) THEN
                   addr := AND(m.base + m.exports[exno], 0FFFFH);
                   EmMem.SetWord(varBase + offset, addr);
+                  IF version >= 3 THEN EmMem.SetWord(varBase + offset + 2, AND((moduleBank * bankSize + m.base) DIV 10000H, 0FFH)) END;
                   Str("  vtable fixup["); Int(i); Str("]: offset="); Int(offset); Str(" mno="); Int(mno);
                   Str(" exno="); Int(exno); Str(" -> "); Str(m.name); Str(" $"); Hex(addr, 4); Ln
                 ELSE
