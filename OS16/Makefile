@@ -11,14 +11,11 @@
 #   make          everything into build/
 #   make test     boot: the boot ROM loads PAYLOAD.816 off a FAT12
 #                 floppy and runs it, on em16 -fpga (test/Boot.expected)
-#   make test-fs  FatFSTest: Floppy and FatFS on the 82077AA. It runs as
-#                 .816 modules, on em16's default machine, which has the
-#                 WD1793, not the 82077AA, so it needs an em16 that has
-#                 the 82077AA there: make test-fs EM16=...
+#   make test-fs  FatFSTest: Floppy and FatFS on the 82077AA, as .816
+#                 modules on em16's default machine
 #   make test-disk  DiskTest: SCSIManager, SCSIDisk and DiskPartition on
-#                 the 53C80, a GPT disk (tools/mkgpt.py) with FatFS on its
-#                 first partition. As test-fs it needs an em16 with the
-#                 53C80 on its default machine: make test-disk EM16=...
+#                 the 53C80, a GPT disk (tools/mkgpt.py) with FatFS on
+#                 both partitions, as test-fs
 #   make fonts    every font of fonts/, not only those used
 #   make clean
 #

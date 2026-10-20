@@ -162,13 +162,11 @@ its transmitter on. SCSIManager works the 53C80 of the carrier's Z85C80
 (card 3, $0830) by programmed I/O, the initiator at ID 7.
 
 `make test` boots: the boot ROM loads PAYLOAD.816 off a FAT12 floppy on
-`em16 -fpga` and runs it. FatFSTest (`make test-fs`) runs as .816
-modules, which em16 loads only on its default machine, whose floppy
-controller is the WD1793; it passes on an em16 with the 82077AA there
-instead (`make test-fs EM16=...`), on 720K and 1.44M disks. DiskTest
-(`make test-disk`) runs the same way and needs the 53C80 on the
-default machine, which em16 has only under -fpga: it passes on an em16
-with it at $0830 there (`make test-disk EM16=...`).
+`em16 -fpga` and runs it. FatFSTest (`make test-fs`, Floppy and FatFS)
+and DiskTest (`make test-disk`, the SCSI disk, its GPT and FatFS on
+both partitions) run as .816 modules, which em16 loads only on its
+default machine; it has the 82077AA at $0800 and the 53C80 at $0830 as
+the SoC does.
 
 ## The attic
 

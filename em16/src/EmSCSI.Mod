@@ -338,6 +338,12 @@ MODULE EmSCSI; (* The SCSI half of the carrier board's Z85C80, a 53C80
     RETURN v
   END Read;
 
+  (* A register as Read gives it, but changing nothing: for the trace. *)
+  PROCEDURE Peek*(reg: INTEGER): INTEGER;
+    VAR v: INTEGER;
+  BEGIN IF AND(reg, 7) = 7 THEN v := 0 ELSE v := Read(reg) END; RETURN v
+  END Peek;
+
   PROCEDURE Write*(reg, v: INTEGER);
   BEGIN reg := AND(reg, 7);
     IF reg = 0 THEN odr := v

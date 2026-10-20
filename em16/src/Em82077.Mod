@@ -425,6 +425,24 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
     RETURN v
   END Read;
 
+  (* A register as Read gives it, but changing nothing: for the trace. *)
+  PROCEDURE Peek*(reg: INTEGER): INTEGER;
+    VAR v: INTEGER;
+  BEGIN reg := AND(reg, 7);
+    IF reg = 5 THEN v := 0;
+      IF ODD(dor DIV 4) & (phase = result) THEN v := res[resPos]
+      ELSIF ODD(dor DIV 4) & (phase = execRead) THEN v := buf[pos]
+      END
+    ELSIF reg = 2 THEN v := dor
+    ELSIF reg = 3 THEN v := AND(tdr, 3)
+    ELSIF reg = 4 THEN v := MSR()
+    ELSIF reg = 7 THEN
+      IF changed[AND(dor, 3)] OR (AND(dor, 3) > 1) OR ~mounted[AND(dor, 3)] THEN v := 80H ELSE v := 0 END
+    ELSE v := 0FFH
+    END;
+    RETURN v
+  END Peek;
+
   PROCEDURE Write*(reg, v: INTEGER; now: LONGINT);
     VAR old: INTEGER;
   BEGIN reg := AND(reg, 7); Update(now);

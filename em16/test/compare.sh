@@ -30,12 +30,14 @@ work=$here/test/out
 rm -rf "$work"; mkdir -p "$work"
 pass=0; fail=0
 
-# run name seconds stdin args...: both emulators, output in $work
+# run name seconds stdin args...: both emulators, output in $work; the
+# new with -wd1793, em16-c's floppy controller at $0800 (the trace shows
+# $0800-$0807 as the top of an empty stack)
 run() {
   name=$1; secs=$2; input=$3; shift 3
   for v in old new; do
-    if [ $v = old ]; then e=$OLD; else e=$NEW; fi
-    perl -e 'alarm shift; exec @ARGV' "$secs" "$e" "$@" < "$input" \
+    if [ $v = old ]; then e=$OLD; w=; else e=$NEW; w=-wd1793; fi
+    perl -e 'alarm shift; exec @ARGV' "$secs" "$e" $w "$@" < "$input" \
       > "$work/$name.$v.out" 2> "$work/$name.$v.err"
   done
 }
@@ -80,14 +82,14 @@ for f in ../oc/test/*.816; do
 done
 
 echo "boot"
-# OS16's boot loader of the WD1793 (the default machine's floppy
-# controller), kept for this in ../OS16/attic; OS16's BootManager now
-# works the SoC's 82077AA and SCC
+# OS16's boot loader of the WD1793 (em16-c's floppy controller, which
+# em16's default machine has with -wd1793), kept for this in
+# ../OS16/attic; OS16's BootManager now works the SoC's 82077AA and SCC
 cp ../OS16/attic/src/BootWD1793.Mod "$work/" && (cd "$work" && "$OC816" BootWD1793.Mod -s > /dev/null)
 cp ../OS16/images/BootDisk.img "$work/old.img"; cp ../OS16/images/BootDisk.img "$work/new.img"
 for v in old new; do
-  if [ $v = old ]; then e=$OLD; else e=$NEW; fi
-  perl -e 'alarm 60; exec @ARGV' "$e" -t -disk0 "$work/$v.img" "$work/BootWD1793.816" \
+  if [ $v = old ]; then e=$OLD; w=; else e=$NEW; w=-wd1793; fi
+  perl -e 'alarm 60; exec @ARGV' "$e" $w -t -disk0 "$work/$v.img" "$work/BootWD1793.816" \
     < /dev/null > "$work/boot.$v.out" 2> "$work/boot.$v.err"
   sed -i '' "s|$work/$v.img|disk.img|" "$work/boot.$v.out"
 done

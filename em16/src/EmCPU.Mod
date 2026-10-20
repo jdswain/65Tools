@@ -254,7 +254,7 @@ MODULE EmCPU; (* The processor: the WDC 65C816, the Rockwell R65C02 and the
     ErrStr(" DP="); ToHex(dp, 4);
     Reg(" SP=", sp, e # 0);
     ErrStr(" {");
-    FOR i := 0 TO 3 DO ErrCh(" "); ToHex(GetWord(sp + 1 + 2 * i), 4) END;
+    FOR i := 0 TO 3 DO ErrCh(" "); ToHex(EmMem.TraceByte(sp + 1 + 2 * i) + EmMem.TraceByte(sp + 2 + 2 * i) * 256, 4) END;
     ErrStr(" }"); ErrStr(" DP="); ErrStr(" {");
     FOR i := 0 TO 7 DO ErrCh(" "); ToHex(EmMem.Peek(dp + i), 2) END;
     ErrStr(" }"); ErrStr(" DBR="); ToHex(dbr, 2);

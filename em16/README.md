@@ -43,9 +43,12 @@ This port is a derivative of it and under the same licence.
     EmSCC     the emulated Z85C30 SCC of rtl/scc_85c30.v
     EmADB     the ADB host, with a keyboard and a mouse
     EmBlit    the blitter
+    EmHarte   -harte: the Harte single-step tests on EmCore
+
+    and on both the default machine and the SoC:
+
     Em82077   the carrier's 82077AA floppy controller, two drives
     EmSCSI    the carrier's 53C80 SCSI controller and a disk at ID 0
-    EmHarte   -harte: the Harte single-step tests on EmCore
 
 What Oberon cannot reach is in C: `EmHost_rt.c` (terminal modes,
 non-blocking standard input, signals, the clock, the disk image files),
@@ -72,6 +75,13 @@ pointer points to, `TXS` with 8 bit index registers puts the stack in
 page `sp_page`, `(d,S),Y` writes a line to standard output, `RTI` in
 emulation mode does not force bits 4 and 5, a JMP to 0 in bank 0 stops.
 These could be corrected now in both versions.
+
+One addition: the default machine has the carrier board's disk
+controllers at the SoC's addresses, the 82077AA at $0800 and the 53C80
+at $0830, so that OS16's drivers run on it as modules; em16-c has the
+WD1793 at $0800, which `-wd1793` gives instead (below), and RAM at
+$0830. The 82077AA's time there is the processor's cycles, three of the
+SoC's to each (as if at 8.4 MHz). The L28 keeps its WD1793 at $0640.
 
 Left out, because nothing reached them: the S28 loader (`load` in
 `main.cpp`, never called), the R6501 (constructed, but no address of
@@ -118,8 +128,8 @@ rather than em16's default machine:
   and the SCSI half of the Z85C80, a 53C80, at $0830 (card 3), with
   their interrupts on the card `IRQ#` that bit 0 of $0340 reads (and the
   CPU's IRQ), and bit 0 of $0340 resetting them; below;
-- with `-wd1793`, the WD1793 card that OS16's `Boot.Mod` was written
-  for at $0800 instead of the 82077AA, as before;
+- with `-wd1793`, the WD1793 card that OS16's old boot loader was
+  written for at $0800 instead of the 82077AA, as before;
 - a program ends with STP or a fetch from 00:0000.
 
 Time is counted in the SoC's 25.2 MHz cycles, and each bus cycle of the
@@ -146,9 +156,10 @@ display's fetch arbitration beyond its fixed windows, and a typed
 character arriving while one waits: on the board it overruns, here it
 is held back, as if by flow control.
 
-### Disks under -fpga
+### Disks
 
-Both controllers are polled: there is no DMA yet. The comments at the
+On the default machine and under -fpga. Both controllers are polled:
+there is no DMA yet. The comments at the
 top of `Em82077.Mod` and `EmSCSI.Mod` list what they do and leave out.
 
 - **Floppy**, `-disk0` and `-disk1`: 720K, 1.44M or 2.88M images, the
@@ -206,7 +217,8 @@ they write:
   R65C19, with varied registers, flags (decimal included), memory and
   direct page; their `-t` traces are compared, three seeds each;
 - every compiled test program in `../oc/test`;
-- OS16's boot loader reading a floppy image: trace and the image after;
+- OS16's old WD1793 boot loader reading a floppy image (em16 with
+  `-wd1793`): trace and the image after;
 - a boot ROM drawing into the framebuffer, with `-fbdump`;
 - Business BASIC on the SoC (the output, not the time);
 - the L28's USART, LCD and banked memory, the VIA's timer interrupts

@@ -7,8 +7,9 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
         [-console] [-I dir] [-disk0 file] [-disk1 file] [-wd1793]
         [-scsi file] file ...
 
-   Under -fpga the floppy disks are the 82077AA's, or the WD1793 card's
-   with -wd1793, and -scsi puts a disk at ID 0 on the SCSI bus.
+   On the default machine and under -fpga the floppy disks are the
+   82077AA's, or the WD1793's with -wd1793, and -scsi puts a disk at ID 0
+   on the SCSI bus; the L28's are its WD1793's.
 
    A file with no extension, or one other than .816, is an ELF
    executable; a .816 file an Oberon module. Ported from the C++ em16
@@ -21,7 +22,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
   IMPORT Env, Files, EmHost, EmMem, EmCPU, EmLoad, EmFDC, Em82077, EmSCSI, EmL28, EmVideo, EmLCD, EmCore, EmSoC, EmHarte;
 
   VAR
-    trace, videoEnabled, testPattern, consoleMode, wantFpga, bad: BOOLEAN;
+    trace, videoEnabled, testPattern, consoleMode, wantFpga, wantL28, bad: BOOLEAN;
     customDp, customSp, entry: INTEGER;
     fbdump, bootrom, font: EmLoad.Path;
 
@@ -65,6 +66,10 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
     RETURN r
   END Suffix;
 
+  PROCEDURE Cycles(): LONGINT;
+  BEGIN RETURN EmCPU.cycles
+  END Cycles;
+
   PROCEDURE Options(VAR index: INTEGER);
     VAR arg, val: EmLoad.Path; n, k: INTEGER; done: BOOLEAN;
   BEGIN n := Env.ArgCount(); done := FALSE;
@@ -93,7 +98,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       ELSIF Equal(arg, "-font") & (index + 1 < n) THEN Env.Arg(index + 1, font); INC(index, 2)
       ELSIF (Equal(arg, "-disk0") OR Equal(arg, "-disk1")) & (index + 1 < n) THEN Env.Arg(index + 1, val);
         k := ORD(arg[5]) - ORD("0");
-        IF wantFpga & ~EmSoC.wd1793 THEN IF Em82077.Mount(k, val) THEN END
+        IF ~EmSoC.wd1793 & ~EmMem.l28 & ~wantL28 THEN IF Em82077.Mount(k, val) THEN END
         ELSIF EmFDC.Mount(k, val) THEN
         END;
         INC(index, 2)
@@ -210,10 +215,15 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
     customDp := -1; customSp := -1; entry := 0; fbdump[0] := 0X; bootrom[0] := 0X; font[0] := 0X;
     n := Env.ArgCount();
     (* -fpga first, so that the memory has its size before files are loaded *)
-    wantFpga := FALSE;
+    (* and -wd1793 and -cpu l28, so that floppies go to the right controller *)
+    wantFpga := FALSE; wantL28 := FALSE;
     FOR i := 1 TO n - 1 DO Env.Arg(i, arg);
-      IF Equal(arg, "-fpga") THEN wantFpga := TRUE ELSIF Equal(arg, "-wd1793") THEN EmSoC.UseWD1793 END
+      IF Equal(arg, "-fpga") THEN wantFpga := TRUE ELSIF Equal(arg, "-wd1793") THEN EmSoC.UseWD1793
+      ELSIF Equal(arg, "-cpu") & (i + 1 < n) THEN Env.Arg(i + 1, arg);
+        wantL28 := Equal(arg, "l28") OR Equal(arg, "L28") OR Equal(arg, "c19") OR Equal(arg, "C19")
+      END
     END;
+    EmMem.SetClock(Cycles);
     IF wantFpga THEN EmMem.EnableFPGA; EmMem.SetMemory(7FFFFFH, 800000H)
     ELSE EmMem.SetMemory(0FFFFFH, 100000H)
     END;
@@ -249,7 +259,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       EmCPU.Reset(trace);
       IF ~EmMem.fpga & (EmCPU.cpuType # EmCPU.l28) THEN
         EmCPU.SetNativeMode;
-        (* the stack grows down from below the floppy controller at $0800 *)
+        (* the stack grows down from below the disk controllers at $0800 *)
         IF customSp >= 0 THEN EmCPU.SetSP(customSp) ELSE EmCPU.SetSP(7FFH) END
       END;
       IF customDp >= 0 THEN
