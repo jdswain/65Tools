@@ -1,6 +1,6 @@
 MODULE FatFSTest; (* Format a floppy, write a file, read it back, delete it:
    Floppy and FatFS through the BlockDriver and FileSystem types.
-   Run on em16 with a blank 720K image as -disk0 (see Makefile: test). *)
+   Run on em16 with a blank 720K image as -disk0 (see Makefile: test-fs). *)
   IMPORT BlockDriver, FileSystem, Floppy, FatFS, Out;
   VAR d: BlockDriver.BlockDriver; fs: FileSystem.FileSystem;
     f, g: FatFS.File; r: FatFS.Rider;

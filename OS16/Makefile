@@ -8,7 +8,12 @@
 # files where they are, not in build/.
 #
 #   make          everything into build/
-#   make test     run the tests on em16 (test/*.expected)
+#   make test     boot: the boot ROM loads PAYLOAD.816 off a FAT12
+#                 floppy and runs it, on em16 -fpga (test/Boot.expected)
+#   make test-fs  FatFSTest: Floppy and FatFS on the 82077AA. It runs as
+#                 .816 modules, on em16's default machine, which has the
+#                 WD1793, not the 82077AA, so it needs an em16 that has
+#                 the 82077AA there: make test-fs EM16=...
 #   make fonts    every font of fonts/, not only those used
 #   make clean
 #
@@ -35,7 +40,7 @@ APPS    := UIMouse Terminal GraphicsWindow
 TESTS   := FatFSTest Payload GfxDemo TestFB
 MODULES := $(SYSTEM) $(UI) $(APPS) $(TESTS)
 
-.PHONY: all test fonts clean
+.PHONY: all test test-fs fonts clean
 
 all:
 	@mkdir -p $(B)
@@ -52,6 +57,18 @@ all:
 	@echo "OS16 built in $(B)/"
 
 test: all
+	@cd $(B) && python3 ../tools/makerom.py BootLoader.816 boot.rom > /dev/null && \
+	  python3 ../tools/makepayload.py Payload.816 PAYLOAD.816 > /dev/null && \
+	  rm -f floppy.dmg && hdiutil create -size 720k -fs "MS-DOS FAT12" -layout NONE -o floppy > /dev/null && \
+	  att=$$(hdiutil attach -imagekey diskimage-class=CRawDiskImage floppy.dmg) && \
+	  cp PAYLOAD.816 "$$(echo "$$att" | grep -o '/Volumes/.*')/" && \
+	  hdiutil detach "$$(echo "$$att" | tail -1 | awk '{print $$1}')" > /dev/null && \
+	  echo "" | perl -e 'alarm 10; exec @ARGV' $(abspath $(EM16)) -fpga -bootrom boot.rom -disk0 floppy.dmg 2> /dev/null \
+	    | tr -d '\r' | sed -nE '/^OS16 boot/,/^returned/p' | grep -v '^found \|^load ' > Boot.out; \
+	  if cmp -s Boot.out ../test/Boot.expected; then echo "PASS boot"; \
+	  else echo "FAIL boot"; diff ../test/Boot.expected Boot.out; exit 1; fi
+
+test-fs: all
 	@cd $(B) && rm -f fs.img && dd if=/dev/zero of=fs.img bs=1024 count=720 2> /dev/null && \
 	  echo "" | perl -e 'alarm 60; exec @ARGV' $(abspath $(EM16)) -disk0 fs.img FatFSTest.816 2> /dev/null \
 	    | sed -nE '/^driver /,/^(gone|still there)$$/p' > FatFSTest.out; \

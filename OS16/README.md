@@ -4,7 +4,8 @@ The operating system for the 65C816 machines, in Oberon (compiled by
 oc816) and 65C816 assembly (`as`).
 
     make          build everything into build/
-    make test     run the tests on em16
+    make test     boot PAYLOAD.816 off a floppy on em16 -fpga
+    make test-fs  FatFSTest; needs an em16 with the 82077AA (README)
     make fonts    compile every font, not only those used
 
 ## Layout
@@ -15,7 +16,8 @@ oc816) and 65C816 assembly (`as`).
     app/       applications: terminal/ (Terminal, and its mouse
                cursor UIMouse.s)
     sample/    GraphicsWindow, a window drawn with Graphics
-    test/      FatFSTest (make test), and the boot loader's payloads:
+    test/      FatFSTest (make test-fs), Boot.expected (make test), and
+               the boot loader's payloads:
                Payload, GfxDemo, TestFB
     tools/     makerom.py (a boot ROM from BootLoader.816),
                makepayload.py (a payload for the boot loader)
@@ -84,16 +86,27 @@ ModuleLoader), and Out (taken from `../oc/test`).
 
 ## Hardware
 
-Floppy and BootLoader drive the WD1793 at $0800 and print on the 6551
-ACIA at $0200, the SoC as it was. em16's SoC now has the 82077AA at
-$0800 (the WD1793 with `-wd1793`) and a Z85C30 SCC for its serial
-port, so BootLoader's output appears on `em16-c -fpga` but not on
-`em16 -fpga` until they are brought up to date.
+Floppy and BootLoader work the carrier's Intel 82077AA (card 0 of the
+SoC's external bus, $0800) by polling: SPECIFY non-DMA, CONFIGURE
+implied seek, RECALIBRATE, then READ and WRITE DATA a sector at a time.
+The density (720K, 1.44M or 2.88M) is found by reading sector 0 at each
+data rate in turn. BootLoader and the payloads print on channel A of
+the SoC's Z85C30 SCC ($0822 control, $0823 data), BootLoader turning
+its transmitter on.
+
+`make test` boots: the boot ROM loads PAYLOAD.816 off a FAT12 floppy on
+`em16 -fpga` and runs it. FatFSTest (`make test-fs`) runs as .816
+modules, which em16 loads only on its default machine, whose floppy
+controller is the WD1793; it passes on an em16 with the 82077AA there
+instead (`make test-fs EM16=...`), on 720K and 1.44M disks.
 
 ## The attic
 
     attic/rom/        empty placeholder files
-    attic/src/        Graphics.s (an older copy of UIGraphics.s) and
+    attic/src/        BootWD1793.Mod (the boot loader of the WD1793 and
+                      the ACIA, which em16's compare.sh runs on the
+                      default machine), Graphics.s (an older copy of
+                      UIGraphics.s) and
                       Graphics (the ELF object as made of it),
                       UIGraphics.s.orig, and
                       UIGraphicsDef.Mod (the stub that let oc816 import

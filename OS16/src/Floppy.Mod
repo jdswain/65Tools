@@ -1,51 +1,59 @@
-MODULE Floppy; (* The WD1793 floppy disk controller at the FPGA SoC's
-   external bus card 0, $0800 (model: Floppy, a BlockDriver): 720K 3.5"
-   disks, 9 sectors of 512 bytes, 2 sides, 80 tracks. *)
+MODULE Floppy; (* The floppy drives of the carrier's Intel 82077AA, card 0
+   of the FPGA SoC's external bus at $0800 (model: Floppy, a
+   BlockDriver): 3.5" disks of 80 tracks, 2 sides and 512 byte sectors,
+   9 a track (720K), 18 (1.44M) or 36 (2.88M).
+
+   The controller is worked by polling, without DMA or interrupts: taken
+   out of reset once, SPECIFY non-DMA, CONFIGURE implied seek (so a read
+   or write moves the head itself), then READ and WRITE DATA a sector at
+   a time. Each drive is recalibrated, and its density found by reading
+   sector 0 at each data rate in turn, the first time it is used.
+   Without a terminal count a one sector transfer ends "end of
+   cylinder" (ST0 $40, ST1 $80): that is success. *)
   IMPORT SYSTEM, Driver, BlockDriver;
 
   CONST
-    (* FDC register addresses (WD1773 at FPGA ext-bus card window $0800) *)
-    CMD    = 0800H;  (* W: command, R: status *)
-    STATUS = 0800H;
-    TRACK  = 0801H;
-    SECTOR = 0802H;
-    DATA   = 0803H;
-    CTRL   = 0806H;  (* W: drive control, R: drive status *)
+    (* 82077AA registers *)
+    DOR  = 0802H;  (* motors 7-4, DMA gate 3, /RESET 2, drive select 1-0 *)
+    MSR  = 0804H;  (* R: RQM 7, DIO 6, non-DMA execution 5, busy 4 *)
+    FIFO = 0805H;
+    CCR  = 0807H;  (* W: data rate *)
+    rqm = 80H; dio = 40H; ndma = 20H; cb = 10H;
 
-    (* WD1793 commands *)
-    cmdRestore = 0;
-    cmdSeek    = 10H;
-    cmdRead    = 80H;
-    cmdWrite   = 0A0H;
+    (* commands *)
+    cmdSpecify = 3; cmdRecalibrate = 7; cmdSenseInt = 8;
+    cmdConfigure = 13H; cmdWrite = 45H; cmdRead = 46H;   (* MFM *)
 
-    (* Status register bits *)
-    stBusy     = 1;
-    stDRQ      = 2;
-    stNotReady = 80H;
-
-    (* Drive control bits *)
-    ctrlMotorOn = 20H;
-    ctrlDrive0  = 2;
-    ctrlDrive1  = 4;
-
-    (* Disk geometry: 720K 3.5" *)
-    SectorsPerTrack* = 9;
-    SidesPerDisk*    = 2;
-    SectorsPerCyl    = 18;  (* SectorsPerTrack * SidesPerDisk *)
-    BlockSize*       = BlockDriver.BlockSize;
-    MaxRetries       = 10000;
+    BlockSize* = BlockDriver.BlockSize;
+    SidesPerDisk* = 2;
+    MaxWait = 30000;   (* 816 INTEGER is 16-bit signed *)
 
     (* Get/Set keys *)
-    keyError*  = 0;
-    keyTrack*  = 1;
+    keyError*  = 0;    (* the last error, below; 0 = OK *)
+    keyTrack*  = 1;    (* the cylinder last read or written *)
+    keySectors* = 2;   (* sectors a track: 9, 18 or 36; 0 until known *)
+
+    (* errors *)
+    errController* = 1;  (* the controller did not answer *)
+    errNoDisk* = 2;      (* no disk, or none it can read *)
+    errRead* = 3;        (* the sector was not read *)
+    errWrite* = 4;       (* the sector was not written *)
+    errProtected* = 5;   (* the disk is write protected *)
 
   TYPE
     Floppy* = POINTER TO FloppyDesc;
     FloppyDesc* = RECORD (BlockDriver.BlockDriverDesc)
       drive: INTEGER;      (* drive number, 0 or 1 *)
-      curTrack: INTEGER;   (* current head position, -1: unknown *)
+      rate: INTEGER;       (* CCR data rate of its disk *)
+      spt: INTEGER;        (* sectors a track, 0: not yet known *)
+      curTrack: INTEGER;   (* cylinder last used, -1: unknown *)
       error: INTEGER       (* last error code: 0 = OK *)
     END;
+
+  VAR
+    ready: BOOLEAN;        (* the controller is set up *)
+    st: ARRAY 8 OF INTEGER;  (* the last result phase *)
+    probe: ARRAY BlockSize OF BYTE;  (* sector 0, read to find the density *)
 
   (* --- Low-level register access --- *)
 
@@ -54,152 +62,138 @@ MODULE Floppy; (* The WD1793 floppy disk controller at the FPGA SoC's
   BEGIN b := val; SYSTEM.PUT(0, reg, b)
   END PutReg;
 
-  PROCEDURE GetReg(reg: INTEGER; VAR val: INTEGER);
-    VAR b: BYTE;
-  BEGIN SYSTEM.GET(0, reg, b); val := b
+  PROCEDURE GetReg(reg: INTEGER): INTEGER;
+    VAR b: BYTE; v: INTEGER;
+  BEGIN SYSTEM.GET(0, reg, b); v := b
+  RETURN v
   END GetReg;
 
-  (* --- Status polling --- *)
+  (* --- The controller --- *)
 
-  PROCEDURE WaitNotBusy(): BOOLEAN;
-    VAR s, n: INTEGER; done: BOOLEAN;
-  BEGIN
-    n := 0; done := FALSE;
-    REPEAT
-      GetReg(STATUS, s);
-      INC(n);
-      IF s MOD 2 = 0 THEN done := TRUE END
-    UNTIL done OR (n >= MaxRetries)
-  RETURN done
-  END WaitNotBusy;
-
-  PROCEDURE WaitDRQ(): BOOLEAN;
-    VAR s, n: INTEGER; ok: BOOLEAN;
-  BEGIN
-    n := 0; ok := FALSE;
-    REPEAT
-      GetReg(STATUS, s);
-      INC(n);
-      IF s DIV 2 MOD 2 = 1 THEN ok := TRUE  (* DRQ set *)
-      ELSIF s MOD 2 = 0 THEN ok := FALSE; n := MaxRetries  (* Busy cleared without DRQ *)
-      END
-    UNTIL ok OR (n >= MaxRetries)
-  RETURN ok
-  END WaitDRQ;
-
-  (* --- Drive selection and motor control --- *)
-
-  PROCEDURE SelectDrive(drive, side: INTEGER);
-    VAR ctl: INTEGER;
-  BEGIN
-    ctl := ctrlMotorOn;
-    IF drive = 0 THEN ctl := ctl + ctrlDrive0
-    ELSE ctl := ctl + ctrlDrive1
-    END;
-    IF side = 1 THEN INC(ctl) END;
-    PutReg(CTRL, ctl)
-  END SelectDrive;
-
-  (* --- Seek to track --- *)
-
-  PROCEDURE Seek(d: Floppy; track: INTEGER): BOOLEAN;
-    VAR ok: BOOLEAN;
-  BEGIN
-    ok := TRUE;
-    IF track # d.curTrack THEN
-      IF track = 0 THEN
-        PutReg(CMD, cmdRestore);
-        ok := WaitNotBusy()
-      ELSE
-        PutReg(DATA, track);
-        PutReg(CMD, cmdSeek);
-        ok := WaitNotBusy()
-      END;
-      IF ok THEN d.curTrack := track END
+  (* until MSR AND mask = val, a bounded while *)
+  PROCEDURE WaitMSR(mask, val: INTEGER): BOOLEAN;
+    VAR n, m: INTEGER; ok: BOOLEAN;
+  BEGIN m := 0; ok := AND(GetReg(MSR), mask) = val;
+    WHILE ~ok & (m < 100) DO
+      n := 0;
+      WHILE ~ok & (n < MaxWait) DO ok := AND(GetReg(MSR), mask) = val; INC(n) END;
+      INC(m)
     END
   RETURN ok
-  END Seek;
+  END WaitMSR;
+
+  (* a command or parameter byte *)
+  PROCEDURE Cmd(v: INTEGER): BOOLEAN;
+    VAR ok: BOOLEAN;
+  BEGIN ok := WaitMSR(rqm + dio, rqm);
+    IF ok THEN PutReg(FIFO, v) END
+  RETURN ok
+  END Cmd;
+
+  (* the result phase into st: how many bytes *)
+  PROCEDURE Result(): INTEGER;
+    VAR n: INTEGER;
+  BEGIN n := 0;
+    IF WaitMSR(rqm, rqm) THEN
+      WHILE (n < LEN(st)) & (AND(GetReg(MSR), rqm + dio + cb) = rqm + dio + cb) DO
+        st[n] := GetReg(FIFO); INC(n)
+      END
+    END
+  RETURN n
+  END Result;
+
+  (* SENSE INTERRUPT STATUS: TRUE if an interrupt was pending *)
+  PROCEDURE SenseInt(): BOOLEAN;
+  BEGIN RETURN Cmd(cmdSenseInt) & (Result() = 2)
+  END SenseInt;
+
+  (* motor on and the drive selected: 1CH or 2DH *)
+  PROCEDURE Select(d: Floppy);
+  BEGIN PutReg(DOR, ASL(10H, d.drive) + 0CH + d.drive)
+  END Select;
+
+  (* Out of reset, collect its four ready changes, polled non-DMA
+     transfers, implied seeks. *)
+  PROCEDURE InitController(): BOOLEAN;
+    VAR i: INTEGER; any: BOOLEAN;
+  BEGIN
+    PutReg(DOR, 0); PutReg(DOR, 1CH);
+    i := 0; WHILE i < 4 DO any := SenseInt(); INC(i) END;
+    ready := Cmd(cmdSpecify) & Cmd(0DFH) & Cmd(3)              (* 3 ms steps, non-DMA *)
+      & Cmd(cmdConfigure) & Cmd(0) & Cmd(50H) & Cmd(0)         (* implied seek, no polling *)
+  RETURN ready
+  END InitController;
+
+  PROCEDURE Recalibrate(d: Floppy): BOOLEAN;
+    VAR n: INTEGER; ok, done: BOOLEAN;
+  BEGIN
+    ok := Cmd(cmdRecalibrate) & Cmd(d.drive); n := 0; done := FALSE;
+    WHILE ok & ~done & (n < MaxWait) DO done := SenseInt(); INC(n) END;
+    IF done THEN d.curTrack := 0 END
+  RETURN ok & done
+  END Recalibrate;
+
+  (* READ or WRITE DATA of one sector, the bytes through buf *)
+  PROCEDURE Transfer(d: Floppy; cmd, block: INTEGER; VAR buf: ARRAY OF BYTE): BOOLEAN;
+    VAR c, h, r, i, v: INTEGER; ok: BOOLEAN;
+  BEGIN
+    c := block DIV (SidesPerDisk * d.spt); h := block DIV d.spt MOD SidesPerDisk; r := block MOD d.spt + 1;
+    Select(d); PutReg(CCR, d.rate);
+    ok := Cmd(cmd) & Cmd(h * 4 + d.drive) & Cmd(c) & Cmd(h) & Cmd(r)
+      & Cmd(2) & Cmd(r) & Cmd(1BH) & Cmd(0FFH);
+    i := 0;
+    WHILE ok & WaitMSR(rqm, rqm) & (AND(GetReg(MSR), ndma) # 0) DO
+      IF cmd = cmdRead THEN v := GetReg(FIFO); IF i < BlockSize THEN buf[i] := v END
+      ELSIF i < BlockSize THEN PutReg(FIFO, buf[i])
+      ELSE PutReg(FIFO, 0)
+      END;
+      INC(i)
+    END;
+    ok := ok & (Result() = 7) & (i = BlockSize) & (st[2] = 0)
+      & ((AND(st[0], 0C0H) = 0) OR (AND(st[0], 0C0H) = 40H) & (st[1] = 80H));
+    IF ok THEN d.curTrack := c END
+  RETURN ok
+  END Transfer;
+
+  (* Set the controller up, recalibrate the drive and find its density:
+     its sector 0 read at 250, 500 and 1000 kbit/s in turn. *)
+  PROCEDURE Prepare(d: Floppy): BOOLEAN;
+    VAR ok: BOOLEAN;
+  BEGIN
+    IF ~ready & ~InitController() THEN d.error := errController
+    ELSE
+      Select(d);
+      IF ~Recalibrate(d) THEN d.error := errController
+      ELSE
+        d.rate := 2; d.spt := 9; ok := Transfer(d, cmdRead, 0, probe);
+        IF ~ok THEN d.rate := 0; d.spt := 18; ok := Transfer(d, cmdRead, 0, probe) END;
+        IF ~ok THEN d.rate := 3; d.spt := 36; ok := Transfer(d, cmdRead, 0, probe) END;
+        IF ~ok THEN d.spt := 0; d.error := errNoDisk END
+      END
+    END
+  RETURN d.spt # 0
+  END Prepare;
 
   (* --- Block I/O --- *)
 
   PROCEDURE (d: Floppy) ReadBlock*(blockNum: INTEGER; VAR buf: ARRAY OF BYTE): INTEGER OVERRIDE;
-    VAR track, side, sector, i, s, res: INTEGER;
+    VAR res: INTEGER;
   BEGIN
     d.error := 0; res := 0;
-
-    track := blockNum DIV SectorsPerCyl;
-    side := blockNum DIV SectorsPerTrack MOD SidesPerDisk;
-    sector := blockNum MOD SectorsPerTrack + 1;
-
-    SelectDrive(d.drive, side);
-
-    IF ~Seek(d, track) THEN d.error := 1; res := -1 END;
-
-    IF res = 0 THEN
-      PutReg(SECTOR, sector);
-      PutReg(CMD, cmdRead);
-      IF ~WaitDRQ() THEN d.error := 2; res := -2 END
-    END;
-
-    IF res = 0 THEN
-      i := 0;
-      WHILE (i < BlockSize) & (res = 0) DO
-        GetReg(DATA, s);
-        buf[i] := s;
-        INC(i)
-      END
-    END;
-
-    IF res = 0 THEN
-      IF ~WaitNotBusy() THEN d.error := 4; res := -4 END
-    END;
-
-    IF res = 0 THEN
-      GetReg(STATUS, s);
-      IF s DIV 8 MOD 2 = 1 THEN d.error := 5; res := -5
-      ELSIF s DIV 16 MOD 2 = 1 THEN d.error := 6; res := -6
-      END
+    IF (d.spt = 0) & ~Prepare(d) THEN res := -d.error
+    ELSIF ~Transfer(d, cmdRead, blockNum, buf) THEN d.error := errRead; res := -errRead
     END
   RETURN res
   END ReadBlock;
 
   PROCEDURE (d: Floppy) WriteBlock*(blockNum: INTEGER; VAR buf: ARRAY OF BYTE): INTEGER OVERRIDE;
-    VAR track, side, sector, i, s, res: INTEGER;
+    VAR res: INTEGER;
   BEGIN
     d.error := 0; res := 0;
-
-    track := blockNum DIV SectorsPerCyl;
-    side := blockNum DIV SectorsPerTrack MOD SidesPerDisk;
-    sector := blockNum MOD SectorsPerTrack + 1;
-
-    SelectDrive(d.drive, side);
-
-    IF ~Seek(d, track) THEN d.error := 1; res := -1 END;
-
-    IF res = 0 THEN
-      PutReg(SECTOR, sector);
-      PutReg(CMD, cmdWrite);
-      IF ~WaitDRQ() THEN d.error := 2; res := -2 END
-    END;
-
-    IF res = 0 THEN
-      i := 0;
-      WHILE (i < BlockSize) & (res = 0) DO
-        s := buf[i];
-        PutReg(DATA, s);
-        INC(i)
-      END
-    END;
-
-    IF res = 0 THEN
-      IF ~WaitNotBusy() THEN d.error := 4; res := -4 END
-    END;
-
-    IF res = 0 THEN
-      GetReg(STATUS, s);
-      IF s DIV 8 MOD 2 = 1 THEN d.error := 5; res := -5
-      ELSIF s DIV 64 MOD 2 = 1 THEN d.error := 7; res := -7
-      END
+    IF (d.spt = 0) & ~Prepare(d) THEN res := -d.error
+    ELSIF ~Transfer(d, cmdWrite, blockNum, buf) THEN
+      IF ODD(st[1] DIV 2) THEN d.error := errProtected ELSE d.error := errWrite END;  (* ST1 NW *)
+      res := -d.error
     END
   RETURN res
   END WriteBlock;
@@ -210,6 +204,7 @@ MODULE Floppy; (* The WD1793 floppy disk controller at the FPGA SoC's
   BEGIN
     IF key = keyError THEN val := d.error
     ELSIF key = keyTrack THEN val := d.curTrack
+    ELSIF key = keySectors THEN val := d.spt
     ELSE val := -1
     END
   END Get;
@@ -221,14 +216,17 @@ MODULE Floppy; (* The WD1793 floppy disk controller at the FPGA SoC's
 
   (* --- Creation --- *)
 
-  (* The driver of drive 0 or 1, named FD0 or FD1. *)
+  (* The driver of drive 0 or 1, named FD0 or FD1. The disk is looked at
+     when it is first read or written. *)
   PROCEDURE New*(drive: INTEGER): Floppy;
     VAR d: Floppy; name: ARRAY 4 OF CHAR;
   BEGIN
-    NEW(d); d.drive := drive; d.curTrack := -1; d.error := 0;
+    NEW(d); d.drive := drive; d.rate := 2; d.spt := 0; d.curTrack := -1; d.error := 0;
     name[0] := "F"; name[1] := "D"; name[2] := CHR(ORD("0") + drive); name[3] := 0X;
     Driver.SetName(d, name);
     RETURN d
   END New;
 
+BEGIN
+  ready := FALSE
 END Floppy.

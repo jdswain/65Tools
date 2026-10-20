@@ -25,6 +25,7 @@ bin=$(cd ../bin && pwd)
 NEW=${NEW:-$bin/em16}
 OLD=${OLD:-$bin/em16-c}
 AS=${AS:-$bin/as}
+OC816=${OC816:-$here/../../../oc/self/s816/oc816}
 work=$here/test/out
 rm -rf "$work"; mkdir -p "$work"
 pass=0; fail=0
@@ -79,12 +80,14 @@ for f in ../oc/test/*.816; do
 done
 
 echo "boot"
-# OS16's boot loader, as `make` in ../OS16 builds it
-[ -f ../OS16/build/BootLoader.816 ] || echo "  (no ../OS16/build/BootLoader.816: run make in ../OS16)"
+# OS16's boot loader of the WD1793 (the default machine's floppy
+# controller), kept for this in ../OS16/attic; OS16's BootLoader now
+# works the SoC's 82077AA and SCC
+cp ../OS16/attic/src/BootWD1793.Mod "$work/" && (cd "$work" && "$OC816" BootWD1793.Mod -s > /dev/null)
 cp ../OS16/images/BootDisk.img "$work/old.img"; cp ../OS16/images/BootDisk.img "$work/new.img"
 for v in old new; do
   if [ $v = old ]; then e=$OLD; else e=$NEW; fi
-  perl -e 'alarm 60; exec @ARGV' "$e" -t -disk0 "$work/$v.img" ../OS16/build/BootLoader.816 \
+  perl -e 'alarm 60; exec @ARGV' "$e" -t -disk0 "$work/$v.img" "$work/BootWD1793.816" \
     < /dev/null > "$work/boot.$v.out" 2> "$work/boot.$v.err"
   sed -i '' "s|$work/$v.img|disk.img|" "$work/boot.$v.out"
 done

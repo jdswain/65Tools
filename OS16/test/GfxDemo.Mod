@@ -11,7 +11,8 @@ MODULE GfxDemo;
   IMPORT SYSTEM;
 
   CONST
-    Serial  = 0200H;
+    SccCtl  = 0822H;                (* the Z85C30 SCC, channel A *)
+    SccData = 0823H;
     Palette = 0240H;
     FBBase  = 700000H;              (* LONGINT framebuffer base *)
     Stride  = 320;
@@ -19,7 +20,12 @@ MODULE GfxDemo;
     (* palette indices *)
     Black = 0; White = 1; LiteGray = 2; DarkGray = 3;
 
-  PROCEDURE Wr(ch: CHAR); BEGIN SYSTEM.PUT(0, Serial, ORD(ch)) END Wr;
+  PROCEDURE Wr(ch: CHAR);                (* the SCC, channel A: wait for room *)
+    VAR b: BYTE;
+  BEGIN
+    REPEAT SYSTEM.GET(0, SccCtl, b) UNTIL ODD(b DIV 4);
+    b := ORD(ch); SYSTEM.PUT(0, SccData, b)
+  END Wr;
 
   (* ---- 24-bit memory access (bank:offset split, both powers of two) ---- *)
 
