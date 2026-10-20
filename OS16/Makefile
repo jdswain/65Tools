@@ -14,8 +14,9 @@
 #   make test-fs  FatFSTest: Floppy and FatFS on the 82077AA, as .816
 #                 modules on em16's default machine
 #   make test-disk  DiskTest: SCSIManager, SCSIDisk and DiskPartition on
-#                 the 53C80, a GPT disk (tools/mkgpt.py) with FatFS on
-#                 both partitions, as test-fs
+#                 the 53C80, a 64 MB GPT disk (tools/mkgpt.py) with FatFS
+#                 on both partitions, as test-fs; then DiskTest2: a file
+#                 beyond volume sector 40000 of partition 2 (FAT16)
 #   make fonts    every font of fonts/, not only those used
 #   make clean
 #
@@ -40,7 +41,7 @@ UI      := Graphics UIKit $(FONTS) FontManager InputManager WindowManager \
            ClipboardManager MenuManager View Control Button TextView \
            TextField Switch Select ListView ScrollView Window Dialog FileDialog
 APPS    := UIMouse Terminal GraphicsWindow
-TESTS   := FatFSTest DiskTest Payload GfxDemo TestFB
+TESTS   := FatFSTest DiskTest DiskTest2 Payload GfxDemo TestFB
 MODULES := $(SYSTEM) $(UI) $(APPS) $(TESTS)
 
 .PHONY: all test test-fs test-disk fonts clean
@@ -82,6 +83,9 @@ test-disk: all
 	@cd $(B) && python3 ../tools/mkgpt.py disk.img > /dev/null && \
 	  echo "" | perl -e 'alarm 300; exec @ARGV' $(abspath $(EM16)) -scsi disk.img DiskTest.816 2> /dev/null \
 	    | sed -nE '/^bus /,/^done$$/p' > DiskTest.out; \
+	  python3 ../tools/mkgpt.py --fill disk.img > /dev/null; \
+	  echo "" | perl -e 'alarm 300; exec @ARGV' $(abspath $(EM16)) -scsi disk.img DiskTest2.816 2> /dev/null \
+	    | sed -nE '/^(partition 2 mounted|no )/,/^done$$/p' >> DiskTest.out; \
 	  python3 ../tools/mkgpt.py --check disk.img >> DiskTest.out; \
 	  if cmp -s DiskTest.out ../test/DiskTest.expected; then echo "PASS DiskTest"; \
 	  else echo "FAIL DiskTest"; diff ../test/DiskTest.expected DiskTest.out; exit 1; fi

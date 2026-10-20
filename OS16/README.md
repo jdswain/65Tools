@@ -5,8 +5,8 @@ oc816) and 65C816 assembly (`as`).
 
     make            build everything into build/
     make test       boot PAYLOAD.816 off a floppy on em16 -fpga
-    make test-fs    FatFSTest; needs an em16 with the 82077AA (Hardware)
-    make test-disk  DiskTest; needs an em16 with the 53C80 (Hardware)
+    make test-fs    FatFSTest, on a floppy
+    make test-disk  DiskTest and DiskTest2, on a 64 MB SCSI disk
     make fonts      compile every font, not only those used
 
 ## Layout
@@ -29,7 +29,8 @@ oc816) and 65C816 assembly (`as`).
     app/       applications: terminal/ (Terminal, and its mouse
                cursor UIMouse.s)
     sample/    GraphicsWindow, a window drawn with Graphics
-    test/      FatFSTest (make test-fs), DiskTest (make test-disk),
+    test/      FatFSTest (make test-fs), DiskTest and DiskTest2
+               (make test-disk),
                Boot.expected (make test), and the boot loader's
                payloads: Payload, GfxDemo, TestFB
     tools/     makerom.py (a boot ROM from BootManager.816),
@@ -143,12 +144,20 @@ needs no module of its own. A GPT is checked as UEFI has it: the
 signature, the header's CRC32 and that of the entries, the backup
 header at the last block if the first is bad.
 
-FatFS.Format sizes the volume to the device's Blocks(), up to 32767
-blocks (16 MB, the 16-bit sector numbers FatFS keeps): FAT12, clusters
-of the smallest power of 2 from 2 sectors whose FAT fits the 9-sector
-FAT cache, two FATs, a root of 112, 224 or 512 entries. A 720K floppy
-gets the layout DOS gives it (clusters of 2, FATs of 3, a root of 112);
-DiskTest's 14 MB partition gets clusters of 16.
+FatFS reads and writes FAT12 and FAT16 (not FAT32), the type from the
+number of clusters as the FAT specification has it, and keeps sector
+numbers in LONGINTs and cluster numbers in INTEGERs: a volume has at
+most 32765 clusters, of up to 64 sectors, about 1 GB. It reads the FAT
+through a cache of 4 of its sectors, since a FAT16 FAT can have 64K.
+Files are still at most 32767 bytes.
+
+FatFS.Format sizes the volume to the device's Blocks(), up to that 1 GB
+(a larger device gets a volume of 1 GB at its start): clusters of the
+smallest power of 2 from 2 sectors that keeps them to 32765, FAT12 below
+4085 clusters and FAT16 from there, two FATs, a root of 112, 224 or 512
+entries, the extended BPB. A 720K floppy gets the layout DOS gives it
+(clusters of 2, FATs of 3, a root of 112, FAT12); DiskTest's 1.4 MB
+partition gets FAT12 and its 62 MB one FAT16 with clusters of 4.
 
 ## Hardware
 
@@ -166,7 +175,10 @@ its transmitter on. SCSIManager works the 53C80 of the carrier's Z85C80
 and DiskTest (`make test-disk`, the SCSI disk, its GPT and FatFS on
 both partitions) run as .816 modules, which em16 loads only on its
 default machine; it has the 82077AA at $0800 and the 53C80 at $0830 as
-the SoC does.
+the SoC does. After DiskTest, `mkgpt.py --fill` gives partition 2's
+clusters up to volume sector 40000 to a FILLER.BIN, and DiskTest2
+writes a file beyond it and reads it back; `mkgpt.py --check` then
+follows its FAT16 chain itself.
 
 ## The attic
 

@@ -1,9 +1,9 @@
 bus SCSI, types 0 -1 -1 -1 -1 -1 -1
 none at ID 1
-disk SD0, 32768 blocks
+disk SD0, 131072 blocks
 partitions 2
 SD0p1 from 40, 2880 blocks, OS16 System
-SD0p2 from 4096, 28639 blocks, OS16 Data
+SD0p2 from 4096, 126943 blocks, OS16 Data
 past the end -1
 formatted, mounted
 synced
@@ -14,11 +14,16 @@ gone
 partition 2 formatted, mounted
 length 20000, bytes ok 20000
 done
+partition 2 mounted, FILLER.BIN there
+DATA.BIN length 20000, bytes ok 20000
+FAR.BIN length 20000, bytes ok 20000
+done
 image: GPT valid
 image: partition 1 boot sector OEM 'OS16', signature 55aa
 image: partition 1 2880 sectors, clusters of 2, FAT of 5, root of 224
 image: partition 1 root: KEEP.TXT 17
 image: partition 2 boot sector OEM 'OS16', signature 55aa
-image: partition 2 28639 sectors, clusters of 16, FAT of 6, root of 512
-image: partition 2 root: DATA.BIN 20000
+image: partition 2 126943 sectors, clusters of 4, FAT of 124, root of 512
+image: partition 2 root: DATA.BIN 20000, FILLER.BIN 20314112, FAR.BIN 20000
+image: partition 2 FAT16, FAR.BIN from sector 39997, holds what was written
 image: outside the partitions untouched
