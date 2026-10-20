@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """A SCSI disk image with a GUID partition table, for make test-disk.
 
-    mkgpt.py disk.img           write it: 8192 blocks of 512 bytes, a
+    mkgpt.py disk.img           write it: 32768 blocks of 512 bytes, a
                                 protective MBR, the GPT and its backup,
                                 partition 1 "OS16 System" (blocks 40 to
                                 2919, 2880 blocks) and partition 2
-                                "OS16 Data" (blocks 4096 to 8150), both
+                                "OS16 Data" (blocks 4096 to 32734), both
                                 empty (zeros)
     mkgpt.py --check disk.img   after DiskTest: what is on it, a line each
 
---check prints that the GPT is still valid, what partition 1 holds (the
-OEM name of a FAT boot sector, and the files of its root directory) and
-whether anything outside partition 1 was written.
+--check prints that the GPT is still valid, what each partition holds (the
+OEM name and layout of a FAT boot sector, and the files of its root
+directory) and whether anything outside the partitions was written.
 """
 import contextlib
 import io
@@ -22,7 +22,7 @@ import tempfile
 import uuid
 import zlib
 
-BLOCKS = 8192
+BLOCKS = 32768
 BS = 512
 ENTRIES = 128
 ESIZE = 128
@@ -30,7 +30,7 @@ BASIC_DATA = uuid.UUID("EBD0A0A2-B9E5-4433-87C0-68B6B72699C7")
 DISK_GUID = uuid.UUID("0516C0DE-0000-4000-8000-000000000016")
 PARTS = [  # first, last, name, unique GUID
     (40, 2919, "OS16 System", uuid.UUID("0516C0DE-0001-4000-8000-000000000001")),
-    (4096, 8150, "OS16 Data", uuid.UUID("0516C0DE-0002-4000-8000-000000000002")),
+    (4096, 32734, "OS16 Data", uuid.UUID("0516C0DE-0002-4000-8000-000000000002")),
 ]
 FIRST_USABLE = 34
 LAST_USABLE = BLOCKS - 34
@@ -83,31 +83,34 @@ def check(path):
         e = img[at * BS:at * BS + n * size]
         ok = ok and h[:8] == b"EFI PART" and zlib.crc32(bytes(h)) == crc and zlib.crc32(e) == ecrc
     print("image: GPT", "valid" if ok else "BAD")
-    # partition 1
-    first, last = PARTS[0][0], PARTS[0][1]
-    boot = img[first * BS:(first + 1) * BS]
-    oem = boot[3:11].decode("ascii", "replace").rstrip()
-    print(f"image: partition 1 boot sector OEM {oem!r}, signature {boot[510:512].hex()}")
-    if boot[510:512] == b"\x55\xaa":
-        res, nfat, root, fpf = boot[14] | boot[15] << 8, boot[16], boot[17] | boot[18] << 8, boot[22] | boot[23] << 8
-        rootat = first + res + nfat * fpf
-        names = []
-        for i in range(root):
-            d = img[rootat * BS + i * 32:rootat * BS + i * 32 + 32]
-            if d[0] == 0:
-                break
-            if d[0] != 0xE5 and d[11] != 0x0F:
-                names.append(d[0:8].decode().rstrip() + "." + d[8:11].decode().rstrip()
-                             + f" {int.from_bytes(d[28:32], 'little')}")
-        print("image: partition 1 root:", ", ".join(names) if names else "(empty)")
-    # outside partition 1: as written
+    for p, (first, last, _, _) in enumerate(PARTS, 1):
+        boot = img[first * BS:(first + 1) * BS]
+        oem = boot[3:11].decode("ascii", "replace").rstrip()
+        print(f"image: partition {p} boot sector OEM {oem!r}, signature {boot[510:512].hex()}")
+        if boot[510:512] == b"\x55\xaa":
+            spc, res, nfat = boot[13], boot[14] | boot[15] << 8, boot[16]
+            root, tot, fpf = boot[17] | boot[18] << 8, boot[19] | boot[20] << 8, boot[22] | boot[23] << 8
+            print(f"image: partition {p} {tot} sectors, clusters of {spc}, FAT of {fpf}, root of {root}")
+            rootat = first + res + nfat * fpf
+            names = []
+            for i in range(root):
+                d = img[rootat * BS + i * 32:rootat * BS + i * 32 + 32]
+                if d[0] == 0:
+                    break
+                if d[0] != 0xE5 and d[11] != 0x0F:
+                    names.append(d[0:8].decode().rstrip() + "." + d[8:11].decode().rstrip()
+                                 + f" {int.from_bytes(d[28:32], 'little')}")
+            print(f"image: partition {p} root:", ", ".join(names) if names else "(empty)")
+    # outside the partitions: as written
     with tempfile.TemporaryDirectory() as d:
         with contextlib.redirect_stdout(io.StringIO()):
             write(os.path.join(d, "orig.img"))
         orig = open(os.path.join(d, "orig.img"), "rb").read()
-    outside = img[:first * BS] == orig[:first * BS] and img[(last + 1) * BS:] == orig[(last + 1) * BS:]
-    print("image: outside partition 1", "untouched" if outside else "CHANGED")
-
+    outside, at = True, 0
+    for first, last, _, _ in PARTS + [(BLOCKS, BLOCKS, None, None)]:
+        outside = outside and img[at * BS:first * BS] == orig[at * BS:first * BS]
+        at = last + 1
+    print("image: outside the partitions", "untouched" if outside else "CHANGED")
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--check":

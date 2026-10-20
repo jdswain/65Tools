@@ -143,6 +143,13 @@ needs no module of its own. A GPT is checked as UEFI has it: the
 signature, the header's CRC32 and that of the entries, the backup
 header at the last block if the first is bad.
 
+FatFS.Format sizes the volume to the device's Blocks(), up to 32767
+blocks (16 MB, the 16-bit sector numbers FatFS keeps): FAT12, clusters
+of the smallest power of 2 from 2 sectors whose FAT fits the 9-sector
+FAT cache, two FATs, a root of 112, 224 or 512 entries. A 720K floppy
+gets the layout DOS gives it (clusters of 2, FATs of 3, a root of 112);
+DiskTest's 14 MB partition gets clusters of 16.
+
 ## Hardware
 
 Floppy and BootManager work the carrier's Intel 82077AA (card 0 of the

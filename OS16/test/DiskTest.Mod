@@ -1,7 +1,9 @@
 MODULE DiskTest; (* The SCSI disk path: SCSIManager on the 53C80, the
    SCSIDisk at ID 0, its GPT partitions as DiskPartitions, and FatFS
    formatted on partition 1, through Files: files written, read back
-   after Files.Init mounts it again, one deleted.
+   after Files.Init mounts it again, one deleted. Then partition 2, big
+   enough to need clusters of 16 sectors: formatted, a file across
+   clusters written and read back.
    Run on em16 with -scsi of tools/mkgpt.py's image (Makefile: test-disk). *)
   IMPORT SCSIManager, SCSIDisk, DiskPartition, Files, FatFS, Out;
 
@@ -12,9 +14,15 @@ MODULE DiskTest; (* The SCSI disk path: SCSIManager on the 53C80, the
     n, i, t, x, ok, res: INTEGER; b: BYTE;
     buf: ARRAY 512 OF BYTE; s: ARRAY 32 OF CHAR;
 
-  PROCEDURE Num(l: LONGINT);   (* below 32768 *)
+  PROCEDURE Num(l: LONGINT);   (* not negative *)
     VAR i: INTEGER;
-  BEGIN i := l; Out.Int(i, 0)
+  BEGIN
+    IF l >= 10000 THEN
+      Num(l DIV 10000); i := l MOD 10000;
+      IF i < 1000 THEN Out.Char("0") END; IF i < 100 THEN Out.Char("0") END; IF i < 10 THEN Out.Char("0") END
+    ELSE i := l
+    END;
+    Out.Int(i, 0)
   END Num;
 
 BEGIN
@@ -58,6 +66,23 @@ BEGIN
       END; Out.Ln;
       Files.Delete("HELLO.TXT", res); Out.String("delete "); Out.Int(res, 0); Out.Ln;
       IF Files.Old("HELLO.TXT") = NIL THEN Out.String("gone") ELSE Out.String("still there") END; Out.Ln
+    END;
+    IF n > 1 THEN
+      fs := FatFS.ForDevice(parts[1]);
+      IF fs.Format() & Files.Mount(fs) THEN Out.String("partition 2 formatted, mounted") ELSE Out.String("partition 2 mount failed") END; Out.Ln;
+      f := Files.New("DATA.BIN"); Files.Set(r, f, 0);
+      i := 0; WHILE i < 20000 DO Files.Write(r, i MOD 253); INC(i) END;
+      Files.Register(f); Files.Close(f);
+      Files.Init(parts[1]);
+      f := Files.Old("DATA.BIN");
+      IF f = NIL THEN Out.String("DATA.BIN not found")
+      ELSE
+        Out.String("length "); Out.Int(Files.Length(f), 0);
+        Files.Set(r, f, 0); ok := 0; i := 0;
+        WHILE i < 20000 DO Files.Read(r, b); IF b = i MOD 253 THEN INC(ok) END; INC(i) END;
+        Out.String(", bytes ok "); Out.Int(ok, 0)
+      END; Out.Ln
     END
-  END
+  END;
+  Out.String("done"); Out.Ln
 END DiskTest.

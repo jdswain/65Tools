@@ -11,7 +11,7 @@ MODULE FatFS; (* The FAT12/FAT16 file system with VFAT long names (model:
     MaxNameLen = 128;
     SectorSize = 512;
 
-    MaxFATSectors = 9;   (* supports up to 1.44MB floppy *)
+    MaxFATSectors = 9;   (* the FAT cache: 3070 FAT12 clusters, enough for 32767 sectors in clusters of 16 *)
 
     (* Directory entry offsets within 32-byte entry *)
     deNAME = 0;          (* 8 bytes *)
@@ -143,7 +143,7 @@ MODULE FatFS; (* The FAT12/FAT16 file system with VFAT long names (model:
     res := ReadSector(0, dirBuf);
     IF res = 0 THEN
       bps := GetWord(dirBuf, bpbBPS);
-      IF bps = SectorSize THEN
+      IF (bps = SectorSize) & (dirBuf[bpbSPC] > 0) THEN
         spc := dirBuf[bpbSPC];
         fatStart := GetWord(dirBuf, bpbRES);
         nfat := dirBuf[bpbNFAT];
@@ -1522,11 +1522,37 @@ MODULE FatFS; (* The FAT12/FAT16 file system with VFAT long names (model:
 
   (* ---- Format ---- *)
 
-  PROCEDURE FormatDevice(d: BlockDriver.BlockDriver);
-    VAR i, res: INTEGER;
+  (* The layout of a FAT12 volume of tot sectors: BPB(1) + FAT1(fpf) +
+     FAT2(fpf) + RootDir(root entries) + Data, in clusters of spc sectors.
+     spc is the smallest power of 2 from 2 whose FAT fits the FAT cache
+     (MaxClusters); FALSE if tot is too small for any. A 720K floppy gets
+     spc 2, fpf 3, root 112, as DOS formats it. *)
+  PROCEDURE Layout(tot: INTEGER; VAR spc, fpf, root: INTEGER): BOOLEAN;
+    CONST MaxClusters = MaxFATSectors * SectorSize * 2 DIV 3 - 2;
+    VAR fixed, clusters, need: INTEGER; done: BOOLEAN;
   BEGIN
-    (* 720K FAT12: SPC=2, RES=1, NFAT=2, ROOT=112, TOT=1440, FPF=3 *)
-    (* Layout: BPB(1) + FAT1(3) + FAT2(3) + RootDir(7) + Data(1426) *)
+    IF tot <= 1440 THEN root := 112 ELSIF tot <= 2880 THEN root := 224 ELSE root := 512 END;
+    fixed := 1 + root * DirEntrySize DIV SectorSize;
+    spc := 2; fpf := 1; done := FALSE;
+    WHILE ~done & (tot > fixed + 2 * fpf + spc) DO
+      clusters := (tot - fixed - 2 * fpf) DIV spc;
+      IF clusters > MaxClusters THEN spc := spc * 2
+      ELSE
+        need := (((clusters + 2) * 3 + 1) DIV 2 + SectorSize - 1) DIV SectorSize;
+        IF need > fpf THEN fpf := need ELSE done := TRUE END
+      END
+    END
+  RETURN done
+  END Layout;
+
+  (* A FAT12 file system the size of d, up to 32767 sectors (16 MB): FALSE
+     if d is too small or a write failed. *)
+  PROCEDURE FormatDevice(d: BlockDriver.BlockDriver): BOOLEAN;
+    VAR i, tot, spc, fpf, root, media: INTEGER; n: LONGINT; ok: BOOLEAN;
+  BEGIN
+    n := d.Blocks();
+    IF n > 32767 THEN tot := 32767 ELSIF n > 0 THEN tot := n ELSE tot := 0 END;
+    ok := Layout(tot, spc, fpf, root);
     i := 0;
     WHILE i < SectorSize DO dirBuf[i] := 0; INC(i) END;
 
@@ -1538,48 +1564,36 @@ MODULE FatFS; (* The FAT12/FAT16 file system with VFAT long names (model:
     dirBuf[bpbOEM+4] := 20H; dirBuf[bpbOEM+5] := 20H;
     dirBuf[bpbOEM+6] := 20H; dirBuf[bpbOEM+7] := 20H;
     PutWord(dirBuf, bpbBPS, 512);
-    dirBuf[bpbSPC] := 2;
+    dirBuf[bpbSPC] := spc;
     PutWord(dirBuf, bpbRES, 1);
     dirBuf[bpbNFAT] := 2;
-    PutWord(dirBuf, bpbROOT, 112);
-    PutWord(dirBuf, bpbTOT, 1440);
-    dirBuf[bpbMEDIA] := 0F9H;
-    PutWord(dirBuf, bpbFPF, 3);
-    PutWord(dirBuf, bpbSPT, 9);
-    PutWord(dirBuf, bpbHEADS, 2);
+    PutWord(dirBuf, bpbROOT, root);
+    PutWord(dirBuf, bpbTOT, tot);
+    (* a floppy's media byte and geometry (80 tracks of 2 sides), or a fixed disk's *)
+    IF (tot <= 2880) & (tot MOD 160 = 0) THEN
+      IF tot = 1440 THEN media := 0F9H ELSE media := 0F0H END;
+      PutWord(dirBuf, bpbSPT, tot DIV 160); PutWord(dirBuf, bpbHEADS, 2)
+    ELSE
+      media := 0F8H; PutWord(dirBuf, bpbSPT, 63); PutWord(dirBuf, bpbHEADS, 255)
+    END;
+    dirBuf[bpbMEDIA] := media;
+    PutWord(dirBuf, bpbFPF, fpf);
     dirBuf[510] := 055H;
     dirBuf[511] := 0AAH;
-    res := d.WriteBlock(0, dirBuf);
+    IF ok THEN ok := d.WriteBlock(0, dirBuf) = 0 END;
 
-    (* Write FAT1 — FAT12: entries 0-1 = F9 FF FF (3 bytes) *)
+    (* each FAT: entries 0-1 = media FF FF, the rest free; then the root directory *)
     i := 0;
     WHILE i < SectorSize DO dirBuf[i] := 0; INC(i) END;
-    dirBuf[0] := 0F9H; dirBuf[1] := 0FFH;
-    dirBuf[2] := 0FFH;
-    res := d.WriteBlock(1, dirBuf);
-    dirBuf[0] := 0; dirBuf[1] := 0; dirBuf[2] := 0;
-    i := 1;
-    WHILE i < 3 DO
-      res := d.WriteBlock(1 + i, dirBuf);
-      INC(i)
-    END;
-
-    (* Write FAT2 *)
-    dirBuf[0] := 0F9H; dirBuf[1] := 0FFH; dirBuf[2] := 0FFH;
-    res := d.WriteBlock(4, dirBuf);
-    dirBuf[0] := 0; dirBuf[1] := 0; dirBuf[2] := 0;
-    i := 1;
-    WHILE i < 3 DO
-      res := d.WriteBlock(4 + i, dirBuf);
-      INC(i)
-    END;
-
-    (* Zero root directory — 7 sectors starting at sector 7 *)
     i := 0;
-    WHILE i < 7 DO
-      res := d.WriteBlock(7 + i, dirBuf);
+    WHILE ok & (i < 2 * fpf + root * DirEntrySize DIV SectorSize) DO
+      IF (i = 0) OR (i = fpf) THEN dirBuf[0] := media; dirBuf[1] := 0FFH; dirBuf[2] := 0FFH
+      ELSE dirBuf[0] := 0; dirBuf[1] := 0; dirBuf[2] := 0
+      END;
+      ok := d.WriteBlock(1 + i, dirBuf) = 0;
       INC(i)
     END
+  RETURN ok
   END FormatDevice;
 
   (* --- Initialization --- *)
@@ -1598,7 +1612,7 @@ MODULE FatFS; (* The FAT12/FAT16 file system with VFAT long names (model:
   (* --- The file system --- *)
 
   PROCEDURE (fs: FatFS) Format*(): BOOLEAN OVERRIDE;
-  BEGIN FormatDevice(fs.dev); RETURN TRUE
+  BEGIN RETURN FormatDevice(fs.dev)
   END Format;
 
   PROCEDURE (fs: FatFS) Mount*(): BOOLEAN OVERRIDE;

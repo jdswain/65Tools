@@ -83,8 +83,8 @@ test-fs: all
 
 test-disk: all
 	@cd $(B) && python3 ../tools/mkgpt.py disk.img > /dev/null && \
-	  echo "" | perl -e 'alarm 120; exec @ARGV' $(abspath $(EM16)) -scsi disk.img DiskTest.816 2> /dev/null \
-	    | sed -nE '/^bus /,/^(gone|still there)$$/p' > DiskTest.out; \
+	  echo "" | perl -e 'alarm 300; exec @ARGV' $(abspath $(EM16)) -scsi disk.img DiskTest.816 2> /dev/null \
+	    | sed -nE '/^bus /,/^done$$/p' > DiskTest.out; \
 	  python3 ../tools/mkgpt.py --check disk.img >> DiskTest.out; \
 	  if cmp -s DiskTest.out ../test/DiskTest.expected; then echo "PASS DiskTest"; \
 	  else echo "FAIL DiskTest"; diff ../test/DiskTest.expected DiskTest.out; exit 1; fi
