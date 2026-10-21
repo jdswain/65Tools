@@ -108,7 +108,10 @@ rather than em16's default machine:
   state: its bus cycles, its idle cycles and its departures from the
   WDC chip are those of the core on the board, not EmCPU's. It passes
   the Harte tests as the core does (`em16 -harte dir [names]`: the
-  same 5,080,011 pass, and the same MVN/MVP files fail);
+  same 5,080,011 pass, and the same MVN/MVP files fail). It has the
+  core's banked direct page and stack too (`WDM #$B1` on, `WDM #$B0`
+  off; docs/BankedDP.md in the Verilog repository), which
+  `test/banked.sh` checks with the core's own test, banked.s;
 - the map: 8 MB of SDRAM through the cache, the I/O block at
   $0200-$0FFF (palette, ADB, system control, external bus, video
   control, blitter; the floppy controller is card 0 of the external

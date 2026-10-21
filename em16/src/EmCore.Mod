@@ -20,6 +20,11 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
    a byte and an interrupt between bytes. ABORT and NMI are not wired on
    the SoC and are left out.
 
+   The core's extension, banked direct page and stack (BankedDP.md in
+   ../../Verilog65C816/docs): WDM $B1 sets the mode and WDM $B0 clears
+   it; in native mode with it set, D is a page number, the direct page is
+   at D * 100H and the stack at Hi(D) * 10000H + S.
+
    For em16, a fetch from 00:0000 stops the processor, and so does STP. *)
 
   IMPORT EmHost, EmSym;
@@ -53,6 +58,7 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
     (* the registers *)
     A*, X*, Y*, S*, D*, PC*, DBR*, PBR*: INTEGER;
     fC*, fZ*, fI*, fD*, fX*, fM*, fV*, fN*, fE*: INTEGER;
+    xb*: BOOLEAN;            (* banked direct page and stack *)
     (* the state machine *)
     state*, IR: INTEGER;
     dMode, dCls, dOp: INTEGER;
@@ -257,7 +263,8 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
         END
     | oprep: SetP(AND(Pbyte(fX), 0FFH - Lo(m)))
     | opsep: SetP(ORA(Pbyte(fX), Lo(m)))
-    ELSE (* WDM *)
+    ELSE (* WDM: $B0 and $B1 clear and set the banked mode *)
+      IF m DIV 2 = 58H THEN xb := ODD(m) END
     END
   END ExecRd;
 
@@ -351,14 +358,26 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
     RETURN r
   END Taddr1;
 
+  (* In the banked mode, the direct page's offset in its bank, and the bank
+     of the direct page, the stack and their pointers. *)
+  PROCEDURE Dbase(): INTEGER;
+    VAR r: INTEGER;
+  BEGIN IF xb & (fE = 0) THEN r := Lo(D) * 256 ELSE r := D END; RETURN r
+  END Dbase;
+
+  PROCEDURE Dbank(): INTEGER;
+    VAR r: INTEGER;
+  BEGIN IF xb & (fE = 0) THEN r := Hi(D) ELSE r := 0 END; RETURN r
+  END Dbank;
+
   PROCEDURE SpPush(): INTEGER;
     VAR r: INTEGER;
-  BEGIN IF (fE # 0) & ~stk16 THEN r := 100H + Lo(S) ELSE r := S END; RETURN r
+  BEGIN IF (fE # 0) & ~stk16 THEN r := 100H + Lo(S) ELSE r := Dbank() * 10000H + S END; RETURN r
   END SpPush;
 
   PROCEDURE SpPull(): INTEGER;
     VAR r: INTEGER;
-  BEGIN IF (fE # 0) & ~stk16 THEN r := 100H + Lo(S + 1) ELSE r := W16(S + 1) END; RETURN r
+  BEGIN IF (fE # 0) & ~stk16 THEN r := 100H + Lo(S + 1) ELSE r := Dbank() * 10000H + W16(S + 1) END; RETURN r
   END SpPull;
 
   PROCEDURE Dpw(): BOOLEAN;      (* direct page wrap: E and DL = 0 *)
@@ -489,30 +508,30 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
     ELSIF (IR = 44H) OR (IR = 54H) THEN DBR := r; state := sOp2     (* MVP/MVN: destination bank *)
     ELSIF (IR = 62H) OR (IR = 0F4H) OR (IR = 82H) THEN tlo := r; state := sOp2
     ELSIF IR = 0D4H THEN                                             (* PEI *)
-      IF Dpw() THEN tptr := Hi(D) * 256 + r ELSE tptr := W16(D + r) END;
-      ptrBank := 0; state := sPtrL
+      IF Dpw() THEN tptr := Hi(D) * 256 + r ELSE tptr := W16(Dbase() + r) END;
+      ptrBank := Dbank(); state := sPtrL
     ELSE md := dMode;
       CASE md OF
         mdrel: IF Btake() THEN PC := W16(pcn + Sext8(r)) ELSE PC := pcn END; state := sFetch
       | mdimm:
           IF Rd16() THEN tlo := r; state := sOp2 ELSE ExecRd(r); state := sFetch END
       | mddp:
-          IF Dpw() THEN taddr := Hi(D) * 256 + r ELSE taddr := W16(D + r) END;
+          IF Dpw() THEN taddr := Hi(D) * 256 + r ELSE taddr := Dbank() * 10000H + W16(Dbase() + r) END;
           wrap16 := TRUE; state := DataState()
       | mddpx:
-          IF Dpw() THEN taddr := Hi(D) * 256 + Lo(r + X) ELSE taddr := W16(D + r + X) END;
+          IF Dpw() THEN taddr := Hi(D) * 256 + Lo(r + X) ELSE taddr := Dbank() * 10000H + W16(Dbase() + r + X) END;
           wrap16 := TRUE; state := DataState()
       | mddpy:
-          IF Dpw() THEN taddr := Hi(D) * 256 + Lo(r + Y) ELSE taddr := W16(D + r + Y) END;
+          IF Dpw() THEN taddr := Hi(D) * 256 + Lo(r + Y) ELSE taddr := Dbank() * 10000H + W16(Dbase() + r + Y) END;
           wrap16 := TRUE; state := DataState()
-      | mdsr: taddr := W16(S + r); wrap16 := TRUE; state := DataState()
+      | mdsr: taddr := Dbank() * 10000H + W16(S + r); wrap16 := TRUE; state := DataState()
       | mdidx:
-          IF Dpw() THEN tptr := Hi(D) * 256 + Lo(r + X) ELSE tptr := W16(D + r + X) END;
-          ptrBank := 0; state := sPtrL
+          IF Dpw() THEN tptr := Hi(D) * 256 + Lo(r + X) ELSE tptr := W16(Dbase() + r + X) END;
+          ptrBank := Dbank(); state := sPtrL
       | mdidp, mdidy, mdidl, mdily:
-          IF Dpw() THEN tptr := Hi(D) * 256 + r ELSE tptr := W16(D + r) END;
-          ptrBank := 0; state := sPtrL
-      | mdsry: tptr := W16(S + r); ptrBank := 0; state := sPtrL
+          IF Dpw() THEN tptr := Hi(D) * 256 + r ELSE tptr := W16(Dbase() + r) END;
+          ptrBank := Dbank(); state := sPtrL
+      | mdsry: tptr := W16(S + r); ptrBank := Dbank(); state := sPtrL
       ELSE tlo := r; state := sOp2
       END
     END
@@ -705,7 +724,7 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
   BEGIN
     state := sVecL; vec := 0FFFCH;
     fE := 1; fM := 1; fX := 1; fI := 1; fD := 0; fC := 0; fZ := 0; fV := 0; fN := 0;
-    A := 0; X := 0; Y := 0; S := 1FFH; D := 0; DBR := 0; PBR := 0; PC := 0;
+    A := 0; X := 0; Y := 0; S := 1FFH; D := 0; DBR := 0; PBR := 0; PC := 0; xb := FALSE;
     Decode(0); tlo := 0; tmid := 0; tptr := 0; ptrBank := 0; taddr := 0; wrap16 := FALSE;
     tdata := 0; pushN := 0; stk16 := FALSE; postPush := ppFetch; pullIdx := 0;
     irq1 := FALSE; irq2 := FALSE; stopped := FALSE
@@ -722,7 +741,7 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
     PC := pc; S := s; A := a; X := x; Y := y; DBR := dbr; D := d; PBR := pbr; fE := e;
     fN := Bit(p, 7); fV := Bit(p, 6); fM := Bit(p, 5); fX := Bit(p, 4);
     fD := Bit(p, 3); fI := Bit(p, 2); fZ := Bit(p, 1); fC := Bit(p, 0);
-    state := sFetch; stopped := FALSE; irq1 := FALSE; irq2 := FALSE
+    state := sFetch; stopped := FALSE; irq1 := FALSE; irq2 := FALSE; xb := FALSE
   END SetState;
 
   PROCEDURE GetP*(): INTEGER;

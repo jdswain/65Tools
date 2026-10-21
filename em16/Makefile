@@ -80,6 +80,7 @@ $(TARGET): $(OBJS) $(CSRC) | $(BINDIR)
 
 test: $(TARGET)
 	@sh test/disks.sh
+	@sh test/banked.sh
 
 compare: $(TARGET)
 	@sh test/compare.sh
