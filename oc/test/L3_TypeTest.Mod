@@ -1,5 +1,5 @@
 MODULE L3_TypeTest;
-  IMPORT Out;
+  IMPORT Out, HeapManager;
   TYPE
     Base = RECORD x: INTEGER END;
     Ext1 = RECORD (Base) y: INTEGER END;

@@ -1,7 +1,7 @@
 MODULE L17_IfExt;
   (* a record implementing an IMPORTED interface — the base module dispatches
      an implementation it has never seen *)
-  IMPORT L17_IfBase;
+  IMPORT L17_IfBase, HeapManager;
   TYPE
     Disc* = POINTER TO DiscDesc;
     DiscDesc* = RECORD IMPLEMENTS L17_IfBase.Shape r*: INTEGER END;

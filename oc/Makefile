@@ -68,84 +68,16 @@ clean:
 test_compile: $(BINDIR)/oc
 	@bash test/run_tests.sh
 
-# Automated emulator tests (legacy runner)
-test_run: $(BINDIR)/oc
-	@bash test/run_emulator_tests.sh
-
-# Level 0 legacy / integration tests
-test_level0: $(BINDIR)/oc
-	@bash test/run_level0_tests.sh
-
-# Level 1 foundation tests
-test_level1: $(BINDIR)/oc
-	@bash test/run_level1_tests.sh
-
-# Level 2 data structure tests
-test_level2: $(BINDIR)/oc
-	@bash test/run_level2_tests.sh
-
-# Level 3 record operations tests
-test_level3: $(BINDIR)/oc
-	@bash test/run_level3_tests.sh
-
-# Level 4 pointer & dynamic allocation tests
-test_level4: $(BINDIR)/oc
-	@bash test/run_level4_tests.sh
-
-# Level 5 SET type tests
-test_level5: $(BINDIR)/oc
-	@bash test/run_level5_tests.sh
-
-# Level 6 numeric CASE statement tests
-test_level6: $(BINDIR)/oc
-	@bash test/run_level6_tests.sh
-
-# Level 7 standard procedures & functions tests
-test_level7: $(BINDIR)/oc
-	@bash test/run_level7_tests.sh
-
-# Level 8 REAL type tests
-test_level8: $(BINDIR)/oc
-	@bash test/run_level8_tests.sh
-
-# Level 9 module system tests
-test_level9: $(BINDIR)/oc
-	@bash test/run_level9_tests.sh
-
-# Level 10 SYSTEM module tests
-test_level10: $(BINDIR)/oc
-	@bash test/run_level10_tests.sh
-
-# Level 11 edge cases & stress tests
-test_level11: $(BINDIR)/oc
-	@bash test/run_level11_tests.sh
-
-# Level 12 negative tests (compiler error detection)
-test_level12: $(BINDIR)/oc
-	@bash test/run_level12_tests.sh
-
-# Level 13 procedure variable tests
-test_level13: $(BINDIR)/oc
-	@bash test/run_level13_tests.sh
-
-test_level14: $(BINDIR)/oc
-	@bash test/run_level14_tests.sh
-
-test_level15: $(BINDIR)/oc
-	@bash test/run_level15_tests.sh
-
-# DP relocation test (all levels with DP at $0200)
-test_dp: $(BINDIR)/oc
-	@bash test/run_dp_test.sh
-
-# Full test suite (compilation tests + L0 emulator tests)
+# Full test suite: the C compiler's compilation tests and oc816's goldens
 test:
-	@bash test/run_tests.sh; bash test/run_level0_tests.sh
+	@bash test/run_tests.sh; bash test/run_self_tests.sh
 
 # Primary suite: the self-hosted Oberon compiler (oc816) is now the reference
 # implementation; it drives every level plus the OO (L16) and interface (L17)
-# goldens. The C compiler and its per-level test_* targets above are kept as a
-# cross-check. Needs the oc816 binary — build it in the oc repo
+# goldens, each run on OS16 booted under em16 -fpga (OS16 must be built:
+# cd ../../OS16 && make). The C compiler is kept for bin/disasm and its
+# compilation tests (test_compile); its programs (NEW is BRK #10) no longer
+# run anywhere. Needs the oc816 binary — build it in the oc repo
 # (cd ../../../oc/self/s816 && make); override the path with OC=/path/to/oc816.
 test_self:
 	@bash test/run_self_tests.sh
@@ -212,4 +144,4 @@ test_disasm: $(BINDIR)/disasm
 	@$(BINDIR)/oc test/DisasmDemo.Mod
 	@$(BINDIR)/disasm DisasmDemo.816
 
-.PHONY: all clean test test_self test_compile test_run test_level0 test_level1 test_level2 test_level3 test_level4 test_level5 test_level6 test_level7 test_level8 test_level9 test_level10 test_level11 test_level12 test_level13 test_level14 test_level15 test_dp test_scanner test_orb test_orp test_disasm install
+.PHONY: all clean test test_self test_compile test_scanner test_orb test_orp test_disasm install

@@ -1,5 +1,5 @@
 MODULE L18_LIMid; (* for L18_LateImport: re-exports L18_LIBase's types *)
-  IMPORT L18_LIBase;
+  IMPORT L18_LIBase, HeapManager;
   VAR p*: L18_LIBase.P; e*: L18_LIBase.E;
   PROCEDURE Make*(): L18_LIBase.P;
     VAR q: L18_LIBase.P;

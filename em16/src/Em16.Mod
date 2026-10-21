@@ -4,19 +4,19 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
 
    em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin]
         [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-test-pattern]
-        [-console] [-I dir] [-disk0 file] [-disk1 file] [-wd1793]
+        [-console] [-disk0 file] [-disk1 file] [-wd1793]
         [-scsi file] file ...
 
    On the default machine and under -fpga the floppy disks are the
    82077AA's, or the WD1793's with -wd1793, and -scsi puts a disk at ID 0
    on the SCSI bus; the L28's are its WD1793's.
 
-   A file with no extension, or one other than .816, is an ELF
-   executable; a .816 file an Oberon module. Ported from the C++ em16
-   (em16-c), whose behaviour and messages it keeps. Its parts:
+   A file is an ELF executable. Oberon modules are not loaded by em16:
+   OS16 boots on -fpga, from a floppy, as on the board, and loads them.
+   Ported from the C++ em16 (em16-c). Its parts:
 
      EmCPU    the processor          EmMem   the memory map
-     EmLoad   ELF and .816 loading   EmHost  the host (C side: EmHost_rt.c)
+     EmLoad   ELF loading, traps     EmHost  the host (C side: EmHost_rt.c)
      EmUART EmVIA EmFDC EmL28 EmVideo EmLCD  the devices *)
 
   IMPORT Env, Files, EmHost, EmMem, EmCPU, EmLoad, EmFDC, Em82077, EmSCSI, EmL28, EmVideo, EmLCD, EmCore, EmSoC, EmHarte;
@@ -58,13 +58,6 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
     RETURN v
   END Number;
 
-  (* The position of the last "." in s, -1 if none. *)
-  PROCEDURE Suffix(s: ARRAY OF CHAR): INTEGER;
-    VAR i, r: INTEGER;
-  BEGIN i := 0; r := -1;
-    WHILE (i < LEN(s)) & (s[i] # 0X) DO IF s[i] = "." THEN r := i END; INC(i) END;
-    RETURN r
-  END Suffix;
 
   PROCEDURE Cycles(): LONGINT;
   BEGIN RETURN EmCPU.cycles
@@ -105,33 +98,19 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       ELSIF Equal(arg, "-wd1793") THEN INC(index)
       ELSIF Equal(arg, "-scsi") & (index + 1 < n) THEN Env.Arg(index + 1, val);
         IF EmSCSI.Mount(val) THEN END; INC(index, 2)
-      ELSIF Equal(arg, "-I") & (index + 1 < n) THEN Env.Arg(index + 1, val); EmLoad.AddPath(val); INC(index, 2)
-      ELSIF (arg[1] = "I") & (arg[2] # 0X) THEN
-        k := 0; WHILE arg[k + 2] # 0X DO val[k] := arg[k + 2]; INC(k) END; val[k] := 0X;
-        EmLoad.AddPath(val); INC(index)
       ELSIF Equal(arg, "-console") THEN consoleMode := TRUE; INC(index)
       ELSIF Equal(arg, "-?") THEN
-        ErrStr("Usage: em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-test-pattern] [-console] [-I dir] [-disk0 file] [-disk1 file] [-wd1793] [-scsi file] file ...");
+        ErrStr("Usage: em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-test-pattern] [-console] [-disk0 file] [-disk1 file] [-wd1793] [-scsi file] file ...");
         EmHost.Ln(EmHost.err); bad := TRUE
       ELSE ErrStr("Invalid: option '"); ErrStr(arg); ErrStr("'"); EmHost.Ln(EmHost.err); bad := TRUE
       END
     END
   END Options;
 
-  (* The modules' initialisations, or the program; on the CPU thread when
-     there is a window. *)
+  (* The program; on the CPU thread when there is a window. *)
   PROCEDURE CpuThread*;
-    VAR i: INTEGER;
   BEGIN
     IF EmMem.fpga THEN EmSoC.Run
-    ELSIF EmLoad.nofEntries > 0 THEN
-      FOR i := 0 TO EmLoad.nofEntries - 1 DO
-        IF EmLoad.entries[i] # 0 THEN
-          EmHost.Str(EmHost.out, "Initialising at "); EmHost.CoutHex(EmLoad.entries[i]); EmHost.Ln(EmHost.out);
-          EmHost.Flush;
-          EmCPU.JumpLong(EmLoad.entries[i])
-        END
-      END
     ELSIF entry # 0 THEN
       EmHost.Str(EmHost.out, "Initialising at "); EmHost.CoutHex(entry); EmHost.Ln(EmHost.out); EmHost.Flush;
       EmCPU.JumpLong(entry)
@@ -206,7 +185,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
   END LoadFont;
 
   PROCEDURE Main;
-    VAR index, n, i, suffix, v: INTEGER; arg: EmLoad.Path; cycles: LONGINT;
+    VAR index, n, i, v: INTEGER; arg: EmLoad.Path; cycles: LONGINT;
   BEGIN
     IF Env.ArgCount() > 2 THEN Env.Arg(1, arg);
       IF Equal(arg, "-harte") THEN Harte; EmHost.Exit(0) END
@@ -229,14 +208,9 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
     END;
     index := 1; Options(index);
     IF ~bad THEN
-      EmLoad.ClearEntries;
       IF index < n THEN
         WHILE index < n DO
-          Env.Arg(index, arg); suffix := Suffix(arg);
-          IF (suffix >= 0) & (arg[suffix+1] = "8") & (arg[suffix+2] = "1") & (arg[suffix+3] = "6") & (arg[suffix+4] = 0X) THEN
-            entry := EmLoad.LoadMod(arg); EmLoad.AddEntry(entry)
-          ELSE entry := EmLoad.LoadELF(arg)
-          END;
+          Env.Arg(index, arg); entry := EmLoad.LoadELF(arg);
           INC(index)
         END
       ELSIF (bootrom[0] = 0X) & ~wantFpga THEN
@@ -244,7 +218,6 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       END
     END;
     IF ~bad THEN
-      IF ~wantFpga THEN EmLoad.WriteManifest END;
       IF consoleMode THEN
         EmL28.EnableKeyboard; EmL28.SetConsoleMode(TRUE); EmL28.SetCocoaInput(TRUE); EmLCD.EnableDisplay;
         EmHost.Str(EmHost.out, "Console mode: keyboard input via LCD window, LCD enabled"); EmHost.Ln(EmHost.out)
@@ -266,7 +239,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
         EmCPU.SetDP(customDp);
         EmHost.Str(EmHost.out, "DP set to $"); EmHost.Hex(EmHost.out, customDp, 4); EmHost.Ln(EmHost.out)
       END;
-      EmLoad.InitHeap;
+      EmLoad.InitTraps;
       EmHost.Flush;
       IF EmLCD.displayEnabled THEN EmHost.RunLCD
       ELSIF videoEnabled THEN

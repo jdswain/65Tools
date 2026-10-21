@@ -2,13 +2,18 @@
 
 em16, the emulator of the 65C816, the Rockwell R65C02 and the L28's
 R65C19 that the 65Tools test their programs on, ported from C++
-(`../em16-c`) to Oberon, and of the Tang Nano 20K SoC of
+(em16-c, now in git's history only) to Oberon, and of the Tang Nano 20K SoC of
 `../../Verilog65C816/fpga` (`-fpga`, below). It builds `../bin/em16`, which the oc test
-suites, `as/test816` and Business BASIC use; the C++ version builds
-`../bin/em16-c` and is kept to compare with.
+suites, `as/test816` and Business BASIC use.
 
     make            ../bin/em16
-    make compare    run both on the same programs (test/compare.sh)
+    make test       the disk controllers and the banked direct page
+
+Oberon programs run on OS16, which boots on `-fpga` from a floppy as on
+the board: em16 has no loader of its own for Oberon modules any more, nor
+a heap for NEW. The tests of `../oc` and `../as/test816` and OS16's own
+build a boot floppy with OS16's kernel image and the program
+(`../../OS16/tools/mkfloppy.py`, `../../OS16/doc/OS16_MemoryManagement.md`).
 
 The Oberon sources are compiled by the LLVM Oberon compiler of the oc
 repository (`../../../oc/bin/oc`, or `make OC=...`), as `as` is.
@@ -23,8 +28,8 @@ This port is a derivative of it and under the same licence.
 ## Modules
 
     Em16      command line, running, -fbdump, the statistics
-    EmLoad    ELF and .816 loading, relocation, imports, the boot
-              manifest at $0D00, the heap and the run time traps
+    EmLoad    ELF loading and the run time traps (but on -fpga, where
+              BRK goes through the vectors)
     EmCPU     the processor: registers, addressing modes, operations,
               the three opcode tables, the trace (-t)
     EmMem     the memory map of the three machines
@@ -61,12 +66,12 @@ the mouse to exported procedures; `-video` and `-console` run the CPU
 (`Em16.CpuThread`) on a second thread, as before.
 
 The opcode tables at the end of `EmCPU.Mod` were generated from
-`em16-c/src/emu816.cpp` by `tools/gendispatch.py`.
+em16-c's `emu816.cpp` (tools/gendispatch.py, both now in git's history).
 
 ## The same behaviour
 
-The port keeps what em16 did, and what its users read: every message
-of the loaders, `cout`'s sticky `hex` (once `cout << hex` had been
+The port kept what em16 did, and what its users read: every message
+of the ELF loader, `cout`'s sticky `hex` (once `cout << hex` had been
 written, later numbers on `cout`, such as the count in "Executed",
 came out in hex), the trace format, the BRK traps, and the places where
 em16 differs from the chip: TCD sets no flags, `JMP a` takes the
@@ -78,10 +83,15 @@ These could be corrected now in both versions.
 
 One addition: the default machine has the carrier board's disk
 controllers at the SoC's addresses, the 82077AA at $0800 and the 53C80
-at $0830, so that OS16's drivers run on it as modules; em16-c has the
-WD1793 at $0800, which `-wd1793` gives instead (below), and RAM at
-$0830. The 82077AA's time there is the processor's cycles, three of the
-SoC's to each (as if at 8.4 MHz). The L28 keeps its WD1793 at $0640.
+at $0830; em16-c has the WD1793 at $0800, which `-wd1793` gives instead
+(below), and RAM at $0830. The 82077AA's time there is the processor's
+cycles, three of the SoC's to each (as if at 8.4 MHz). The L28 keeps its
+WD1793 at $0640. Removed since: the loading of .816 modules (with -I,
+the manifest at $0D00, the module table at $0E00), the heap behind
+BRK #10, and the comparison with em16-c (test/compare.sh,
+tools/cputest.py, tools/gendispatch.py and em16-c itself, in git's
+history): OS16 loads modules, and its heap
+is NEW's.
 
 Left out, because nothing reached them: the S28 loader (`load` in
 `main.cpp`, never called), the R6501 (constructed, but no address of
@@ -92,8 +102,7 @@ Differences: the trace and standard error are written a line at a time
 rather than piece by piece (the order is the same; it is many times
 faster); `WDM 2` reads a character if one is waiting instead of blocking
 on `cin`; the memory starts zeroed; the string table of an ELF file may
-have 1 MB, its symbol table 200000 symbols, a .816 module 64K of type
-descriptors.
+have 1 MB, its symbol table 200000 symbols.
 
 ## The SoC (-fpga)
 
@@ -211,26 +220,12 @@ before, as above.
 
 ## Testing
 
-`test/compare.sh` runs both versions and compares standard output
-(without the timing lines), standard error, the traces and the files
-they write:
-
-- `tools/cputest.py` writes programs that execute every opcode of the
-  65C816 in its five register width modes, of the R65C02 and of the
-  R65C19, with varied registers, flags (decimal included), memory and
-  direct page; their `-t` traces are compared, three seeds each;
-- every compiled test program in `../oc/test`;
-- OS16's old WD1793 boot loader reading a floppy image (em16 with
-  `-wd1793`): trace and the image after;
-- a boot ROM drawing into the framebuffer, with `-fbdump`;
-- Business BASIC on the SoC (the output, not the time);
-- the L28's USART, LCD and banked memory, the VIA's timer interrupts
-  and ADB.
-
-314 comparisons, all the same (except Business BASIC since its
-console moved to the SCC, which em16-c does not have). `test/disks.sh`
-covers the disk controllers, which em16-c does not have either. The oc816 golden suite (146 pass,
-2 skipped), `as/test816` and Business BASIC's tests pass with it.
+`make test` runs `test/disks.sh`, a boot ROM (`test/disks.s`) that drives
+both disk controllers by polling and compares what it prints with
+`test/disks.expected`, and `test/banked.sh`, the banked direct page and
+stack of the board's 65C816. The oc816 golden suite (`../oc`, make
+test_self), `as/test816`, OS16's tests and Business BASIC's run on em16
+-fpga.
 
 The port found two faults of the Oberon compiler: two procedures of
 the same name in one module are accepted, and a call from another

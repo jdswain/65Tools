@@ -1,8 +1,5 @@
-MODULE TestTool;
-   IMPORT SYSTEM;
-	  
-   CONST
-	  ACIA_DATA = 0C000H;
+MODULE TestTool;   (* output through Out, the serial port *)
+   IMPORT Out;
 	  
    TYPE
 	  String = ARRAY 250 OF CHAR;
@@ -12,12 +9,12 @@ MODULE TestTool;
 	  
    PROCEDURE NewLine*;
    BEGIN
-	  SYSTEM.PUT(0, ACIA_DATA, 0AX);
+	  Out.Ln
    END NewLine;
    
    PROCEDURE PutChar*(value: CHAR);
    BEGIN
-	  SYSTEM.PUT(0, ACIA_DATA, value);
+	  Out.Char(value)
    END PutChar;
 
    PROCEDURE Println*(VAR str: ARRAY OF CHAR);

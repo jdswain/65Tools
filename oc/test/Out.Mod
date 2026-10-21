@@ -1,15 +1,20 @@
-MODULE Out;
+MODULE Out; (* Output on the serial port: channel A of the board's Z85C30
+   SCC (em16 -fpga writes it to standard output). *)
   IMPORT SYSTEM;
-  CONST ACIA_DATA = 0C000H;
+  CONST
+    SccCtl = 0822H;    (* RR0 bit 2: the transmit buffer is empty *)
+    SccData = 0823H;
 
   PROCEDURE Char*(ch: CHAR);
+    VAR b: BYTE;
   BEGIN
-    SYSTEM.PUT(0, ACIA_DATA, ch)
+    REPEAT SYSTEM.GET(0, SccCtl, b) UNTIL ODD(b DIV 4);
+    SYSTEM.PUT(0, SccData, ch)
   END Char;
 
   PROCEDURE Ln*;
   BEGIN
-    SYSTEM.PUT(0, ACIA_DATA, 0AX)
+    Char(0AX)
   END Ln;
 
   PROCEDURE String*(s: ARRAY OF CHAR);
@@ -20,6 +25,15 @@ MODULE Out;
       Char(s[i]); i := i + 1
     END
   END String;
+
+  (* the names of the host runtime's Out *)
+  PROCEDURE Write*(ch: CHAR);
+  BEGIN Char(ch)
+  END Write;
+
+  PROCEDURE WriteString*(s: ARRAY OF CHAR);
+  BEGIN String(s)
+  END WriteString;
 
   PROCEDURE Int*(x, n: INTEGER);
     VAR i, d: INTEGER;
@@ -116,6 +130,14 @@ MODULE Out;
     END
   END Real;
 
+  PROCEDURE Init;   (* the transmitter on, 8 bits (WR5) *)
+    VAR b: BYTE;
+  BEGIN
+    SYSTEM.GET(0, SccCtl, b);   (* the register pointer back to 0 *)
+    b := 5; SYSTEM.PUT(0, SccCtl, b); b := 68H; SYSTEM.PUT(0, SccCtl, b)
+  END Init;
+
 BEGIN
+  Init;
   Char("O"); Char("K"); Ln()
 END Out.

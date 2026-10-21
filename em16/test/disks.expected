@@ -1,7 +1,6 @@
 82077AA: Mounted disk 0 (1.44M): fd.img
 SCSI: Mounted disk at ID 0 (10240 blocks): sd.img
 Boot ROM loaded (8192 bytes), reset vector -> $e000
-Heap initialized at $1000 (bank 0)
 82077AA: $0340, DOR on, MSR: 00 01 80 
 sense interrupt x4: C0 C1 C2 C3 00 
 version: 90 

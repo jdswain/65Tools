@@ -1,5 +1,5 @@
 MODULE L9_CrossTypeTest;
-  IMPORT Out, L9_TypeBase;
+  IMPORT Out, L9_TypeBase, HeapManager;
   TYPE
     Ext2 = RECORD (L9_TypeBase.Base) z: INTEGER END;
     PExt2 = POINTER TO Ext2;

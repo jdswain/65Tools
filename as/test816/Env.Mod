@@ -1,5 +1,5 @@
 MODULE Env;
-  (* Program arguments for the emulator: Seed sets them before the
+  (* Program arguments for the assembler on OS16: Seed sets them before the
      assembler starts. *)
 
   CONST maxArgs = 8;

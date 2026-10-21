@@ -1,7 +1,7 @@
 MODULE L18_ShiftDiv; (* a runtime shift count from a record field, whose
    pointer takes registers before the value is loaded; power-of-two DIV
    of a procedure's result *)
-  IMPORT Out;
+  IMPORT Out, HeapManager;
   TYPE R = POINTER TO RD; RD = RECORD a, drive: INTEGER END;
   VAR r: R; n, x: INTEGER;
 

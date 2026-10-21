@@ -12,8 +12,7 @@
 # The compiler writes its .smb/.o/.ll files beside the source, so the
 # sources are copied to obj/ and compiled there. Edit the files in src/.
 #
-# The C++ em16 this was ported from is in ../em16-c (bin/em16-c);
-# make compare runs both on the same programs (test/compare.sh).
+# The C++ em16 this was ported from (em16-c) is in git's history.
 
 OC     ?= ../../../oc/bin/oc
 OC     := $(abspath $(OC))
@@ -30,7 +29,7 @@ CSRC := $(SRCDIR)/EmHost_rt.c $(SRCDIR)/EmFont.c $(SRCDIR)/EmCocoa.m
 
 RT_SMB := $(RT)/Errors.smb $(RT)/Out.smb $(RT)/Files.smb $(RT)/Env.smb
 
-.PHONY: all test compare clean
+.PHONY: all test clean
 
 .SECONDARY: $(MODS:%=$(OBJDIR)/%.Mod)
 
@@ -81,9 +80,6 @@ $(TARGET): $(OBJS) $(CSRC) | $(BINDIR)
 test: $(TARGET)
 	@sh test/disks.sh
 	@sh test/banked.sh
-
-compare: $(TARGET)
-	@sh test/compare.sh
 
 clean:
 	rm -rf $(OBJDIR)

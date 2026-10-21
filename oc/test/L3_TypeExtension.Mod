@@ -1,5 +1,5 @@
 MODULE L3_TypeExtension;
-  IMPORT Out;
+  IMPORT Out, HeapManager;
   TYPE
     Base = RECORD x: INTEGER END;
     Derived = RECORD (Base) y: INTEGER END;

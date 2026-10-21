@@ -1,43 +1,50 @@
 #!/bin/sh
-# The assembler compiled for the 65C816, run under em16.
+# The assembler compiled for the 65C816, run on OS16 under em16.
 #
 #   sh run.sh [-v]
 #
-# Compiles the sources of ../src with oc816 against the small runtime in
-# this directory (files in memory, arguments set by a module), loads the
-# lot into em16 and has it assemble sample.s. The output file and the
-# listing it produces must equal those of the host assembler ../../bin/as.
-# Name the tools with OC816, EM16 and AS.
+# Compiles the sources of ../src with oc816 against OS16's kernel (its
+# Files and Out; Env, here, gives the arguments, which Seed sets) and
+# boots OS16 on em16 -fpga from a floppy with sample.s, the assembler's
+# modules and RUN.TXT: Seed, AS (which assembles sample.s into the files
+# sample.bin and sample.lst on the floppy) and Dump (which prints them).
+# The output file and the listing must equal those of the host assembler
+# ../../bin/as. Name the tools with OC816, EM16, AS and OS16B (OS16's
+# build directory: cd ../../../OS16 && make first).
 
 cd "$(dirname "$0")" || exit 1
 abs() { echo "$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"; }
 OC816=$(abs "${OC816:-../../../../oc/self/s816/oc816}")
 EM16=$(abs "${EM16:-../../bin/em16}")
 AS=$(abs "${AS:-../../bin/as}")
+OS16B=$(abs "${OS16B:-../../../OS16/build}")
 for t in "$OC816" "$EM16" "$AS"; do
   [ -x "$t" ] || { echo "test816 skipped: $t not found"; exit 0; }
 done
+[ -f "$OS16B/KERNEL.IMG" ] || { echo "test816 skipped: no OS16 kernel in $OS16B (cd ../../../OS16 && make)"; exit 0; }
+KERNEL=$(cat "$OS16B/KERNEL.TXT")
 
-RUNTIME="Out Files Env"
 MODS="ASC ASH ASS ASB ASG ASL ASI ASP ASO"
-mkdir -p out/host
-cp Out.Mod Files.Mod Env.Mod Dump.Mod ../src/*.Mod sample.s out/
+rm -rf out; mkdir -p out/host
+cp Env.Mod Dump.Mod ../src/*.Mod sample.s out/
 python3 mkseed.py sample.s sample.bin && mv Seed.Mod out/
 cd out || exit 1
+for k in $KERNEL; do cp "$OS16B/$k.smb" .; done
+cp "$OS16B/KERNEL.IMG" "$OS16B/boot.rom" .
 
 # compile, in order of import
-for m in $RUNTIME $MODS Seed AS Dump; do
-  if ! "$OC816" $m.Mod -s > $m.log 2>&1; then
+for m in Env $MODS Seed AS Dump; do
+  if ! "$OC816" $m.Mod -s > $m.log 2>&1 || grep -q "  pos " $m.log; then
     echo "FAIL: oc816 $m.Mod"; grep -E "pos|rror" $m.log | head; exit 1
   fi
 done
 [ "$1" = "-v" ] && ls -l *.816 | awk '{ printf "  %-10s %6d bytes\n", $NF, $5 }'
 
-# run: the modules initialise in the order given, so Seed prepares the
-# source and the arguments, AS assembles, Dump prints the results
-LOAD=""
-for m in $RUNTIME $MODS Seed AS Dump; do LOAD="$LOAD $m.816"; done
-echo "" | perl -e 'alarm 120; exec @ARGV' "$EM16" $LOAD > em16.log 2>&1
+# run: Startup loads Seed, which sets the arguments, AS, which assembles,
+# and Dump, which prints the results
+python3 ../../../../OS16/tools/mkfloppy.py -d . -x "$(echo $KERNEL | tr ' ' ,)" -m Seed -m AS -m Dump \
+  -n "RUN.TXT=Seed AS Dump" boot.img KERNEL.IMG sample.s || exit 1
+echo "" | perl -e 'alarm 300; exec @ARGV' "$EM16" -fpga -bootrom boot.rom -disk0 boot.img 2>&1 | tr -d '\r' > em16.log
 sed -n '/^--- output$/,/^--- listing$/p' em16.log | sed '1d;$d' > sample.hex
 sed -n '/^--- listing$/,/^--- end$/p' em16.log | sed '1d;$d' > sample.lst
 

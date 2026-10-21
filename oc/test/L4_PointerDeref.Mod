@@ -1,5 +1,5 @@
 MODULE L4_PointerDeref;
-  IMPORT Out;
+  IMPORT Out, HeapManager;
   TYPE Rec = RECORD x, y: INTEGER END;
        Ptr = POINTER TO Rec;
   VAR p: Ptr;

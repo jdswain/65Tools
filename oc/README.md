@@ -47,53 +47,35 @@ cd ../em16
 make
 ```
 
-em16 is written in Oberon and needs the LLVM Oberon compiler (`../../../oc`);
-the C++ version it was ported from is in `../em16-c` (`make -f Makefile.macos`,
-builds `../bin/em16-c`).
+em16 is written in Oberon and needs the LLVM Oberon compiler (`../../../oc`).
 
-To run a compiled module:
-
-```bash
-echo "" | ../bin/em16 test/Hello.816
-```
-
-For multi-module programs, list dependencies before the main module:
-
-```bash
-echo "" | ../bin/em16 test/Out.816 test/MyProgram.816
-```
-
-The `-t` flag enables an instruction trace for debugging.
+Compiled modules run on OS16 (`../../OS16`), booted under `em16 -fpga`
+from a floppy that holds OS16's kernel, the program and the modules it
+imports, and RUN.TXT naming it (`../../OS16/tools/mkfloppy.py`): em16 has
+no loader of its own for them. `test/run_self_tests.sh` does this for each
+test. The `-t` flag of em16 enables an instruction trace for debugging.
 
 ## Tests
 
-The test suite is organized into levels (L0-L12), each covering a set of
+The test suite is organized into levels (L0-L18), each covering a set of
 language features. See `test/TEST_PLAN.md` for the full breakdown.
 
 ```bash
-# Run all tests (compilation + L0 emulator tests)
+# Run all tests: this compiler's compilation tests, then oc816's goldens
 make test
 
-# Run just compilation tests (no emulator needed)
+# Run just this compiler's compilation tests
 make test_compile
 
-# Run a specific level
-make test_level0    # Legacy / integration tests
-make test_level1    # Foundations (arithmetic, control flow, procedures)
-make test_level2    # Arrays, strings, records
-make test_level3    # Record operations
-make test_level4    # Pointers and dynamic allocation
-make test_level5    # SET type
-make test_level6    # CASE statements
-make test_level7    # Standard procedures (INC, DEC, ABS, ODD, LEN, etc.)
-make test_level8    # REAL arithmetic
-make test_level9    # Module system (imports, exports)
-make test_level10   # SYSTEM module (PUT, GET, ADR, BIT, etc.)
-make test_level11   # Edge cases and stress tests
-make test_level12   # Negative tests (compiler error detection)
+# Run oc816's goldens on OS16 (build OS16 first: cd ../../OS16 && make);
+# give levels to run only those
+make test_self
+bash test/run_self_tests.sh L4 L9
 ```
 
-All levels except `test_compile` and `test_level12` require the emulator.
+This C compiler's own programs no longer run: its NEW is `BRK #10`, which
+em16 answered from a heap of its own, and that heap and em16's module
+loader are gone; NEW is OS16's HeapManager's.
 
 ## Project Structure
 

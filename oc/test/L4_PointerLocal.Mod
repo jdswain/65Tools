@@ -1,5 +1,5 @@
 MODULE L4_PointerLocal;
-  IMPORT Out;
+  IMPORT Out, HeapManager;
   TYPE Rec = RECORD a, b: INTEGER END;
        Ptr = POINTER TO Rec;
 

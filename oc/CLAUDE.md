@@ -6,8 +6,9 @@
 > `make test_self` (or `OC=… ./test/run_self_tests.sh`) — it covers every level
 > plus the OO (L16) and interface (L17) goldens. Keep this C compiler buildable
 > for `bin/disasm` and side-by-side comparison; it is baseline Oberon-07 +
-> LONGINT only (no methods/interfaces). The em16 emulator's `.816` loader lives
-> in `../em16/src/EmLoad.Mod` (C++ original: `../em16-c/src/main.cpp`).
+> LONGINT only (no methods/interfaces). Its programs no longer run: em16 has
+> no `.816` loader or heap any more; oc816's tests run on OS16 booted under
+> `em16 -fpga` (`../../OS16`, `test/run_self_tests.sh`).
 
 This project is written in C.
 There is a Makefile for building.
@@ -27,7 +28,7 @@ There is also cpu.c, codegen.c, and gen_816.c for generating code.
 Each oberon module compiles to a file with .816 extension.
 There is a disassembler for the 816 files, it is in bin/disasm.
 The disassembler does not implement all 65C816 instructions yet, quite often we need to add instructions.
-The emulator is in ../bin/em16. You need the command echo "" | ../bin/em16 test/module.816
+The emulator is in ../bin/em16. A compiled module runs on OS16, booted on em16 -fpga from a floppy with it (see test/run_self_tests.sh and ../../OS16/tools/mkfloppy.py).
 The emulator has a -t trace option, this outputs an instruction trace.
 The compiler is based on an oberon version, this is in oberon/. Often it is useful to refer to the source in there to see what needs to be implemented.
 

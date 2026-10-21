@@ -1,5 +1,5 @@
 MODULE L4_LinkedList;
-  IMPORT Out;
+  IMPORT Out, HeapManager;
   TYPE Node = RECORD val: INTEGER; next: POINTER TO Node END;
        NodePtr = POINTER TO Node;
   VAR head, n: NodePtr;

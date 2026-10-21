@@ -1,9 +1,14 @@
-MODULE L1_SystemPut;
+MODULE L1_SystemPut; (* SYSTEM.PUT to a device: the board's serial port,
+   channel A of the SCC, waiting with SYSTEM.GET for room as Out does *)
   IMPORT SYSTEM, Out;
-  CONST ACIA = 0C000H;
+  CONST SccCtl = 0822H; SccData = 0823H;
+
+  PROCEDURE Put(ch: CHAR);
+    VAR b: BYTE;
+  BEGIN REPEAT SYSTEM.GET(0, SccCtl, b) UNTIL ODD(b DIV 4); SYSTEM.PUT(0, SccData, ch)
+  END Put;
+
 BEGIN
-  SYSTEM.PUT(0, ACIA, ORD("H"));
-  SYSTEM.PUT(0, ACIA, ORD("i"));
-  SYSTEM.PUT(0, ACIA, 0AH);
+  Put("H"); Put("i"); Put(0AX);
   Out.Char("."); Out.Ln()
 END L1_SystemPut.

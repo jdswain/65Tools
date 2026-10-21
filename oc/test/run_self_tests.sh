@@ -11,6 +11,13 @@
 #     OC     compiler binary (default: the built self/s816/oc816 in the oc repo)
 #     args   optional list of level prefixes to run (e.g. L1 L5); default all
 #
+# Each test runs on OS16, booted as on the board: em16 -fpga with OS16's
+# boot ROM and a floppy (OS16/tools/mkfloppy.py) holding the kernel image,
+# RUN.TXT naming the test, and the test's module with the modules it
+# imports. OS16 must be built first (cd ../../OS16 && make): the tests link
+# to the kernel's modules (Out, HeapManager, ...) by its symbol files, and
+# their output is what follows Out's "OK" as the kernel starts.
+#
 # Parity note: oc816 uses the shared (latest) Oberon frontend. Its REAL
 # literal conversion is correctly-rounded and can differ in the last
 # printed digit from the C compiler's (e.g. 3.14159 vs 3.14158) — oc816 is
@@ -22,10 +29,14 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 OC="${OC:-$PROJECT_DIR/../../../oc/self/s816/oc816}"
 EM16="${EM16:-$PROJECT_DIR/../bin/em16}"
-TIMEOUT_SECS="${TIMEOUT_SECS:-5}"
+OS16B="${OS16B:-$PROJECT_DIR/../../OS16/build}"
+TIMEOUT_SECS="${TIMEOUT_SECS:-30}"
 
 if [ ! -x "$OC" ];   then echo "ERROR: compiler not found/executable at $OC"; exit 1; fi
 if [ ! -x "$EM16" ]; then echo "ERROR: emulator not found at $EM16"; exit 1; fi
+if [ ! -f "$OS16B/KERNEL.IMG" ]; then echo "ERROR: no OS16 kernel at $OS16B (cd ../../OS16 && make)"; exit 1; fi
+KERNEL="$(cat "$OS16B/KERNEL.TXT")"
+MKFLOPPY="$PROJECT_DIR/../../OS16/tools/mkfloppy.py"
 
 # Work in a scratch dir so oc816's v5 .smb / .816 artifacts never clobber
 # the C compiler's outputs in test/.
@@ -34,9 +45,12 @@ trap 'rm -rf "$WORK"' EXIT
 cp "$SCRIPT_DIR"/*.Mod "$WORK"/ 2>/dev/null
 cp "$SCRIPT_DIR"/*.expected "$WORK"/ 2>/dev/null
 cd "$WORK" || exit 1
+# the kernel's modules are the kernel's: its symbol files, not compiled here
+for k in $KERNEL; do rm -f "$k.Mod"; cp "$OS16B/$k.smb" .; done
+cp "$OS16B/KERNEL.IMG" "$OS16B/boot.rom" .
 
 # Pre-compile library modules so dependencies resolve.
-for lib in Out Runtime TestTool; do
+for lib in Runtime TestTool; do
   [ -f "$lib.Mod" ] && "$OC" "$lib.Mod" -s >/dev/null 2>&1
 done
 
@@ -46,7 +60,7 @@ done
 for pass in 1 2; do
   for m in *.Mod; do
     bn="${m%.Mod}"
-    case "$bn" in Out|Runtime|TestTool) continue;; esac
+    case "$bn" in Runtime|TestTool) continue;; esac
     [ -f "$bn.expected" ] && continue   # a test driver — compiled+run below
     "$OC" "$m" -s >/dev/null 2>&1
   done
@@ -103,14 +117,14 @@ for lvl in "${LEVELS[@]}"; do
       FAIL=$((FAIL + 1)); continue
     fi
     [ -f "$bn.816" ] || { echo "SKIP  $bn (no .816)"; SKIP=$((SKIP + 1)); continue; }
-    full="$(echo "" | perl -e "alarm $TIMEOUT_SECS; exec @ARGV" "$EM16" "$bn.816" 2>/dev/null)"
+    if ! python3 "$MKFLOPPY" -d . -x "$(echo $KERNEL | tr ' ' ,)" -m "$bn" -n "RUN.TXT=$bn" boot.img KERNEL.IMG 2> floppy.err; then
+      echo "FAIL  $bn (floppy: $(cat floppy.err))"; FAIL=$((FAIL + 1)); continue
+    fi
+    full="$(echo "" | perl -e "alarm $TIMEOUT_SECS; exec @ARGV" "$EM16" -fpga -bootrom boot.rom -disk0 boot.img 2>/dev/null | tr -d '\r')"
     [ $? -eq 142 ] && { echo "FAIL  $bn (timeout)"; FAIL=$((FAIL + 1)); continue; }
-    # Output from the first module init through to "Executed" — this includes
-    # the deterministic "OK" startup line most goldens in this tree capture.
-    # (The C run_level*_tests.sh reset the buffer per-init and so strip it; the
-    # goldens are historically inconsistent about it, so this runner keeps the
-    # OK-including convention and owns its own regenerated goldens.)
-    actual="$(echo "$full" | awk '/^Initialising at/{f=1;next} /^Executed /{exit} f{print}')"
+    # Output from Out's "OK", as the kernel starts, up to em16's statistics
+    # (the blank line before "Executed"): what the goldens capture.
+    actual="$(echo "$full" | awk '/^OK$/{f=1} /^Executed /{exit} f{print}' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}')"
     if [ "$actual" = "$(cat "$exp")" ]; then
       echo "PASS  $bn"; PASS=$((PASS + 1))
     else

@@ -1,5 +1,5 @@
 MODULE L4_PointerAssign;
-  IMPORT Out;
+  IMPORT Out, HeapManager;
   TYPE Rec = RECORD val: INTEGER END;
        Ptr = POINTER TO Rec;
   VAR p, q: Ptr;
