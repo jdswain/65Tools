@@ -127,6 +127,8 @@ rather than em16's default machine:
   bus, and the SCC answers at $0820-$082F in place of card 2), the 8K
   boot ROM at $E000 until system control bit 0 is cleared;
 - the serial port, channel A of the SCC, on standard input and output;
+- the SCC's baud-rate generators and their zero-count interrupt, as
+  `rtl/scc_85c30.v` has them: OS16's clock tick, on channel B;
 - the display: 640 x 480 in 16 colours at $70_0000, or 80 x 30 text
   (video control bit 0) drawn with the board's font, read at start from
   the Verilog repository's `fpga/rom/font_st8x16.hex` (or `-font`). The

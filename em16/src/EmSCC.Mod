@@ -18,6 +18,13 @@ MODULE EmSCC; (* The SoC's emulated Z85C30 SCC, rtl/scc_85c30.v, with
    5), MIE (WR9 bit 3), RR3, RR2 from channel B with the status in it (WR9
    bits 0 and 4), and the resets in WR9 bits 7-6. Channel B has no pins.
 
+   The baud-rate generators: while WR14 bit 0 is set and bit 1 selects
+   PCLK (the SoC's clock; RTxC has no pin), each counts down from its time
+   constant (WR13:WR12), a zero count every time constant + 2 cycles. With
+   WR15 bit 1 and WR1 bit 0 a zero count latches the channel's
+   external/status interrupt (RR3 bit 3 A, bit 0 B; the vector's 101 and
+   001), until WR0 command 2. They do not set the serial rate.
+
    A character typed reaches the FIFO no sooner than a character time
    after the one before, and only if there is room: on the board a fourth
    character waiting is lost (overrun); here the host holds it back, as a
@@ -28,8 +35,9 @@ MODULE EmSCC; (* The SoC's emulated Z85C30 SCC, rtl/scc_85c30.v, with
   CONST charTime = 2340; A = 1; B = 0;
 
   VAR
-    ptr, wr1, wr3, wr5, wr12, wr13, wr15: ARRAY 2 OF INTEGER;
-    txIP: ARRAY 2 OF BOOLEAN;
+    ptr, wr1, wr3, wr5, wr12, wr13, wr14, wr15: ARRAY 2 OF INTEGER;
+    txIP, extIP: ARRAY 2 OF BOOLEAN;
+    zero: ARRAY 2 OF LONGINT;   (* the next zero count *)
     wr2, wr9: INTEGER;
     fifo: ARRAY 3 OF INTEGER;
     count: INTEGER;
@@ -39,7 +47,7 @@ MODULE EmSCC; (* The SoC's emulated Z85C30 SCC, rtl/scc_85c30.v, with
 
   PROCEDURE ResetChannel(c: INTEGER);
   BEGIN ptr[c] := 0; wr1[c] := 0; wr3[c] := AND(wr3[c], 0FEH); wr5[c] := AND(wr5[c], 61H);
-    wr15[c] := 0F8H; txIP[c] := FALSE;
+    wr14[c] := AND(wr14[c], 0C3H) + 20H; wr15[c] := 0F8H; txIP[c] := FALSE; extIP[c] := FALSE;
     IF c = A THEN count := 0; overrun := FALSE; txFull := FALSE END
   END ResetChannel;
 
@@ -48,7 +56,7 @@ MODULE EmSCC; (* The SoC's emulated Z85C30 SCC, rtl/scc_85c30.v, with
   BEGIN
     FOR c := 0 TO 1 DO
       ptr[c] := 0; wr1[c] := 0; wr3[c] := 0; wr5[c] := 0; wr12[c] := 0; wr13[c] := 0;
-      wr15[c] := 0F8H; txIP[c] := FALSE
+      wr14[c] := 30H; wr15[c] := 0F8H; txIP[c] := FALSE; extIP[c] := FALSE; zero[c] := 0
     END;
     wr2 := 0; wr9 := 0; count := 0; overrun := FALSE; txFull := FALSE; txBuf := 0;
     txFree := 0; rxNext := 0; nextPoll := 0
@@ -83,9 +91,27 @@ MODULE EmSCC; (* The SoC's emulated Z85C30 SCC, rtl/scc_85c30.v, with
     nextPoll := now + charTime
   END Poll;
 
+  PROCEDURE Running(c: INTEGER): BOOLEAN;   (* the generator counts *)
+  BEGIN RETURN AND(wr14[c], 3) = 3
+  END Running;
+
+  PROCEDURE Period(c: INTEGER): LONGINT;
+    VAR p: LONGINT;
+  BEGIN p := wr13[c]; RETURN p * 256 + wr12[c] + 2
+  END Period;
+
+  (* The zero counts up to now, at each the time constant reloaded. *)
+  PROCEDURE Count(c: INTEGER; now: LONGINT);
+  BEGIN
+    WHILE Running(c) & (now >= zero[c]) DO
+      IF ODD(wr15[c] DIV 2) & ODD(wr1[c]) THEN extIP[c] := TRUE END;
+      zero[c] := zero[c] + Period(c)
+    END
+  END Count;
+
   (* Called as time passes, for a program that waits for the IRQ. *)
   PROCEDURE Tick*(now: LONGINT);
-  BEGIN Send(now); IF now >= nextPoll THEN Poll(now) END
+  BEGIN Send(now); IF now >= nextPoll THEN Poll(now) END; Count(A, now); Count(B, now)
   END Tick;
 
   PROCEDURE RxIP(): BOOLEAN;
@@ -94,7 +120,7 @@ MODULE EmSCC; (* The SoC's emulated Z85C30 SCC, rtl/scc_85c30.v, with
   END RxIP;
 
   PROCEDURE Irq*(): BOOLEAN;
-  BEGIN RETURN ODD(wr9 DIV 8) & (RxIP() OR txIP[A] OR txIP[B])
+  BEGIN RETURN ODD(wr9 DIV 8) & (RxIP() OR txIP[A] OR extIP[A] OR txIP[B] OR extIP[B])
   END Irq;
 
   PROCEDURE Pop(): INTEGER;
@@ -121,7 +147,9 @@ MODULE EmSCC; (* The SoC's emulated Z85C30 SCC, rtl/scc_85c30.v, with
     ELSIF (n = 2) OR (n = 6) THEN
       IF (c = A) OR ~ODD(wr9) THEN r := wr2
       ELSE
-        IF RxIP() THEN v := 6 ELSIF txIP[A] THEN v := 4 ELSIF txIP[B] THEN v := 0 ELSE v := 3 END;
+        IF RxIP() THEN v := 6 ELSIF txIP[A] THEN v := 4 ELSIF extIP[A] THEN v := 5
+        ELSIF txIP[B] THEN v := 0 ELSIF extIP[B] THEN v := 1 ELSE v := 3
+        END;
         IF ODD(wr9 DIV 16) THEN               (* status high: V4-V6, reversed *)
           r := AND(wr2, 8FH) + (v MOD 2) * 40H + (v DIV 2 MOD 2) * 20H + (v DIV 4) * 10H
         ELSE r := AND(wr2, 0F1H) + v * 2
@@ -132,7 +160,9 @@ MODULE EmSCC; (* The SoC's emulated Z85C30 SCC, rtl/scc_85c30.v, with
       IF c = A THEN
         IF RxIP() THEN r := ORA(r, 20H) END;
         IF txIP[A] THEN r := ORA(r, 10H) END;
-        IF txIP[B] THEN r := ORA(r, 2) END
+        IF extIP[A] THEN r := ORA(r, 8) END;
+        IF txIP[B] THEN r := ORA(r, 2) END;
+        IF extIP[B] THEN r := ORA(r, 1) END
       END
     ELSIF n = 8 THEN IF c = A THEN r := Pop() ELSE r := 0 END
     ELSIF (n = 9) OR (n = 13) THEN r := wr13[c]
@@ -167,7 +197,8 @@ MODULE EmSCC; (* The SoC's emulated Z85C30 SCC, rtl/scc_85c30.v, with
       cmd := AND(data DIV 8, 7); n := AND(data, 7);
       IF cmd = 1 THEN n := n + 8 END;
       ptr[c] := n;
-      IF cmd = 5 THEN txIP[c] := FALSE
+      IF cmd = 2 THEN extIP[c] := FALSE
+      ELSIF cmd = 5 THEN txIP[c] := FALSE
       ELSIF (cmd = 6) & (c = A) THEN overrun := FALSE
       END
     ELSE n := ptr[c]; ptr[c] := 0;
@@ -185,11 +216,16 @@ MODULE EmSCC; (* The SoC's emulated Z85C30 SCC, rtl/scc_85c30.v, with
         IF cmd = 3 THEN wr9 := 0 ELSE wr9 := AND(data, 3FH) END
       ELSIF n = 12 THEN wr12[c] := data
       ELSIF n = 13 THEN wr13[c] := data
+      ELSIF n = 14 THEN
+        IF ~Running(c) & (AND(data, 3) = 3) THEN zero[c] := now + Period(c) - 1 END;
+        wr14[c] := data
       ELSIF n = 15 THEN wr15[c] := data
-      END                                         (* WR4, WR6, WR7, WR10, WR11, WR14: no effect *)
+      END                                         (* WR4, WR6, WR7, WR10, WR11: no effect *)
     END;
     IF ~ODD(wr1[A] DIV 2) THEN txIP[A] := FALSE END;
-    IF ~ODD(wr1[B] DIV 2) THEN txIP[B] := FALSE END
+    IF ~ODD(wr1[B] DIV 2) THEN txIP[B] := FALSE END;
+    IF ~ODD(wr1[A]) THEN extIP[A] := FALSE END;
+    IF ~ODD(wr1[B]) THEN extIP[B] := FALSE END
   END Write;
 
 BEGIN Reset; interactive := EmHost.IsTTY() # 0;
