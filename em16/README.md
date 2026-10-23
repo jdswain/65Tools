@@ -9,6 +9,12 @@ suites, `as/test816` and Business BASIC use.
     make            ../bin/em16
     make test       the disk controllers and the banked direct page
 
+`-t` traces every instruction to standard error: where, the opcode, the
+registers and the cycles so far. `-tfrom addr skip count` traces only
+from the skip+1th time the instruction at addr (`0xFF00`, say) is reached,
+for count instructions: one interrupt or a few, not a whole boot
+(`../../OS16/tools/irqprof.py` profiles such a trace).
+
 Oberon programs run on OS16, which boots on `-fpga` from a floppy as on
 the board: em16 has no loader of its own for Oberon modules any more, nor
 a heap for NEW. The tests of `../oc` and `../as/test816` and OS16's own

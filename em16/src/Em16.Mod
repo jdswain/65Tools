@@ -64,12 +64,15 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
   END Cycles;
 
   PROCEDURE Options(VAR index: INTEGER);
-    VAR arg, val: EmLoad.Path; n, k: INTEGER; done: BOOLEAN;
+    VAR arg, val: EmLoad.Path; n, k, tskip: INTEGER; done: BOOLEAN;
   BEGIN n := Env.ArgCount(); done := FALSE;
     WHILE ~done & ~bad & (index < n) DO
       Env.Arg(index, arg);
       IF arg[0] # "-" THEN done := TRUE
       ELSIF Equal(arg, "-t") THEN trace := TRUE; INC(index)
+      ELSIF Equal(arg, "-tfrom") & (index + 3 < n) THEN
+        Env.Arg(index + 1, val); k := Number(val); Env.Arg(index + 2, val); tskip := Number(val);
+        Env.Arg(index + 3, val); EmCore.TraceFrom(k, tskip, Number(val)); INC(index, 4)
       ELSIF Equal(arg, "-dp") & (index + 1 < n) THEN Env.Arg(index + 1, val); customDp := Number(val); INC(index, 2)
       ELSIF Equal(arg, "-sp") & (index + 1 < n) THEN Env.Arg(index + 1, val); customSp := Number(val); INC(index, 2)
       ELSIF Equal(arg, "-cpu") & (index + 1 < n) THEN Env.Arg(index + 1, val);
@@ -100,7 +103,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
         IF EmSCSI.Mount(val) THEN END; INC(index, 2)
       ELSIF Equal(arg, "-console") THEN consoleMode := TRUE; INC(index)
       ELSIF Equal(arg, "-?") THEN
-        ErrStr("Usage: em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-test-pattern] [-console] [-disk0 file] [-disk1 file] [-wd1793] [-scsi file] file ...");
+        ErrStr("Usage: em16 [-t] [-tfrom addr skip count] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-test-pattern] [-console] [-disk0 file] [-disk1 file] [-wd1793] [-scsi file] file ...");
         EmHost.Ln(EmHost.err); bad := TRUE
       ELSE ErrStr("Invalid: option '"); ErrStr(arg); ErrStr("'"); EmHost.Ln(EmHost.err); bad := TRUE
       END

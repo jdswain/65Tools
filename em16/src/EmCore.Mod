@@ -68,6 +68,7 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
     pushN, postPush, pullIdx, vec: INTEGER;
     irq1, irq2: BOOLEAN;          (* the IRQ input's synchronizer; TRUE: asserted *)
     stopped*, trace*: BOOLEAN;
+    traceAt, traceSkip, traceLeft: INTEGER;   (* TraceFrom's *)
     (* the decode table *)
     mode, cls, op: ARRAY 256 OF INTEGER;
     mnem: ARRAY 800 OF CHAR;
@@ -77,6 +78,12 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
   PROCEDURE SetTrace*(on: BOOLEAN);
   BEGIN trace := on
   END SetTrace;
+
+  (* The trace on when the instruction at at is reached for the skip+1th
+     time, and off again after count instructions. *)
+  PROCEDURE TraceFrom*(at, skip, count: INTEGER);
+  BEGIN traceAt := at; traceSkip := skip; traceLeft := count
+  END TraceFrom;
 
   PROCEDURE SetBus*(r, p: Reader; w: Writer; i: Idler; irq: Line);
   BEGIN read := r; peek := p; write := w; idle := i; irqLine := irq
@@ -446,7 +453,12 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
     IF Intr() THEN idle; IntEntry(PC, 0, 0FFEEH + 10H * fE)   (* IRQ: native $FFEE, emulation $FFFE *)
     ELSIF (PBR = 0) & (PC = 0) THEN stopped := TRUE; idle
     ELSE
-      IF trace THEN Trace(peek(PBR * 10000H + PC), cycles) END;
+      IF (traceAt >= 0) & (PBR * 10000H + PC = traceAt) THEN
+        IF traceSkip > 0 THEN DEC(traceSkip) ELSE trace := TRUE; traceAt := -1 END
+      END;
+      IF trace THEN Trace(peek(PBR * 10000H + PC), cycles);
+        IF traceLeft > 0 THEN DEC(traceLeft); IF traceLeft = 0 THEN trace := FALSE END END
+      END;
       o := read(PBR * 10000H + PC);
       PC := W16(PC + 1);
       CASE o OF
@@ -956,5 +968,5 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
     mnem := "BRKORACOPORATSBORAASLORAPHPORAASLPHDTSBORAASLORABPLORAORAORATRBORAASLORACLCORAINCTCSTRBORAASLORAJSRANDJSLANDBITANDROLANDPLPANDROLPLDBITANDROLANDBMIANDANDANDBITANDROLANDSECANDDECTSCBITANDROLANDRTIEORWDMEORMVPEORLSREORPHAEORLSRPHKJMPEORLSREORBVCEOREOREORMVNEORLSREORCLIEORPHYTCDJMLEORLSREORRTSADCPERADCSTZADCRORADCPLAADCRORRTLJMPADCRORADCBVSADCADCADCSTZADCRORADCSEIADCPLYTDCJMPADCRORADCBRASTABRLSTASTYSTASTXSTADEYBITTXAPHBSTYSTASTXSTABCCSTASTASTASTYSTASTXSTATYASTATXSTXYSTZSTASTZSTALDYLDALDXLDALDYLDALDXLDATAYLDATAXPLBLDYLDALDXLDABCSLDALDALDALDYLDALDXLDACLVLDATSXTYXLDYLDALDXLDACPYCMPREPCMPCPYCMPDECCMPINYCMPDEXWAICPYCMPDECCMPBNECMPCMPCMPPEICMPDECCMPCLDCMPPHXSTPJMLCMPDECCMPCPXSBCSEPSBCCPXSBCINCSBCINXSBCNOPXBACPXSBCINCSBCBEQSBCSBCSBCPEASBCINCSBCSEDSBCPLXXCEJSRSBCINCSBC";
   END Init;
 
-BEGIN Init; read := NIL; write := NIL; idle := NIL; irqLine := NIL; trace := FALSE; Reset
+BEGIN Init; read := NIL; write := NIL; idle := NIL; irqLine := NIL; trace := FALSE; traceAt := -1; Reset
 END EmCore.
