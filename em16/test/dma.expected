@@ -1,0 +1,12 @@
+82077AA: Mounted disk 0 (1.44M): fd.img
+SCSI: Mounted disk at ID 0 (10240 blocks): sd.img
+Boot ROM loaded (8192 bytes), reset vector -> $e000
+floppy read C5 H0 R3-4 by DMA: 80 10 00 00 00 06 00 01 02 dma 01 00 00 34 00 B6 00 B7 00 FF 00 
+floppy write C5 H1 R1 by DMA: 04 00 00 06 01 01 02 dma 01 00 00 52 00 
+floppy read, no DMA: 40 10 00 05 00 03 02 
+floppy read C5 H0 R5 at $0810: 40 80 00 06 00 01 02 B8 00 
+request sense: status 00 
+read(10) 100-101 by DMA: status 00 bsr tcr 90 01 dma 01 00 00 34 00 64 00 65 00 FF 
+write(6) 7 by DMA: status 00 bsr tcr 90 80 dma 01 00 00 52 00 
+read(10) 9, 600 asked: status 00 bsr tcr 10 01 dma 00 00 58 32 00 09 00 
+read(6) 7 at $0840: status 00 bsr tcr 10 00 02 00 5A 5A 5A 

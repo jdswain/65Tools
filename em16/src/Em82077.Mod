@@ -22,15 +22,27 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
    one result byte, $80. The deleted data, READ TRACK and SCAN commands
    are not modelled.
 
-   There is no DMA: transfers are polled, after SPECIFY has set ND (bit 0
-   of its second byte). A read, write or format started without it ends
-   at once with an overrun and a warning on standard error. In non-DMA
-   execution the CPU moves each byte through the FIFO while MSR shows
-   RQM, and INT is asserted while it does. With no TC (the DMA's
-   terminal count) a multi-sector transfer ends after the sector EOT
-   names, so a polled transfer ends as on any PC: ST0 $40 (abnormal
-   termination) with ST1 $80 (end of cylinder), and the result's
-   C, H and R point past the last sector.
+   Transfers are polled, after SPECIFY has set ND (bit 0 of its second
+   byte), or by DMA (EmDMA's channel 1), without it. In non-DMA execution
+   the CPU moves each byte through the FIFO while MSR shows RQM, and INT is
+   asserted while it does. With no TC (the DMA's terminal count) a
+   multi-sector transfer ends after the sector EOT names, so a polled
+   transfer ends as on any PC: ST0 $40 (abnormal termination) with ST1 $80
+   (end of cylinder), and the result's C, H and R point past the last
+   sector.
+
+   DMA: DRQ (Drq) while the DOR's DMA gate is on and the FIFO has a byte
+   for a read, or room for a write; the engine's /DACK cycles are DackRead
+   and DackWrite, and the CPU's accesses to slot 1 ($0810, pseudo-DMA) are
+   the same cycles without TC. In DMA execution MSR shows only the busy
+   bit and INT comes only with the result. A read's bytes arrive at the
+   data rate, one every 806, 672, 403 or 201 cycles (250K, 300K, 500K, 1M)
+   from the moment the sector is found; one not taken before the 16-byte
+   FIFO is full ends the command with an overrun (ST0 $40, ST1 $10). A
+   write's bytes leave at the same rate, and DRQ asks while the FIFO has
+   room. TC with a byte ends the command normally once that sector is done
+   (a write's sector filled out with zeros): ST0 $00, with C, H and R the
+   sector after it.
 
    As on the chip: the controller is in reset until DOR bit 2 is set, and
    coming out of reset (that, or DSR bit 7) it raises INT and holds a
@@ -65,7 +77,7 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
 
   VAR
     dor, tdr, rate, srt, hut, hlt: INTEGER;
-    nonDma, warned: BOOLEAN;
+    nonDma: BOOLEAN;
     eis, efifo, poll, fifothr, pretrk, lock, perp: INTEGER;
     phase, op: INTEGER;
     cmd: ARRAY 9 OF INTEGER; nCmd, need: INTEGER;
@@ -82,6 +94,9 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
     mt: BOOLEAN;
     buf: ARRAY sectorSize OF BYTE;
     pos: INTEGER;
+    clock: LONGINT;                 (* the latest time the chip has been given *)
+    secStart: LONGINT;              (* when the sector in hand was found *)
+    tcSeen: BOOLEAN;                (* TC came with a byte of this sector *)
 
   PROCEDURE Mount*(d: INTEGER; name: ARRAY OF CHAR): BOOLEAN;
     VAR k, size: INTEGER; ok: BOOLEAN;
@@ -172,6 +187,22 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
     RETURN (drv <= 1) & mounted[drv] & MotorOn(drv) & (rate = RateFor(drv)) & (pcn[drv] < tracks)
   END Readable;
 
+  (* the cycles a byte takes at the current data rate *)
+  PROCEDURE ByteTime(): INTEGER;
+    VAR t: INTEGER;
+  BEGIN
+    IF rate = 0 THEN t := 403 ELSIF rate = 1 THEN t := 672 ELSIF rate = 2 THEN t := 806 ELSE t := 201 END;
+    RETURN t
+  END ByteTime;
+
+  (* the bytes of the sector that have passed the head by time at *)
+  PROCEDURE Arrived(at: LONGINT): INTEGER;
+    VAR k: LONGINT; r: INTEGER;
+  BEGIN k := (at - secStart) DIV ByteTime();
+    IF k < 0 THEN k := 0 ELSIF k > sectorSize THEN k := sectorSize END;
+    r := k; RETURN r
+  END Arrived;
+
   PROCEDURE Offset(): INTEGER;
   BEGIN RETURN ((pcn[drv] * sides + head) * spt[drv] + r - 1) * sectorSize
   END Offset;
@@ -187,8 +218,8 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
       k := EmHost.DiskRead(drv, Offset(), buf);
       IF k < 0 THEN k := 0 END;
       FOR i := k TO sectorSize - 1 DO buf[i] := 0 END;
-      pos := 0; phase := execRead
-    ELSIF op = opWrite THEN pos := 0; phase := execWrite
+      pos := 0; phase := execRead; secStart := clock
+    ELSIF op = opWrite THEN pos := 0; phase := execWrite; secStart := clock
     END
   END StartSector;
 
@@ -202,6 +233,17 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
       Finish(40H, 80H, 0)                                   (* end of cylinder *)
     END
   END NextSector;
+
+  (* TC has ended the transfer with the sector in hand: the result points
+     at the sector after it. *)
+  PROCEDURE EndTC;
+  BEGIN
+    IF r # eot THEN INC(r)
+    ELSIF mt & (head = 0) THEN head := 1; h := h - 2 * (h MOD 2) + 1; r := 1
+    ELSE INC(c); r := 1; IF mt THEN h := h - 2 * (h MOD 2) + 1 END
+    END;
+    Finish(0, 0, 0)
+  END EndTC;
 
   PROCEDURE Verify;
   BEGIN
@@ -240,6 +282,10 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
   PROCEDURE Update(now: LONGINT);
     VAR d: INTEGER;
   BEGIN
+    IF now > clock THEN clock := now END;
+    IF (phase = execRead) & ~nonDma & (Arrived(now) - pos > 16) THEN
+      Finish(40H, 10H, 0)                                   (* overrun *)
+    END;
     FOR d := 0 TO 3 DO
       IF seeking[d] & (now >= seekEnd[d]) THEN
         seeking[d] := FALSE; pcn[d] := seekTo[d]; pend[d] := TRUE; pendSt0[d] := seekSt0[d]
@@ -259,6 +305,20 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
     IF nonDma & ((phase = execRead) OR (phase = execWrite) OR (phase = execFormat)) THEN p := TRUE END;
     RETURN p & ODD(dor DIV 8) & ODD(dor DIV 4)
   END Irq;
+
+  (* DRQ, at the time at: the DMA gate on, and a byte for the engine to take,
+     or room for one it gives. *)
+  PROCEDURE Drq*(at: LONGINT): BOOLEAN;
+    VAR p: BOOLEAN;
+  BEGIN p := FALSE;
+    IF ~nonDma & ODD(dor DIV 8) & ODD(dor DIV 4) THEN
+      IF phase = execRead THEN p := Arrived(at) > pos
+      ELSIF phase = execWrite THEN p := pos < Arrived(at) + 16
+      ELSIF phase = execFormat THEN p := TRUE
+      END
+    END;
+    RETURN p
+  END Drq;
 
   (* Move the head of drive d to track t; recal: a RECALIBRATE. *)
   PROCEDURE Seek(d, t: INTEGER; recal: BOOLEAN; now: LONGINT);
@@ -302,14 +362,7 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
     ELSE c := pcn[drv]; h := head; r := 1; n := 2
     END;
     IF o = opFormat THEN n := cmd[2]; sc := cmd[3]; fill := cmd[5] END;
-    IF ~nonDma & (o # opVerify) & (o # opReadID) THEN
-      IF ~warned THEN warned := TRUE;
-        EmHost.Str(EmHost.err, "82077AA: DMA is not emulated; set ND with SPECIFY for polled transfers");
-        EmHost.Ln(EmHost.err)
-      END;
-      Finish(40H, 10H, 0)                                   (* overrun *)
-    ELSE phase := waiting
-    END
+    tcSeen := FALSE; phase := waiting
   END Begin;
 
   PROCEDURE Execute(now: LONGINT);
@@ -361,6 +414,7 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
       IF phase = idle THEN v := rqm
       ELSIF phase = command THEN v := rqm + cb
       ELSIF phase = waiting THEN v := cb
+      ELSIF (phase >= execRead) & (phase <= execFormat) & ~nonDma THEN v := cb
       ELSIF phase = execRead THEN v := rqm + dio + cb
       ELSIF (phase = execWrite) OR (phase = execFormat) THEN v := rqm + cb
       ELSIF phase = result THEN v := rqm + dio + cb
@@ -411,6 +465,36 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
     END
   END WriteFIFO;
 
+  (* A /DACK read: the engine's, with tc its terminal count, or the CPU's
+     at slot 1. *)
+  PROCEDURE DackRead*(tc: BOOLEAN; at: LONGINT): INTEGER;
+    VAR v: INTEGER;
+  BEGIN v := 0;
+    IF at > clock THEN clock := at END;
+    IF ODD(dor DIV 4) & (phase = execRead) THEN
+      v := buf[pos]; INC(pos);
+      IF tc THEN tcSeen := TRUE END;
+      IF tcSeen THEN EndTC                                  (* the sector is read out regardless *)
+      ELSIF pos = sectorSize THEN NextSector
+      END
+    END;
+    RETURN v
+  END DackRead;
+
+  (* A /DACK write: the engine's, or the CPU's at slot 1. *)
+  PROCEDURE DackWrite*(v: INTEGER; tc: BOOLEAN; at: LONGINT);
+  BEGIN
+    IF at > clock THEN clock := at END;
+    IF ODD(dor DIV 4) & (phase = execWrite) THEN
+      buf[pos] := v; INC(pos);
+      IF tc THEN WHILE pos < sectorSize DO buf[pos] := 0; INC(pos) END END;
+      IF pos = sectorSize THEN EmHost.DiskWrite(drv, Offset(), buf);
+        IF tc THEN EndTC ELSE NextSector END
+      END
+    ELSIF ODD(dor DIV 4) & (phase = execFormat) THEN WriteFIFO(v, at)
+    END
+  END DackWrite;
+
   PROCEDURE Read*(reg: INTEGER; now: LONGINT): INTEGER;
     VAR v: INTEGER;
   BEGIN reg := AND(reg, 7); Update(now);
@@ -458,5 +542,6 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
   END Write;
 
 BEGIN mounted[0] := FALSE; mounted[1] := FALSE; mounted[2] := FALSE; mounted[3] := FALSE;
-  spt[0] := 18; spt[1] := 18; spt[2] := 18; spt[3] := 18; warned := FALSE; nextID := 0; Reset
+  spt[0] := 18; spt[1] := 18; spt[2] := 18; spt[3] := 18; nextID := 0; clock := 0; secStart := 0;
+  tcSeen := FALSE; Reset
 END Em82077.

@@ -19,9 +19,22 @@ MODULE EmSCSI; (* The SCSI half of the carrier board's Z85C80, a 53C80
    then AIP and LA in the initiator command register), selection (the
    IDs on the data bus, SEL, BSY released), then each byte by REQ and
    ACK, the phase read from the bus status register and copied to the
-   target command register so that "phase match" holds. There is no
-   DMA: the DMA bits and the start registers have no effect, beyond a
-   warning on standard error the first time.
+   target command register so that "phase match" holds.
+
+   DMA (EmDMA's channel 0): with mode bit 1 set, a write to register 5
+   starts a DMA send and one to register 7 a DMA initiator receive
+   (register 6, target receive, is accepted and does nothing). DRQ (Drq)
+   then asks for each byte while the target asserts REQ in the phase the
+   target command register names; the engine's /DACK cycles, DackRead and
+   DackWrite, take or give the byte and the chip does the REQ/ACK
+   handshake itself. The CPU's accesses to slot 4 ($0840, pseudo-DMA) are
+   the same cycles without EOP. EOP (the engine's TC) with a byte sets End
+   of DMA (bus and status bit 7) and interrupts if mode bit 3 is set; so
+   does the target asking in another phase while DMA is still on (phase
+   mismatch: a short transfer). Clearing mode bit 1 ends DMA and clears
+   End of DMA. The target command register's bit 7 (last byte sent) is set
+   once a send's EOP byte has gone across, which here is at once, and
+   cleared with mode bit 1.
 
    The interrupt (bus and status bit 4, cleared by reading register 7)
    comes from a SCSI bus reset, and from the loss of BSY while mode bit 2
@@ -55,7 +68,8 @@ MODULE EmSCSI; (* The SCSI half of the carrier board's Z85C80, a 53C80
 
   VAR
     odr, icr, mode, tcr, ser: INTEGER;
-    aip, irq, busyErr, warned: BOOLEAN;
+    aip, irq, busyErr: BOOLEAN;
+    dmaSend, dmaRecv, endDma, lastSent: BOOLEAN;
     (* the disk *)
     mounted, readOnly, unitAttention, identified, acked: BOOLEAN;
     blocks, state, phase, out, lun: INTEGER;
@@ -298,10 +312,59 @@ MODULE EmSCSI; (* The SCSI half of the carrier board's Z85C80, a 53C80
     RETURN v
   END BusStatus;
 
+  (* The target asks in the phase the target command register names. *)
+  PROCEDURE Match(): BOOLEAN;
+  BEGIN RETURN (state = transfer) & req & (AND(tcr, 7) * 4 = phase)
+  END Match;
+
+  PROCEDURE Drq*(): BOOLEAN;
+  BEGIN
+    RETURN ODD(mode DIV 2) & ~endDma & Match()
+      & (dmaSend & (AND(phase, ioL) = 0) OR dmaRecv & (AND(phase, ioL) # 0))
+  END Drq;
+
+  (* After a DMA byte: the target asking in another phase interrupts. *)
+  PROCEDURE Mismatch;
+  BEGIN
+    IF ODD(mode DIV 2) & (dmaSend OR dmaRecv) & ~endDma & (state = transfer) & req & ~Match() THEN
+      irq := TRUE
+    END
+  END Mismatch;
+
+  PROCEDURE Eop;
+  BEGIN endDma := TRUE; IF ODD(mode DIV 8) THEN irq := TRUE END
+  END Eop;
+
+  (* A /DACK read, the engine's with eop its terminal count, or the CPU's
+     at slot 4: the input data register, and the handshake. *)
+  PROCEDURE DackRead*(eop: BOOLEAN): INTEGER;
+    VAR v: INTEGER;
+  BEGIN
+    IF dmaRecv & ODD(mode DIV 2) & Match() & (AND(phase, ioL) # 0) THEN
+      v := out; req := FALSE; acked := FALSE; Handle(v);
+      IF eop THEN Eop END;
+      Mismatch
+    ELSE v := Bus()
+    END;
+    RETURN v
+  END DackRead;
+
+  (* A /DACK write: the output data register, and the handshake. *)
+  PROCEDURE DackWrite*(v: INTEGER; eop: BOOLEAN);
+  BEGIN
+    IF dmaSend & ODD(mode DIV 2) & Match() & (AND(phase, ioL) = 0) THEN
+      odr := v; req := FALSE; acked := FALSE; Handle(v);
+      IF eop THEN Eop; lastSent := TRUE END;
+      Mismatch
+    END
+  END DackWrite;
+
   PROCEDURE BusAndStatus(): INTEGER;
     VAR v, p: INTEGER;
   BEGIN v := 0;
     IF state = transfer THEN p := phase ELSE p := 0 END;
+    IF endDma THEN v := v + 80H END;
+    IF Drq() THEN v := v + 40H END;
     IF irq THEN v := v + 10H END;
     IF AND(tcr, 7) * 4 = p THEN v := v + 8 END;
     IF busyErr THEN v := v + 4 END;
@@ -313,7 +376,8 @@ MODULE EmSCSI; (* The SCSI half of the carrier board's Z85C80, a 53C80
   (* --- the chip --- *)
 
   PROCEDURE ResetChip*;
-  BEGIN odr := 0; icr := 0; mode := 0; tcr := 0; ser := 0; aip := FALSE; irq := FALSE; busyErr := FALSE
+  BEGIN odr := 0; icr := 0; mode := 0; tcr := 0; ser := 0; aip := FALSE; irq := FALSE; busyErr := FALSE;
+    dmaSend := FALSE; dmaRecv := FALSE; endDma := FALSE; lastSent := FALSE
   END ResetChip;
 
   PROCEDURE Reset*;
@@ -330,7 +394,7 @@ MODULE EmSCSI; (* The SCSI half of the carrier board's Z85C80, a 53C80
     IF (reg = 0) OR (reg = 6) THEN v := Bus()
     ELSIF reg = 1 THEN v := AND(icr, 9FH); IF aip THEN v := v + 40H END
     ELSIF reg = 2 THEN v := mode
-    ELSIF reg = 3 THEN v := tcr
+    ELSIF reg = 3 THEN v := tcr; IF lastSent THEN v := v + 80H END
     ELSIF reg = 4 THEN v := BusStatus()
     ELSIF reg = 5 THEN v := BusAndStatus()
     ELSE irq := FALSE; busyErr := FALSE; v := 0
@@ -349,21 +413,24 @@ MODULE EmSCSI; (* The SCSI half of the carrier board's Z85C80, a 53C80
     IF reg = 0 THEN odr := v
     ELSIF reg = 1 THEN
       IF ODD(v DIV 80H) & ~ODD(icr DIV 80H) THEN              (* SCSI bus reset *)
-        mode := 0; tcr := 0; aip := FALSE; irq := TRUE; DiskReset
+        mode := 0; tcr := 0; aip := FALSE; irq := TRUE; DiskReset;
+        dmaSend := FALSE; dmaRecv := FALSE; endDma := FALSE
       END;
       icr := AND(v, 9FH)
     ELSIF reg = 2 THEN mode := v;
       IF ~ODD(v) THEN aip := FALSE
       ELSIF (state = free) & ~ODD(icr DIV 4) THEN aip := TRUE  (* the bus is free: arbitrating *)
       END;
-      IF ODD(v DIV 2) & ~warned THEN warned := TRUE;
-        EmHost.Str(EmHost.err, "53C80: DMA is not emulated; use programmed I/O"); EmHost.Ln(EmHost.err)
-      END
+      IF ~ODD(v DIV 2) THEN dmaSend := FALSE; dmaRecv := FALSE; endDma := FALSE; lastSent := FALSE END
     ELSIF reg = 3 THEN tcr := AND(v, 0FH)
     ELSIF reg = 4 THEN ser := v
+    ELSIF reg = 5 THEN
+      IF ODD(mode DIV 2) THEN dmaSend := TRUE; dmaRecv := FALSE; endDma := FALSE; lastSent := FALSE END
+    ELSIF reg = 7 THEN
+      IF ODD(mode DIV 2) THEN dmaRecv := TRUE; dmaSend := FALSE; endDma := FALSE END
     END;
     Update
   END Write;
 
-BEGIN mounted := FALSE; readOnly := FALSE; blocks := 0; warned := FALSE; Reset
+BEGIN mounted := FALSE; readOnly := FALSE; blocks := 0; Reset
 END EmSCSI.

@@ -7,7 +7,7 @@ R65C19 that the 65Tools test their programs on, ported from C++
 suites, `as/test816` and Business BASIC use.
 
     make            ../bin/em16
-    make test       the disk controllers and the banked direct page
+    make test       the disk controllers, DMA and the banked direct page
 
 `-t` traces every instruction to standard error: where, the opcode, the
 registers and the cycles so far. `-tfrom addr skip count` traces only
@@ -129,8 +129,9 @@ rather than em16's default machine:
   `test/banked.sh` checks with the core's own test, banked.s;
 - the map: 8 MB of SDRAM through the cache, the I/O block at
   $0200-$0FFF (palette, ADB, system control, external bus, video
-  control, blitter; the floppy controller is card 0 of the external
-  bus, and the SCC answers at $0820-$082F in place of card 2), the 8K
+  control, blitter, DMA; the external bus is eight slots of 16
+  registers mirrored every 128 bytes, the floppy controller in slot 0,
+  and the SCC answers at $0820-$082F in place of slot 2), the 8K
   boot ROM at $E000 until system control bit 0 is cleared;
 - the serial port, channel A of the SCC, on standard input and output;
 - the SCC's baud-rate generators and their zero-count interrupt, as
@@ -144,10 +145,14 @@ rather than em16's default machine:
 - the ADB host with a keyboard and a mouse that the `-video` window
   feeds;
 - the disk controllers of the carrier board that `docs/Hardware.md`
-  describes, at the addresses it gives: an 82077AA at $0800 (card 0)
-  and the SCSI half of the Z85C80, a 53C80, at $0830 (card 3), with
+  describes, at the addresses it gives: an 82077AA at $0800 (slot 0)
+  and the SCSI half of the Z85C80, a 53C80, at $0830 (slot 3), with
   their interrupts on the card `IRQ#` that bit 0 of $0340 reads (and the
   CPU's IRQ), and bit 0 of $0340 resetting them; below;
+- the DMA engine (`rtl/dma.v`, `EmDMA.Mod`; docs/DMA.md in the Verilog
+  repository), two channels at $0400 and $0410 between the memory and
+  the 53C80 and the 82077AA, its interrupt ORed into the CPU's IRQ; the
+  chips' /DACK slots, 4 and 1 ($0840, $0810), reach them by pseudo-DMA;
 - with `-wd1793`, the WD1793 card that OS16's old boot loader was
   written for at $0800 instead of the 82077AA, as before;
 - a program ends with STP or a fetch from 00:0000.
@@ -155,8 +160,10 @@ rather than em16's default machine:
 Time is counted in the SoC's 25.2 MHz cycles, and each bus cycle of the
 core takes what the board would take:
 
-- boot ROM and I/O block 2 cycles, the external bus a cycle of its
-  1 MHz PHI0 after waiting for its falling edge;
+- boot ROM and I/O block 2 cycles, the external bus 14 (its Intel
+  cycle on the 8.4 MHz timing, as the CPU sees it);
+- a DMA byte 17 cycles; the engine's SDRAM traffic and its hold on the
+  external bus are not counted against the CPU;
 - SDRAM as the cache's state machine: a byte of the held word 1 cycle,
   another hit 3, a miss 18; a store is posted in 3 and holds the port
   for 10, so a store or a miss after it may wait;
@@ -178,23 +185,30 @@ is held back, as if by flow control.
 
 ### Disks
 
-On the default machine and under -fpga. Both controllers are polled:
-there is no DMA yet. The comments at the
-top of `Em82077.Mod` and `EmSCSI.Mod` list what they do and leave out.
+On the default machine and under -fpga. Both controllers can be
+polled, and under -fpga moved by DMA too (the default machine has no
+engine). The comments at the top of `Em82077.Mod`, `EmSCSI.Mod` and
+`EmDMA.Mod` list what they do and leave out.
 
 - **Floppy**, `-disk0` and `-disk1`: 720K, 1.44M or 2.88M images, the
   sectors in the order track, side, sector. The 82077AA is in PC/AT
-  mode. Set ND with SPECIFY: without DMA a read or write ends at once
-  with an overrun. The data rate (CCR or DSR) must suit the disk, 500K
-  for 1.44M and 250K for 720K, and a polled transfer ends after the
-  sector EOT names with ST0 $40, ST1 $80, as on a PC without TC.
+  mode. Set ND with SPECIFY for polled transfers; without it the
+  transfer is DMA: DRQ while the DOR's DMA gate is on, a read's bytes
+  arriving at the data rate, and an overrun (ST0 $40, ST1 $10) if one
+  is not taken before the 16-byte FIFO fills. The data rate (CCR or
+  DSR) must suit the disk, 500K for 1.44M and 250K for 720K. A
+  transfer ends after the sector EOT names with ST0 $40, ST1 $80, as on
+  a PC without TC, or normally (ST0 $00) when TC comes with a byte.
   Seeks take the step rate SPECIFY sets.
 - **SCSI**, `-scsi`: one disk at ID 0, as large as its image, in 512
   byte blocks from block 0. The 53C80's registers are those of the 5380;
   the disk answers arbitration, selection with or without ATN, and the
   common commands of a SCSI-2 disk (INQUIRY, TEST UNIT READY, REQUEST
   SENSE, READ CAPACITY, READ and WRITE 6 and 10, MODE SENSE, ...), with
-  UNIT ATTENTION after power on and a bus reset.
+  UNIT ATTENTION after power on and a bus reset. DMA mode (mode bit 1,
+  then a write to register 5, send, or 7, initiator receive) asks for
+  each byte with DRQ while the phase matches; EOP sets End of DMA, and
+  the target changing phase first interrupts.
 
 `tools/mkdisk.sh` makes FAT images with the Mac's `hdiutil`, and opens
 them in the Finder to copy files in and out, as the floppy images were:
@@ -212,7 +226,12 @@ polling (reset and SENSE INTERRUPT STATUS, SPECIFY, RECALIBRATE, SEEK,
 READ and WRITE DATA, a wrong data rate, a wrong cylinder, READ ID;
 arbitration, selection, IDENTIFY, the SCSI commands above, a check
 condition and its sense, a selection nobody answers, a bus reset) and
-compares what it prints with `test/disks.expected`.
+compares what it prints with `test/disks.expected`. `test/dma.sh` does
+the same by DMA, `test/dma.s` against `test/dma.expected`: floppy reads
+and writes with TC, a read the engine never serves (an overrun), a
+read by pseudo-DMA; SCSI reads and writes, a read shorter than the
+count asked for (the phase changes, and COUNT says how much is left),
+and a read by pseudo-DMA.
 
 `fpga/rom`'s `blttest`, `fbtest`, `texttest` and `adbtest` behave as on
 the board (`as -o X.mem`, the image made an 8K binary for `-bootrom`;
@@ -230,7 +249,7 @@ before, as above.
 
 `make test` runs `test/disks.sh`, a boot ROM (`test/disks.s`) that drives
 both disk controllers by polling and compares what it prints with
-`test/disks.expected`, and `test/banked.sh`, the banked direct page and
+`test/disks.expected`, `test/dma.sh`, the same by DMA, and `test/banked.sh`, the banked direct page and
 stack of the board's 65C816. The oc816 golden suite (`../oc`, make
 test_self), `as/test816`, OS16's tests and Business BASIC's run on em16
 -fpga.
