@@ -151,8 +151,12 @@ rather than em16's default machine:
   CPU's IRQ), and bit 0 of $0340 resetting them; below;
 - the DMA engine (`rtl/dma.v`, `EmDMA.Mod`; docs/DMA.md in the Verilog
   repository), two channels at $0400 and $0410 between the memory and
-  the 53C80 and the 82077AA, its interrupt ORed into the CPU's IRQ; the
-  chips' /DACK slots, 4 and 1 ($0840, $0810), reach them by pseudo-DMA;
+  the 53C80 and the 82077AA; the chips' /DACK slots, 4 and 1 ($0840,
+  $0810), reach them by pseudo-DMA;
+- the tick timer (`rtl/timer.v`, `EmTimer.Mod`) at $0450, a period of
+  RELOAD cycles and a 32-bit count of ticks, and the interrupt status
+  and mask at $0440 and $0441, through which the timer, the two DMA
+  channels, the cards' `IRQ#` and the SCC reach the CPU's IRQ;
 - with `-wd1793`, the WD1793 card that OS16's old boot loader was
   written for at $0800 instead of the 82077AA, as before;
 - a program ends with STP or a fetch from 00:0000.

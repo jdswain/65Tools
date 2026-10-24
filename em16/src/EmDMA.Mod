@@ -87,6 +87,11 @@ MODULE EmDMA; (* The SoC's DMA engine (rtl/dma.v of the Verilog repository;
   BEGIN RETURN done[0] & ie[0] OR done[1] & ie[1]
   END Irq;
 
+  (* channel c's DONE & IE, for the interrupt status at $0440 *)
+  PROCEDURE IrqCh*(c: INTEGER): BOOLEAN;
+  BEGIN RETURN done[c] & ie[c]
+  END IrqCh;
+
   PROCEDURE Byte(x, n: INTEGER): INTEGER;          (* byte n of x *)
   BEGIN WHILE n > 0 DO x := x DIV 100H; DEC(n) END;
     RETURN AND(x, 0FFH)
