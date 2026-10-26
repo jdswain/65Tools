@@ -5,11 +5,13 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
    em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin]
         [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-test-pattern]
         [-console] [-disk0 file] [-disk1 file] [-wd1793]
-        [-scsi file] file ...
+        [-scsi file] [-adbkey code] file ...
 
    On the default machine and under -fpga the floppy disks are the
    82077AA's, or the WD1793's with -wd1793, and -scsi puts a disk at ID 0
-   on the SCSI bus; the L28's are its WD1793's.
+   on the SCSI bus; the L28's are its WD1793's. Under -fpga, -adbkey
+   holds an ADB key code down from power on (the keyboard reports it at
+   the first Talk), as a key held while the board starts.
 
    A file is an ELF executable. Oberon modules are not loaded by em16:
    OS16 boots on -fpga, from a floppy, as on the board, and loads them.
@@ -19,11 +21,12 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
      EmLoad   ELF loading, traps     EmHost  the host (C side: EmHost_rt.c)
      EmUART EmVIA EmFDC EmL28 EmVideo EmLCD  the devices *)
 
-  IMPORT Env, Files, EmHost, EmMem, EmCPU, EmLoad, EmFDC, Em82077, EmSCSI, EmL28, EmVideo, EmLCD, EmCore, EmSoC, EmHarte;
+  IMPORT Env, Files, EmHost, EmMem, EmCPU, EmLoad, EmFDC, Em82077, EmSCSI, EmADB, EmL28, EmVideo, EmLCD, EmCore, EmSoC, EmHarte;
 
   VAR
     trace, videoEnabled, testPattern, consoleMode, wantFpga, wantL28, bad: BOOLEAN;
     customDp, customSp, entry: INTEGER;
+    adbKeys: ARRAY 8 OF INTEGER; nAdbKeys: INTEGER;   (* -adbkey: held down at reset *)
     fbdump, bootrom, font: EmLoad.Path;
 
   PROCEDURE ErrStr(s: ARRAY OF CHAR);
@@ -102,8 +105,10 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       ELSIF Equal(arg, "-scsi") & (index + 1 < n) THEN Env.Arg(index + 1, val);
         IF EmSCSI.Mount(val) THEN END; INC(index, 2)
       ELSIF Equal(arg, "-console") THEN consoleMode := TRUE; INC(index)
+      ELSIF Equal(arg, "-adbkey") & (index + 1 < n) THEN Env.Arg(index + 1, val);
+        IF nAdbKeys < LEN(adbKeys) THEN adbKeys[nAdbKeys] := Number(val); INC(nAdbKeys) END; INC(index, 2)
       ELSIF Equal(arg, "-?") THEN
-        ErrStr("Usage: em16 [-t] [-tfrom addr skip count] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-test-pattern] [-console] [-disk0 file] [-disk1 file] [-wd1793] [-scsi file] file ...");
+        ErrStr("Usage: em16 [-t] [-tfrom addr skip count] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-test-pattern] [-console] [-disk0 file] [-disk1 file] [-wd1793] [-scsi file] [-adbkey code] file ...");
         EmHost.Ln(EmHost.err); bad := TRUE
       ELSE ErrStr("Invalid: option '"); ErrStr(arg); ErrStr("'"); EmHost.Ln(EmHost.err); bad := TRUE
       END
@@ -195,7 +200,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       IF Equal(arg, "-harte") THEN Harte; EmHost.Exit(0) END
     END;
     trace := FALSE; videoEnabled := FALSE; testPattern := FALSE; consoleMode := FALSE; bad := FALSE;
-    customDp := -1; customSp := -1; entry := 0; fbdump[0] := 0X; bootrom[0] := 0X; font[0] := 0X;
+    customDp := -1; customSp := -1; entry := 0; nAdbKeys := 0; fbdump[0] := 0X; bootrom[0] := 0X; font[0] := 0X;
     n := Env.ArgCount();
     (* -fpga first, so that the memory has its size before files are loaded *)
     (* and -wd1793 and -cpu l28, so that floppies go to the right controller *)
@@ -232,7 +237,9 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       IF bootrom[0] # 0X THEN BootROM END
     END;
     IF ~bad THEN
-      IF EmMem.fpga THEN EmCore.SetTrace(trace); EmSoC.Reset; LoadFont; EmHost.SetADB(1) END;
+      IF EmMem.fpga THEN EmCore.SetTrace(trace); EmSoC.Reset; LoadFont; EmHost.SetADB(1);
+        FOR i := 0 TO nAdbKeys - 1 DO EmADB.KeyDown(adbKeys[i]) END   (* keys held at power on *)
+      END;
       EmCPU.Reset(trace);
       IF ~EmMem.fpga & (EmCPU.cpuType # EmCPU.l28) THEN
         EmCPU.SetNativeMode;

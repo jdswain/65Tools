@@ -113,7 +113,8 @@ have 1 MB, its symbol table 200000 symbols.
 ## The SoC (-fpga)
 
     em16 -fpga [-bootrom rom.bin] [-font font.hex] [-video] [-fbdump ppm]
-               [-disk0 img] [-disk1 img] [-wd1793] [-scsi img] [file ...]
+               [-disk0 img] [-disk1 img] [-wd1793] [-scsi img]
+               [-adbkey code] [file ...]
 
 `-fpga` emulates the SoC of `../../Verilog65C816/fpga` as its RTL
 describes it (`rtl/soc.v` and the modules below it, and `fpga/README.md`)
@@ -145,7 +146,8 @@ rather than em16's default machine:
 - the blitter (`rtl/blitter.v`) as its test bench's reference model
   defines it, its writes dropping the cache lines they touch;
 - the ADB host with a keyboard and a mouse that the `-video` window
-  feeds;
+  feeds; `-adbkey code` (e.g. `0x2e`, M) holds a key down from power on,
+  for a boot ROM that looks for one;
 - the disk controllers of the carrier board that `docs/Hardware.md`
   describes, at the addresses it gives: an 82077AA at $0800 (slot 0)
   and the SCSI half of the Z85C80, a 53C80, at $0830 (slot 3), with
