@@ -24,8 +24,9 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
                    to a /DACK slot is pseudo-DMA, a byte without TC.
          $0820-$082F the emulated Z85C30 SCC (EmSCC), the serial port,
                    which answers in place of slot 2 and takes 3 cycles
-     $00_E000-$00_FFFF  the 8K boot ROM while system control bit 0 is set;
-                   writes there always go to the SDRAM
+     $00_E000-$00_FFFF  the boot ROM while system control bit 0 is set,
+                   or from $C000 or $8000 for an image over 8 or 16K
+                   (LoadROM); writes there always go to the SDRAM
    $80_0000-$FF_FFFF  unmapped: $FF
 
    Time is the SoC's 25.2 MHz clock. Each bus cycle of the core takes the
@@ -45,7 +46,8 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
 
   VAR
     now*: LONGINT;            (* cycles since reset *)
-    rom: ARRAY 2000H OF BYTE;
+    rom: ARRAY 8000H OF BYTE;
+    romBase: INTEGER;         (* where the boot ROM starts: $E000, $C000 or $8000 *)
     romEn, cardReset: BOOLEAN;
     imask: INTEGER;           (* $0441 *)
     wd1793*: BOOLEAN;         (* card 0 is the WD1793 card, not the 82077AA *)
@@ -55,9 +57,17 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
   BEGIN wd1793 := TRUE; EmDMA.NoFloppy
   END UseWD1793;
 
+  (* The boot ROM is sized to its image, as the Verilog repository's
+     tools/romimage.py sizes it: the smallest of 8, 16 or 32K that holds the
+     n bytes, at the top of bank 0, the image at its top (the image ends at
+     $FFFF), $FF below it. n is at most 32K. *)
   PROCEDURE LoadROM*(VAR src: ARRAY OF BYTE; n: INTEGER);
-    VAR i: INTEGER;
-  BEGIN FOR i := 0 TO 1FFFH DO IF i < n THEN rom[i] := src[i] ELSE rom[i] := 0FFH END END
+    VAR i, size: INTEGER;
+  BEGIN size := 2000H; WHILE (size < n) & (size < 8000H) DO size := size * 2 END;
+    romBase := 10000H - size;
+    FOR i := 0 TO size - 1 DO
+      IF i < size - n THEN rom[i] := 0FFH ELSE rom[i] := src[i - (size - n)] END
+    END
   END LoadROM;
 
   (* The devices that act on their own: every 64 cycles is often enough. *)
@@ -184,7 +194,7 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
   BEGIN
     IF a >= EmSDRAM.size THEN Pass(2); r := 0FFH
     ELSIF IO(a) THEN r := IORead(a)
-    ELSIF romEn & (a >= 0E000H) & (a <= 0FFFFH) THEN Pass(2); r := rom[a - 0E000H]
+    ELSIF romEn & (a >= romBase) & (a <= 0FFFFH) THEN Pass(2); r := rom[a - romBase]
     ELSE Pass(EmSDRAM.ReadCost(a, now)); r := EmSDRAM.Peek(a)
     END;
     RETURN r
@@ -213,7 +223,7 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
     VAR r: INTEGER;
   BEGIN
     IF IO(a) THEN r := 0FFH
-    ELSIF romEn & (a >= 0E000H) & (a <= 0FFFFH) THEN r := rom[a - 0E000H]
+    ELSIF romEn & (a >= romBase) & (a <= 0FFFFH) THEN r := rom[a - romBase]
     ELSE r := EmSDRAM.Peek(a)
     END;
     RETURN r
@@ -240,5 +250,5 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
     EmHost.DrainAll
   END Run;
 
-BEGIN romEn := TRUE; now := 0; wd1793 := FALSE
+BEGIN romEn := TRUE; romBase := 0E000H; now := 0; wd1793 := FALSE
 END EmSoC.

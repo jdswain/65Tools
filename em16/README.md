@@ -131,8 +131,10 @@ rather than em16's default machine:
   $0200-$0FFF (palette, ADB, system control, external bus, video
   control, blitter, DMA; the external bus is eight slots of 16
   registers mirrored every 128 bytes, the floppy controller in slot 0,
-  and the SCC answers at $0820-$082F in place of slot 2), the 8K
-  boot ROM at $E000 until system control bit 0 is cleared;
+  and the SCC answers at $0820-$082F in place of slot 2), the boot
+  ROM until system control bit 0 is cleared: 8, 16 or 32K at $E000,
+  $C000 or $8000, the smallest that holds the `-bootrom` image, which
+  ends at $FFFF (as the Verilog repository's Makefile sizes it);
 - the serial port, channel A of the SCC, on standard input and output;
 - the SCC's baud-rate generators and their zero-count interrupt, as
   `rtl/scc_85c30.v` has them: OS16's clock tick, on channel B;
@@ -239,7 +241,7 @@ count asked for (the phase changes, and COUNT says how much is left),
 and a read by pseudo-DMA.
 
 `fpga/rom`'s `blttest`, `fbtest`, `texttest` and `adbtest` behave as on
-the board (`as -o X.mem`, the image made an 8K binary for `-bootrom`;
+the board (`as -o X.mem`, the image made a binary for `-bootrom`;
 their closing `bra halt` replaced by STP to end the run).
 
 ## Speed

@@ -82,6 +82,7 @@ test: $(TARGET)
 	@sh test/disks.sh
 	@sh test/dma.sh
 	@sh test/timer.sh
+	@sh test/romsize.sh
 	@sh test/banked.sh
 
 clean:

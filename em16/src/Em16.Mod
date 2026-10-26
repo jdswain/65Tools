@@ -123,17 +123,18 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
   END CpuThread;
 
   PROCEDURE BootROM;
-    VAR f: Files.File; r: Files.Rider; rom: ARRAY 2000H OF BYTE; b: BYTE; n, i: INTEGER;
+    VAR f: Files.File; r: Files.Rider; rom: ARRAY 8000H OF BYTE; b: BYTE; n, i: INTEGER;
   BEGIN f := Files.Old(bootrom);
     IF f = NIL THEN ErrStr("Cannot open boot ROM: "); ErrStr(bootrom); EmHost.Ln(EmHost.err); bad := TRUE
+    ELSIF (Files.Length(f) = 0) OR (Files.Length(f) > 8000H) THEN
+      ErrStr("Boot ROM must be 1 to 32768 bytes: "); ErrStr(bootrom); EmHost.Ln(EmHost.err); bad := TRUE
     ELSE
-      FOR i := 0 TO 1FFFH DO rom[i] := 0 END;
-      n := Files.Length(f); IF n > 2000H THEN n := 2000H END;
+      n := Files.Length(f);
       Files.Set(r, f, 0);
       FOR i := 0 TO n - 1 DO Files.ReadByte(r, b); rom[i] := b END;
       EmMem.LoadBootROM(rom, n);
       EmHost.Str(EmHost.out, "Boot ROM loaded ("); EmHost.Cout(n); EmHost.Str(EmHost.out, " bytes), reset vector -> $");
-      EmHost.CoutHex(rom[1FFCH] + rom[1FFDH] * 256); EmHost.Ln(EmHost.out)
+      EmHost.CoutHex(rom[n - 4] + rom[n - 3] * 256); EmHost.Ln(EmHost.out)
     END
   END BootROM;
 
