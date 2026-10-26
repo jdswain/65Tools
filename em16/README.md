@@ -144,7 +144,8 @@ rather than em16's default machine:
   the Verilog repository's `fpga/rom/font_st8x16.hex` (or `-font`). The
   font comes from EmuTOS and is GPL v2, so it is read, not copied here;
 - the blitter (`rtl/blitter.v`) as its test bench's reference model
-  defines it, its writes dropping the cache lines they touch;
+  defines it, its 8x8 patterns included, its writes dropping the cache
+  lines they touch;
 - the ADB host with a keyboard and a mouse that the `-video` window
   feeds; `-adbkey code` (e.g. `0x2e`, M) holds a key down from power on,
   for a boot ROM that looks for one;
@@ -259,7 +260,11 @@ before, as above.
 `make test` runs `test/disks.sh`, a boot ROM (`test/disks.s`) that drives
 both disk controllers by polling and compares what it prints with
 `test/disks.expected`, `test/dma.sh`, the same by DMA, and `test/banked.sh`, the banked direct page and
-stack of the board's 65C816. The oc816 golden suite (`../oc`, make
+stack of the board's 65C816. `test/pattern.sh` draws with the blitter's
+patterns (`test/pattern.s`): odd left and right edges, copy, OR, XOR and
+BIC, fill set as well, a transparent colour, and a PATTERN write while
+busy; a model in the script, from the definition, checks every pixel. The
+same ROM prints the same on the RTL's SoC simulation. The oc816 golden suite (`../oc`, make
 test_self), `as/test816`, OS16's tests and Business BASIC's run on em16
 -fpga.
 
