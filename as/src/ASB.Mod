@@ -18,6 +18,9 @@ MODULE ASB; (* Base of the 65xx assembler: values and the symbol table.
   CONST
     (* value forms *)
     Undef* = 0; Int* = 1; Real* = 2; Str* = 3;
+    (* what an Int is relative to, in a .816 module: the loader adds the
+       module's code or data address to it (Value.base) *)
+    Abs* = 0; CodeBase* = 1; DataBase* = 2; Mixed* = 3;   (* Mixed: not relocatable *)
     Mod* = 4;        (* an imported module; only its exports have values *)
 
     Forever* = 7FFFH;  (* stamp of a predefined symbol: it is never redefined *)
@@ -43,6 +46,7 @@ MODULE ASB; (* Base of the 65xx assembler: values and the symbol table.
     Value* = RECORD
       form*: INTEGER;
       i*: LONGINT;
+      base*: INTEGER;      (* Abs, CodeBase, DataBase or Mixed *)
       r*: REAL;
       s*: String
     END;
@@ -95,15 +99,15 @@ MODULE ASB; (* Base of the 65xx assembler: values and the symbol table.
   (* --- values --- *)
 
   PROCEDURE SetInt*(VAR v: Value; i: LONGINT);
-  BEGIN v.form := Int; v.i := i; v.s := NIL
+  BEGIN v.form := Int; v.i := i; v.s := NIL; v.base := Abs
   END SetInt;
 
   PROCEDURE SetReal*(VAR v: Value; r: REAL);
-  BEGIN v.form := Real; v.r := r; v.s := NIL
+  BEGIN v.form := Real; v.r := r; v.s := NIL; v.base := Abs
   END SetReal;
 
   PROCEDURE SetStr*(VAR v: Value; s: String);
-  BEGIN v.form := Str; v.s := s
+  BEGIN v.form := Str; v.s := s; v.base := Abs
   END SetStr;
 
   (* A new string of the first len characters of s. *)
@@ -140,7 +144,7 @@ MODULE ASB; (* Base of the 65xx assembler: values and the symbol table.
     VAR obj: Object; h: INTEGER;
   BEGIN obj := ThisIn(scope, name);
     IF obj = NIL THEN
-      NEW(obj); ASH.Copy(name, obj.name); obj.val.form := Undef; obj.stamp := -1;
+      NEW(obj); ASH.Copy(name, obj.name); obj.val.form := Undef; obj.val.base := Abs; obj.stamp := -1;
       IF scope = topScope THEN h := Hash(name); obj.next := hash[h]; hash[h] := obj
       ELSE obj.next := scope.dsc; scope.dsc := obj
       END
@@ -166,7 +170,7 @@ MODULE ASB; (* Base of the 65xx assembler: values and the symbol table.
   (* An anonymous object to serve as the scope of a block or macro call. *)
   PROCEDURE NewScope*(): Object;
     VAR obj: Object;
-  BEGIN NEW(obj); obj.name[0] := 0X; obj.val.form := Undef;
+  BEGIN NEW(obj); obj.name[0] := 0X; obj.val.form := Undef; obj.val.base := Abs;
     RETURN obj
   END NewScope;
 
@@ -421,7 +425,7 @@ MODULE ASB; (* Base of the 65xx assembler: values and the symbol table.
         ELSE
           imports[nofImports].key := key; ASH.Copy(modid, imports[nofImports].name);
           INC(nofImports); mno := nofImports;
-          mod := NewIn(topScope, modid); mod.val.form := Mod; mod.dsc := NIL;
+          mod := NewIn(topScope, modid); mod.val.form := Mod; mod.val.base := Abs; mod.dsc := NIL;
           (* the predeclared types: reference = form, but BYTE is an integer *)
           FOR i := 0 TO maxRef - 1 DO forms[i] := i END;
           forms[1] := IntF;

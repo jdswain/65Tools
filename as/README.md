@@ -33,6 +33,30 @@ written then.
     -legacy       write .816/.smb in the layouts of the C Oberon compiler
     -v            report the passes
 
+### Oberon modules (.816)
+
+The `text` section is the module's code and `bss` its variables, which the
+loader allocates in bank 0 and zeroes (`data.w 0`, `fill n` reserve them).
+A procedure is exported with `*` and declared to Oberon importers with
+`.proc Name(INTEGER, VAR BYTE, ...): INTEGER`; `_init` is the module's body
+(without one, an RTL appended to the code is). Parameters arrive in the
+compiler's registers, R0 at `$02` upward, and a result goes back in R0
+(`../oc/doc/DP.md`).
+
+Addresses in a module are relocated by the loader (OS16's ModuleManager
+and tools/mklink.py): a label in `text` or `bss` is relative to the
+module's code or data, and stays so plus or minus a number; the difference
+of two is a number. Such an address may be an absolute operand (`lda
+count`, `lda table,x`, `jmp (jtab,x)`), a 16-bit immediate (`ldx #arr`),
+a long operand (`lda.l table`, `jml label`; a variable's bank is 0), a
+`data.w` or `data.l`, or the target of a branch, JSR, JSL or PER; never a
+direct page or 8-bit operand, and `<`, `>`, `^` and other operators make
+it a number the loader cannot relocate, which is an error where it is
+emitted. A code address read as data needs the code's data bank (`phk`
+`plb`) or a long operand. The relocation entries mark these in their high
+word: $4000 a data word, $2000 a code word in its bank, $1000 a 24-bit
+code address, each of the bytes at the entry's offset.
+
 ## Modules
 
 | Module | Role | From |

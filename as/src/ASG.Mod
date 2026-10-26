@@ -29,6 +29,16 @@ MODULE ASG; (* Code generator of the 65xx assembler.
     Write* = 1; Alloc* = 2; Exec* = 4; DPage* = 8; Stack* = 10H; TLS* = 400H;
 
     maxSections* = 32;
+
+    (* what a value is relative to in a .816 module: ASB's Abs, CodeBase,
+       DataBase and Mixed *)
+    bAbs = 0; bCode = 1; bData = 2;
+    (* the kinds of relocation, in the high word of an entry; with none
+       the loader works it out from the opcode at the offset (a JSR, JSL,
+       PER or LDA #). These are of the bytes at the offset itself: *)
+    RelData* = 40000000H;   (* a word: the module's data address added *)
+    RelCode* = 20000000H;   (* a word: its code address in the bank added *)
+    RelLong* = 10000000H;   (* three bytes: its code address added *)
     maxReloc* = 1023;    (* older loaders accept fewer than 1024 *)
     BlockSize = 1024;
     RelocBlockSize = 64;
@@ -78,6 +88,8 @@ MODULE ASG; (* Code generator of the 65xx assembler.
     defaultCpu*: INTEGER;        (* processor selected when a section begins *)
     machine*: INTEGER;           (* processor the program last selected *)
     nofReloc*: INTEGER;          (* relocatable calls in text; see Reloc *)
+    module*: BOOLEAN;            (* a .816 module: addresses are relocated *)
+    bss*: Section;               (* in a module, its variables *)
     relocs: RelocBlock;
 
     cur: Section;
@@ -218,6 +230,18 @@ MODULE ASG; (* Code generator of the 65xx assembler.
   BEGIN o(l); o(l DIV 100H); o(l DIV 10000H); o(l DIV 1000000H)
   END Long;
 
+  (* What an address in the current section is relative to. *)
+  PROCEDURE Base*(): INTEGER;
+    VAR b: INTEGER;
+  BEGIN b := bAbs;
+    IF module & (cur = text) THEN b := bCode ELSIF module & (cur = bss) THEN b := bData END;
+    RETURN b
+  END Base;
+
+  PROCEDURE SetModule*(on: BOOLEAN);
+  BEGIN module := on
+  END SetModule;
+
   (* Note a call at the location counter for the loader to relocate. *)
   PROCEDURE AddReloc;
     VAR b: RelocBlock; i: INTEGER;
@@ -235,6 +259,54 @@ MODULE ASG; (* Code generator of the 65xx assembler.
       END
     END
   END AddReloc;
+
+  (* Note the bytes at the location counter, of the given kind. *)
+  PROCEDURE AddRelocAt(kind: LONGINT);
+    VAR b: RelocBlock; i: INTEGER;
+  BEGIN
+    IF cur = text THEN
+      IF nofReloc < maxReloc THEN
+        IF relocs = NIL THEN NEW(relocs); relocs.next := NIL END;
+        b := relocs; i := nofReloc;
+        WHILE i >= RelocBlockSize DO
+          IF b.next = NIL THEN NEW(b.next); b.next.next := NIL END;
+          b := b.next; i := i - RelocBlockSize
+        END;
+        b.r[i] := addr - cur.org + kind; INC(nofReloc)
+      ELSE relocOverflow := TRUE
+      END
+    END
+  END AddRelocAt;
+
+  (* The offset of address a, relative to base, in its section. *)
+  PROCEDURE Offset(a: LONGINT; base: INTEGER): LONGINT;
+  BEGIN
+    IF base = bCode THEN a := a - text.org ELSIF base = bData THEN a := a - bss.org END;
+    RETURN a
+  END Offset;
+
+  (* An address relative to base as a data word (word) or long, for the
+     loader to relocate. *)
+  PROCEDURE Address*(a: LONGINT; base: INTEGER; word: BOOLEAN);
+  BEGIN a := Offset(a, base);
+    IF base = bData THEN AddRelocAt(RelData)
+    ELSIF word THEN AddRelocAt(RelCode)
+    ELSE AddRelocAt(RelLong)
+    END;
+    IF word THEN Word(a) ELSE Long(a) END
+  END Address;
+
+  (* The operand of an instruction, two bytes (long: three), relative to
+     base: noted for the loader. A data address is in bank 0. *)
+  PROCEDURE Operand(a: LONGINT; base: INTEGER; long: BOOLEAN);
+  BEGIN a := Offset(a, base);
+    IF base = bData THEN AddRelocAt(RelData); a := a MOD 10000H
+    ELSIF long THEN AddRelocAt(RelLong)
+    ELSE AddRelocAt(RelCode)
+    END;
+    o(a); o(a DIV 100H);
+    IF long THEN o(a DIV 10000H) END
+  END Operand;
 
   (* The offset in text of relocatable call i. *)
   PROCEDURE Reloc*(i: INTEGER): LONGINT;
@@ -339,15 +411,37 @@ MODULE ASG; (* Code generator of the 65xx assembler.
   END Resolve;
 
   (* Emit instruction op. The operands a1, a2, a3 are in the order they
-     were written; mode tells how many of them there are. src and line
-     locate the instruction for messages. *)
-  PROCEDURE Instr*(op, mode, modifier: INTEGER; a1, a2, a3: LONGINT;
+     were written; mode tells how many of them there are; bases is what
+     each is relative to (b1 + 4 * b2 + 16 * b3). src and line locate the
+     instruction for messages. *)
+  PROCEDURE Instr*(op, mode, modifier: INTEGER; a1, a2, a3: LONGINT; bases: INTEGER;
       src: ASS.Source; line: INTEGER);
-    VAR form, code: INTEGER; r: LONGINT; wide: BOOLEAN;
-  BEGIN
+    VAR form, code, b1, b2, b3: INTEGER; r: LONGINT; wide, ok: BOOLEAN;
+  BEGIN b1 := bases MOD 4; b2 := bases DIV 4 MOD 4; b3 := bases DIV 16 MOD 4;
+    (* an address the loader relocates is never on the direct page *)
+    IF (b1 # bAbs) & (modifier = MNone) THEN modifier := MAbs END;
     Resolve(op, modifier, mode, a1, src, line);
     IF ~ASC.Find(op, mode, form, code) THEN
       IF final THEN InstrError(src, line, op, mode) END
+    ELSIF (b1 # bAbs) OR (b2 # bAbs) OR (b3 # bAbs) THEN
+      (* in a .816 module: an address the loader relocates *)
+      ok := (b2 = bAbs) & ((b1 = bCode) OR (b1 = bData)) & ((b3 = bAbs) OR (b3 = bCode));
+      IF ok & ((form = ASC.fWord) OR (form = ASC.fLong) & (b1 # bData) OR (form = ASC.fBitAR) & (b3 = bCode)) THEN
+        o(code);
+        IF form = ASC.fBitAR THEN o(a2) END;
+        Operand(a1, b1, form = ASC.fLong);
+        IF form = ASC.fBitAR THEN Rel8(a3, src, line) END
+      ELSIF ok & (form = ASC.fLong) THEN o(code); Operand(a1, b1, FALSE); o(0)   (* bank 0 *)
+      ELSIF ok & ((form = ASC.fImmA) OR (form = ASC.fImmX)) THEN
+        IF form = ASC.fImmA THEN wide := longa ELSE wide := longi END;
+        IF (modifier = MWord) OR (modifier = MAbs) THEN wide := TRUE END;
+        IF ~wide & final THEN ASS.Error(src, line, "an 8-bit immediate cannot hold an address the loader relocates", "") END;
+        o(code); Operand(a1, b1, FALSE)
+      ELSIF ok & (b1 = bCode) & ((form = ASC.fRel) OR (form = ASC.fRelL) OR (form = ASC.fBra) OR (form = ASC.fBrl)
+          OR (form = ASC.fWordR) OR (form = ASC.fLongR)) THEN
+        Instr(op, mode, modifier, a1, a2, a3, 0, src, line)   (* relative, or a call: as before *)
+      ELSIF final THEN ASS.Error(src, line, "not an address the loader can relocate here", "")
+      END
     ELSE
       CASE form OF
         ASC.fImpl: o(code)
@@ -392,13 +486,13 @@ MODULE ASG; (* Code generator of the 65xx assembler.
 
   PROCEDURE Init*;
   BEGIN
-    sections := NIL; lastSect := NIL; nofSections := 0; nofReloc := 0;
+    sections := NIL; lastSect := NIL; nofSections := 0; nofReloc := 0; module := FALSE;
     relocOverflow := FALSE; entry := 0; final := FALSE;
     (* the standard sections, in the order they have in an ELF file *)
     cur := NewSection("stack", Nobits, Write + Alloc + Stack);
     cur := NewSection("dp", Nobits, Write + Alloc + DPage);
     cur := NewSection("tls", Nobits, Write + Alloc + TLS);
-    cur := NewSection("bss", Nobits, Write + Alloc);
+    bss := NewSection("bss", Nobits, Write + Alloc); cur := bss;
     cur := NewSection("data", Progbits, Write + Alloc);
     cur := NewSection("rodata", Progbits, Alloc);
     text := NewSection("text", Progbits, Alloc + Exec);

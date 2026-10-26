@@ -470,9 +470,12 @@ MODULE ASO; (* Output of the 65xx assembler.
     END
   END WriteSymbols;
 
-  (* An Oberon module: the text section is its code, the exported
-     symbols are its procedures and "_init" is its body. A module made
-     by the assembler has no variables, strings or type descriptors. *)
+  (* An Oberon module: the text section is its code, the bss section its
+     variables (zeroed by the loader, in bank 0), the exported symbols
+     are its procedures and "_init" is its body. A module made by the
+     assembler has no strings or type descriptors, and its variables are
+     not exported. Addresses in code and in bss are relocated by the
+     loader: ASG.RelCode, RelLong and RelData. *)
   PROCEDURE WriteModule(name: ARRAY OF CHAR; legacy: BOOLEAN);
     VAR text: ASG.Section; exports, init, obj: ASB.Object; sig: ASB.Signature;
       nofExp, i, version: INTEGER; entry: LONGINT;
@@ -482,7 +485,8 @@ MODULE ASO; (* Output of the 65xx assembler.
     exports := Exports(nofExp, init);
     IF legacy THEN version := LegacySymVersion ELSE version := SymVersion END;
     WriteSymbols(smb, modid, exports, version, key);
-    IF init # NIL THEN entry := init.val.i - text.org ELSE entry := 0 END;
+    (* with no body, an RTL after the code is the entry *)
+    IF init # NIL THEN entry := init.val.i - text.org ELSE entry := text.size END;
     IF ASG.RelocOverflow() THEN ASS.Error(NIL, 0, "too many relocatable calls", "") END;
     IF (ASS.errcnt = 0) & Create(name) THEN
       WString(modid);
@@ -494,9 +498,11 @@ MODULE ASO; (* Output of the 65xx assembler.
       END;
       W1(0);
       W4(0);   (*type descriptors*)
-      W4(0);   (*variables*)
+      W4(ASG.bss.size);   (*variables*)
       W4(0);   (*strings*)
-      W4(text.size); WCode(text, 0, text.size);
+      IF init # NIL THEN W4(text.size); WCode(text, 0, text.size)
+      ELSE W4(text.size + 1); WCode(text, 0, text.size); W1(6BH)   (*RTL*)
+      END;
       (* commands: the procedures without parameters and result *)
       obj := exports;
       WHILE obj # NIL DO

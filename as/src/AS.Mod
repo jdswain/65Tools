@@ -95,6 +95,7 @@ MODULE AS; (* The 65xx assembler: command line and control.
     ELSE
       ASS.Init; ASB.Init; ASG.Init; ASI.Init; ASP.Init(outName);
       ASG.SetDefaultCpu(ASO.DefaultCpu(format)); ASI.SetVerbose(verbose);
+      ASG.SetModule(format = ASO.Mod816);
       FOR i := 0 TO nofDefs - 1 DO
         Env.Arg(defs[i], arg);
         IF defShared[i] THEN  (*drop the "-D"*)

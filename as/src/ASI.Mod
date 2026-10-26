@@ -395,7 +395,7 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
   END Shift;
 
   PROCEDURE Binary(code: INTEGER);
-    VAR x, y, z: ASB.Value; a, b, c: LONGINT; p, q: REAL;
+    VAR x, y, z: ASB.Value; a, b, c: LONGINT; p, q: REAL; base: INTEGER;
   BEGIN Pop(y); Pop(x);
     IF (x.form = ASB.Str) & (y.form = ASB.Str) & ((code = eql) OR (code = neq) OR (code = add)) THEN
       IF code = add THEN ASB.SetStr(z, Concat(x.s, y.s))
@@ -416,7 +416,18 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
       ELSIF code = gtr THEN ASB.SetInt(z, Bool(p > q))
       ELSE ASB.SetInt(z, Bool(p >= q))
       END
-    ELSE a := IntOf(x); b := IntOf(y); c := 0;
+    ELSE a := IntOf(x); b := IntOf(y); c := 0; base := ASB.Abs;
+      IF (x.base # ASB.Abs) OR (y.base # ASB.Abs) THEN
+        (* an address in a .816 module plus or minus a number stays one;
+           the difference of two in the same place is a number *)
+        IF (code = add) & (y.base = ASB.Abs) THEN base := x.base
+        ELSIF (code = add) & (x.base = ASB.Abs) THEN base := y.base
+        ELSIF (code = sub) & (y.base = ASB.Abs) THEN base := x.base
+        ELSIF (code = sub) & (x.base = y.base) THEN base := ASB.Abs
+        ELSIF (code >= eql) & (code <= geq) OR (code = land) OR (code = lor) THEN base := ASB.Abs
+        ELSE base := ASB.Mixed
+        END
+      END;
       CASE code OF
         add: c := a + b
       | sub: c := a - b
@@ -436,14 +447,15 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
       | gtr: c := Bool(a > b)
       | geq: c := Bool(a >= b)
       END;
-      ASB.SetInt(z, c)
+      ASB.SetInt(z, c); z.base := base
     END;
     Push(z)
   END Binary;
 
   PROCEDURE Unary(code: INTEGER);
-    VAR x: ASB.Value; a: LONGINT;
+    VAR x: ASB.Value; a: LONGINT; base: INTEGER;
   BEGIN Pop(x);
+    IF (x.base # ASB.Abs) & (code # not) THEN base := ASB.Mixed ELSE base := ASB.Abs END;
     IF (code = neg) & (x.form = ASB.Real) THEN ASB.SetReal(x, -x.r)
     ELSIF code = not THEN ASB.SetInt(x, Bool(~True(x)))
     ELSE a := IntOf(x);
@@ -453,7 +465,7 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
       ELSIF code = high THEN a := a DIV 100H MOD 100H
       ELSE (*bank*) a := a DIV 10000H MOD 100H
       END;
-      ASB.SetInt(x, a)
+      ASB.SetInt(x, a); x.base := base
     END;
     Push(x)
   END Unary;
@@ -465,7 +477,7 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
   BEGIN
     CASE s OF
       sOrg: sect := ASG.Current(); ASB.SetInt(v, sect.org)
-    | sAddr: ASB.SetInt(v, ASG.Here())
+    | sAddr: ASB.SetInt(v, ASG.Here()); v.base := ASG.Base()
     | sLongA: ASB.SetInt(v, Bool(ASG.LongA()))
     | sLongI: ASB.SetInt(v, Bool(ASG.LongI()))
     | sCpu: ASC.CpuName(ASC.Cpu(), name); ASB.SetStr(v, ASB.NewString(name, ASH.Length(name)))
@@ -572,8 +584,8 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
       IF obj.stamp = stamp THEN Err("label defined twice: ", ref.name)
       ELSIF obj.val.form = ASB.Mod THEN Err(ref.name, " is a module")
       ELSE
-        IF (obj.val.form # ASB.Int) OR (obj.val.i # a) THEN changed := TRUE END;
-        ASB.SetInt(obj.val, a); obj.stamp := stamp; obj.rdo := FALSE;
+        IF (obj.val.form # ASB.Int) OR (obj.val.i # a) OR (obj.val.base # ASG.Base()) THEN changed := TRUE END;
+        ASB.SetInt(obj.val, a); obj.val.base := ASG.Base(); obj.stamp := stamp; obj.rdo := FALSE;
         obj.expo := ref.expo
       END;
       IF ~ref.local THEN curLabel := obj END
@@ -583,14 +595,14 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
   (* --- instructions and data --- *)
 
   PROCEDURE Instruction(op: Op);
-    VAR n: INTEGER; a1, a2, a3: LONGINT;
-  BEGIN n := ASC.Operands(op.b); a1 := 0; a2 := 0; a3 := 0;
+    VAR n, b1, b2, b3: INTEGER; a1, a2, a3: LONGINT;
+  BEGIN n := ASC.Operands(op.b); a1 := 0; a2 := 0; a3 := 0; b1 := ASB.Abs; b2 := ASB.Abs; b3 := ASB.Abs;
     IF n > sp THEN n := sp END;
-    IF n >= 1 THEN a1 := IntOf(stack[sp - n]) END;
-    IF n >= 2 THEN a2 := IntOf(stack[sp - n + 1]) END;
-    IF n >= 3 THEN a3 := IntOf(stack[sp - n + 2]) END;
+    IF n >= 1 THEN a1 := IntOf(stack[sp - n]); b1 := stack[sp - n].base END;
+    IF n >= 2 THEN a2 := IntOf(stack[sp - n + 1]); b2 := stack[sp - n + 1].base END;
+    IF n >= 3 THEN a3 := IntOf(stack[sp - n + 2]); b3 := stack[sp - n + 2].base END;
     Drop(n);
-    ASG.Instr(op.a, op.b, op.i, a1, a2, a3, op.src, op.line)
+    ASG.Instr(op.a, op.b, op.i, a1, a2, a3, b1 + 4 * b2 + 16 * b3, op.src, op.line)
   END Instruction;
 
   (* x as an IEEE 754 single, low byte first *)
@@ -622,6 +634,11 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
         IF code = byte THEN
           FOR i := 0 TO v.s.len - 1 DO ASG.Byte(ORD(v.s.s[i])) END
         ELSE Err("number expected, not a string", "")
+        END
+      ELSIF v.base # ASB.Abs THEN
+        IF (v.base = ASB.Mixed) OR (code = byte) THEN
+          Err("not an address the loader can relocate", ""); ASG.Byte(0)
+        ELSE ASG.Address(IntOf(v), v.base, code = word)
         END
       ELSIF code = byte THEN ASG.Byte(IntOf(v))
       ELSIF code = word THEN ASG.Word(IntOf(v))
