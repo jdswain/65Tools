@@ -43,7 +43,7 @@ done
 # run: Startup loads Seed, which sets the arguments, AS, which assembles,
 # and Dump, which prints the results
 python3 ../../../../OS16/tools/mkfloppy.py -d . -x "$(echo $KERNEL | tr ' ' ,)" -m Seed -m AS -m Dump \
-  -n "RUN.TXT=Seed AS Dump" boot.img KERNEL.IMG sample.s || exit 1
+  -n "RUN.TXT=Seed AS Dump" -S KERNEL.IMG boot.img sample.s || exit 1
 echo "" | perl -e 'alarm 300; exec @ARGV' "$EM16" -fpga -bootrom boot.rom -disk0 boot.img 2>&1 | tr -d '\r' > em16.log
 sed -n '/^--- output$/,/^--- listing$/p' em16.log | sed '1d;$d' > sample.hex
 sed -n '/^--- listing$/,/^--- end$/p' em16.log | sed '1d;$d' > sample.lst

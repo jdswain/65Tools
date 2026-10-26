@@ -117,7 +117,7 @@ for lvl in "${LEVELS[@]}"; do
       FAIL=$((FAIL + 1)); continue
     fi
     [ -f "$bn.816" ] || { echo "SKIP  $bn (no .816)"; SKIP=$((SKIP + 1)); continue; }
-    if ! python3 "$MKFLOPPY" -d . -x "$(echo $KERNEL | tr ' ' ,)" -m "$bn" -n "RUN.TXT=$bn" boot.img KERNEL.IMG 2> floppy.err; then
+    if ! python3 "$MKFLOPPY" -d . -x "$(echo $KERNEL | tr ' ' ,)" -m "$bn" -n "RUN.TXT=$bn" -S KERNEL.IMG boot.img 2> floppy.err; then
       echo "FAIL  $bn (floppy: $(cat floppy.err))"; FAIL=$((FAIL + 1)); continue
     fi
     full="$(echo "" | perl -e "alarm $TIMEOUT_SECS; exec @ARGV" "$EM16" -fpga -bootrom boot.rom -disk0 boot.img 2>/dev/null | tr -d '\r')"
