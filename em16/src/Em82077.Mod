@@ -25,7 +25,9 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
    Transfers are polled, after SPECIFY has set ND (bit 0 of its second
    byte), or by DMA (EmDMA's channel 1), without it. In non-DMA execution
    the CPU moves each byte through the FIFO while MSR shows RQM, and INT is
-   asserted while it does. With no TC (the DMA's terminal count) a
+   asserted while it does: for a read while the FIFO has a byte, for a
+   write while it has room, in time as for DMA (below), with the same
+   overrun. With no TC (the DMA's terminal count) a
    multi-sector transfer ends after the sector EOT names, so a polled
    transfer ends as on any PC: ST0 $40 (abnormal termination) with ST1 $80
    (end of cylinder), and the result's C, H and R point past the last
@@ -57,8 +59,9 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
 
    Time: a step takes SPECIFY's step rate, (16 - SRT) ms at 500K, longer
    at the slower rates, and a read, write or READ ID finds its sector
-   1 ms after it is started. The bytes of a sector are there as fast as
-   the CPU takes them: the FIFO never overruns. With no disk, or with the
+   1 ms after it is started, and its bytes pass the head at the data
+   rate, polled or by DMA. A write's FIFO running empty (an underrun) is
+   not modelled: the bytes wait for the CPU or the engine. With no disk, or with the
    motor off, there is no index pulse; the chip would then wait forever,
    this ends the command with "missing address mark" instead. Not
    modelled: head load and unload times, the FIFO threshold, precompensation,
@@ -283,7 +286,7 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
     VAR d: INTEGER;
   BEGIN
     IF now > clock THEN clock := now END;
-    IF (phase = execRead) & ~nonDma & (Arrived(now) - pos > 16) THEN
+    IF (phase = execRead) & (Arrived(now) - pos > 16) THEN
       Finish(40H, 10H, 0)                                   (* overrun *)
     END;
     FOR d := 0 TO 3 DO
@@ -294,6 +297,15 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
     IF (phase = waiting) & (now >= ready) THEN Arrive END
   END Update;
 
+  (* A read's FIFO has a byte; a write's has room. *)
+  PROCEDURE HasByte(): BOOLEAN;
+  BEGIN RETURN Arrived(clock) > pos
+  END HasByte;
+
+  PROCEDURE HasRoom(): BOOLEAN;
+  BEGIN RETURN pos < Arrived(clock) + 16
+  END HasRoom;
+
   PROCEDURE Tick*(now: LONGINT);
   BEGIN Update(now)
   END Tick;
@@ -302,7 +314,9 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
     VAR p: BOOLEAN; d: INTEGER;
   BEGIN p := intr;
     FOR d := 0 TO 3 DO p := p OR pend[d] END;
-    IF nonDma & ((phase = execRead) OR (phase = execWrite) OR (phase = execFormat)) THEN p := TRUE END;
+    IF nonDma & ((phase = execRead) & HasByte() OR (phase = execWrite) & HasRoom() OR (phase = execFormat)) THEN
+      p := TRUE
+    END;
     RETURN p & ODD(dor DIV 8) & ODD(dor DIV 4)
   END Irq;
 
@@ -415,8 +429,9 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
       ELSIF phase = command THEN v := rqm + cb
       ELSIF phase = waiting THEN v := cb
       ELSIF (phase >= execRead) & (phase <= execFormat) & ~nonDma THEN v := cb
-      ELSIF phase = execRead THEN v := rqm + dio + cb
-      ELSIF (phase = execWrite) OR (phase = execFormat) THEN v := rqm + cb
+      ELSIF phase = execRead THEN IF HasByte() THEN v := rqm + dio + cb ELSE v := cb END
+      ELSIF phase = execWrite THEN IF HasRoom() THEN v := rqm + cb ELSE v := cb END
+      ELSIF phase = execFormat THEN v := rqm + cb
       ELSIF phase = result THEN v := rqm + dio + cb
       END;
       IF nonDma & (phase >= waiting) & (phase <= execFormat) THEN v := v + ndma END;
@@ -432,7 +447,7 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
     IF phase = result THEN
       v := res[resPos]; INC(resPos); intr := FALSE;
       IF resPos >= nRes THEN phase := idle END
-    ELSIF phase = execRead THEN
+    ELSIF (phase = execRead) & HasByte() THEN
       v := buf[pos]; INC(pos);
       IF pos = sectorSize THEN NextSector END
     END;
@@ -449,7 +464,7 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
       ELSE cmd[nCmd] := v; INC(nCmd)
       END;
       IF (phase = command) & (nCmd = need) THEN Execute(now) END
-    ELSIF phase = execWrite THEN
+    ELSIF (phase = execWrite) & HasRoom() THEN
       buf[pos] := v; INC(pos);
       IF pos = sectorSize THEN EmHost.DiskWrite(drv, Offset(), buf); NextSector END
     ELSIF phase = execFormat THEN

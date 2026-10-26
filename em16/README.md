@@ -196,10 +196,11 @@ engine). The comments at the top of `Em82077.Mod`, `EmSCSI.Mod` and
 
 - **Floppy**, `-disk0` and `-disk1`: 720K, 1.44M or 2.88M images, the
   sectors in the order track, side, sector. The 82077AA is in PC/AT
-  mode. Set ND with SPECIFY for polled transfers; without it the
-  transfer is DMA: DRQ while the DOR's DMA gate is on, a read's bytes
-  arriving at the data rate, and an overrun (ST0 $40, ST1 $10) if one
-  is not taken before the 16-byte FIFO fills. The data rate (CCR or
+  mode. Set ND with SPECIFY for polled transfers (RQM while the FIFO
+  has a byte, or room); without it the transfer is DMA, DRQ while the
+  DOR's DMA gate is on. Either way a read's bytes arrive at the data
+  rate, and one not taken before the 16-byte FIFO fills is an overrun
+  (ST0 $40, ST1 $10). The data rate (CCR or
   DSR) must suit the disk, 500K for 1.44M and 250K for 720K. A
   transfer ends after the sector EOT names with ST0 $40, ST1 $80, as on
   a PC without TC, or normally (ST0 $00) when TC comes with a byte.
