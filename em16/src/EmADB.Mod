@@ -38,6 +38,7 @@ MODULE EmADB; (* The SoC's Apple Desktop Bus host, rtl/adb_host.v, with a
     rx: ARRAY 8 OF INTEGER;
     rxCount: INTEGER;
     rxTimeout, rxSrq, resetting: BOOLEAN;
+    talks*: LONGINT;                (* transactions started, for EmSoC's pacing *)
 
   PROCEDURE Cycles(us: INTEGER): LONGINT;
     VAR c: LONGINT;
@@ -65,7 +66,7 @@ MODULE EmADB; (* The SoC's Apple Desktop Bus host, rtl/adb_host.v, with a
   (* What the device at addr answers to Talk register reg: rxCount bytes
      in rx, 0 for silence. *)
   PROCEDURE Talk(addr, reg: INTEGER);
-    VAR a: INTEGER;
+    VAR a, dx, dy: INTEGER;
   BEGIN rxCount := 0;
     IF addr = kbdAddr THEN
       IF (reg = 0) & KbdHasData() THEN
@@ -77,10 +78,12 @@ MODULE EmADB; (* The SoC's Apple Desktop Bus host, rtl/adb_host.v, with a
       ELSIF reg = 3 THEN rx[0] := 60H + kbdAddr; rx[1] := kbdHandler; rxCount := 2
       END
     ELSIF addr = mouseAddr THEN
-      IF (reg = 0) & MouseHasData() THEN
+      IF (reg = 0) & MouseHasData() THEN   (* what is beyond 7 bits waits for the next Talk *)
         IF mouseButton THEN a := 0 ELSE a := 80H END;
-        rx[0] := a + AND(Clamp(mouseDy), 7FH); rx[1] := 80H + AND(Clamp(mouseDx), 7FH);
-        mouseDx := 0; mouseDy := 0; mouseMoved := FALSE; rxCount := 2
+        dx := Clamp(mouseDx); dy := Clamp(mouseDy);
+        rx[0] := a + AND(dy, 7FH); rx[1] := 80H + AND(dx, 7FH);
+        mouseDx := mouseDx - dx; mouseDy := mouseDy - dy;
+        mouseMoved := (mouseDx # 0) OR (mouseDy # 0); rxCount := 2
       ELSIF reg = 3 THEN rx[0] := 60H + mouseAddr; rx[1] := mouseHandler; rxCount := 2
       END
     END
@@ -98,7 +101,7 @@ MODULE EmADB; (* The SoC's Apple Desktop Bus host, rtl/adb_host.v, with a
 
   PROCEDURE Start(c: INTEGER; now: LONGINT);
     VAR addr, code, reg, us: INTEGER;
-  BEGIN cmd := c; busy := TRUE; done := FALSE; timeout := FALSE; srq := FALSE; count := 0;
+  BEGIN INC(talks); cmd := c; busy := TRUE; done := FALSE; timeout := FALSE; srq := FALSE; count := 0;
     addr := c DIV 16; code := AND(c DIV 4, 3); reg := AND(c, 3);
     us := usAttn + usSync + 9 * usBit;                  (* command and its stop bit *)
     rxSrq := (KbdHasData() & (addr # kbdAddr)) OR (MouseHasData() & (addr # mouseAddr));
@@ -187,5 +190,5 @@ MODULE EmADB; (* The SoC's Apple Desktop Bus host, rtl/adb_host.v, with a
     FOR i := 0 TO 7 DO data[i] := 0 END; ResetDevices
   END Reset;
 
-BEGIN Reset
+BEGIN talks := 0; Reset
 END EmADB.

@@ -5,13 +5,15 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
    em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin]
         [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-test-pattern]
         [-console] [-disk0 file] [-disk1 file] [-wd1793]
-        [-scsi file] [-adbkey code] file ...
+        [-scsi file] [-adbkey code] [-adbmouse dx dy] file ...
 
    On the default machine and under -fpga the floppy disks are the
    82077AA's, or the WD1793's with -wd1793, and -scsi puts a disk at ID 0
    on the SCSI bus; the L28's are its WD1793's. Under -fpga, -adbkey
    holds an ADB key code down from power on (the keyboard reports it at
-   the first Talk), as a key held while the board starts.
+   the first Talk), as a key held while the board starts, and -adbmouse
+   moves the mouse dx right and dy down from power on, reported at the
+   mouse's Talks (a test of a program's own pointer).
 
    A file is an ELF executable. Oberon modules are not loaded by em16:
    OS16 boots on -fpga, from a floppy, as on the board, and loads them.
@@ -27,6 +29,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
     trace, videoEnabled, testPattern, consoleMode, wantFpga, wantL28, bad: BOOLEAN;
     customDp, customSp, entry: INTEGER;
     adbKeys: ARRAY 8 OF INTEGER; nAdbKeys: INTEGER;   (* -adbkey: held down at reset *)
+    adbDx, adbDy: INTEGER;                            (* -adbmouse: moved at reset *)
     fbdump, bootrom, font: EmLoad.Path;
 
   PROCEDURE ErrStr(s: ARRAY OF CHAR);
@@ -107,8 +110,10 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       ELSIF Equal(arg, "-console") THEN consoleMode := TRUE; INC(index)
       ELSIF Equal(arg, "-adbkey") & (index + 1 < n) THEN Env.Arg(index + 1, val);
         IF nAdbKeys < LEN(adbKeys) THEN adbKeys[nAdbKeys] := Number(val); INC(nAdbKeys) END; INC(index, 2)
+      ELSIF Equal(arg, "-adbmouse") & (index + 2 < n) THEN
+        Env.Arg(index + 1, val); adbDx := Number(val); Env.Arg(index + 2, val); adbDy := Number(val); INC(index, 3)
       ELSIF Equal(arg, "-?") THEN
-        ErrStr("Usage: em16 [-t] [-tfrom addr skip count] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-test-pattern] [-console] [-disk0 file] [-disk1 file] [-wd1793] [-scsi file] [-adbkey code] file ...");
+        ErrStr("Usage: em16 [-t] [-tfrom addr skip count] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-test-pattern] [-console] [-disk0 file] [-disk1 file] [-wd1793] [-scsi file] [-adbkey code] [-adbmouse dx dy] file ...");
         EmHost.Ln(EmHost.err); bad := TRUE
       ELSE ErrStr("Invalid: option '"); ErrStr(arg); ErrStr("'"); EmHost.Ln(EmHost.err); bad := TRUE
       END
@@ -200,7 +205,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       IF Equal(arg, "-harte") THEN Harte; EmHost.Exit(0) END
     END;
     trace := FALSE; videoEnabled := FALSE; testPattern := FALSE; consoleMode := FALSE; bad := FALSE;
-    customDp := -1; customSp := -1; entry := 0; nAdbKeys := 0; fbdump[0] := 0X; bootrom[0] := 0X; font[0] := 0X;
+    customDp := -1; customSp := -1; entry := 0; nAdbKeys := 0; adbDx := 0; adbDy := 0; fbdump[0] := 0X; bootrom[0] := 0X; font[0] := 0X;
     n := Env.ArgCount();
     (* -fpga first, so that the memory has its size before files are loaded *)
     (* and -wd1793 and -cpu l28, so that floppies go to the right controller *)
@@ -238,7 +243,8 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
     END;
     IF ~bad THEN
       IF EmMem.fpga THEN EmCore.SetTrace(trace); EmSoC.Reset; LoadFont; EmHost.SetADB(1);
-        FOR i := 0 TO nAdbKeys - 1 DO EmADB.KeyDown(adbKeys[i]) END   (* keys held at power on *)
+        FOR i := 0 TO nAdbKeys - 1 DO EmADB.KeyDown(adbKeys[i]) END;   (* keys held at power on *)
+        IF (adbDx # 0) OR (adbDy # 0) THEN EmADB.MouseMove(adbDx, adbDy) END
       END;
       EmCPU.Reset(trace);
       IF ~EmMem.fpga & (EmCPU.cpuType # EmCPU.l28) THEN

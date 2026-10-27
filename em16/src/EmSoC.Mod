@@ -43,6 +43,8 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
 
   CONST
     extCost = 14;             (* an external bus cycle *)
+    Hz = 25200000;            (* the clock *)
+    Polls = 200;              (* ADB transactions in a second: the guest reads its input (OS16 400, the boot ROM 100) *)
 
   VAR
     now*: LONGINT;            (* cycles since reset *)
@@ -52,6 +54,10 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
     imask: INTEGER;           (* $0441 *)
     wd1793*: BOOLEAN;         (* card 0 is the WD1793 card, not the 82077AA *)
     nextTick: LONGINT;
+    nextPace: LONGINT;
+    rested: BOOLEAN;          (* the guest reads its input: real time *)
+    ms: INTEGER;              (* milliseconds of this second *)
+    talks0: LONGINT;          (* EmADB.talks at its start *)
 
   PROCEDURE UseWD1793*;
   BEGIN wd1793 := TRUE; EmDMA.NoFloppy
@@ -243,10 +249,25 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
     EmCore.Reset
   END Reset;
 
-  (* Until the core stops: STP, or a fetch from 00:0000. *)
+  (* Until the core stops: STP, or a fetch from 00:0000. Flat out; but
+     with a window (EmHost.pace), once the guest reads its keyboard and
+     mouse (Polls ADB transactions in a second, as OS16's InputManager
+     makes and a boot does not), at the board's speed from then on, each millisecond of the
+     clock in step with the host's, so that its times (a key's repeat, a
+     double click) are the person's, busy or not. *)
   PROCEDURE Run*;
   BEGIN
-    WHILE ~EmCore.stopped DO EmCore.Step(now) END;
+    nextPace := now; rested := FALSE; ms := 0; talks0 := EmADB.talks;
+    WHILE ~EmCore.stopped DO EmCore.Step(now);
+      IF (EmHost.pace # 0) & (now >= nextPace) THEN
+        IF rested THEN EmHost.Pace(now, Hz)
+        ELSE
+          INC(ms);
+          IF ms = 1000 THEN rested := EmADB.talks - talks0 >= Polls; ms := 0; talks0 := EmADB.talks END
+        END;
+        nextPace := now + Hz DIV 1000
+      END
+    END;
     EmHost.DrainAll
   END Run;
 

@@ -69,9 +69,11 @@ MODULE EmVIA; (* The 6522 VIA, with timer 1 for interrupts, and behind its
     ELSIF addr = mouseAddress THEN
       IF reg = 0 THEN
         IF mouseMoved OR mouseButton THEN
-          IF mouseButton THEN a := 0 ELSE a := 80H END;
-          Answer(ORA(a, AND(Clamp(mouseDy), 7FH)), ORA(80H, AND(Clamp(mouseDx), 7FH)));
-          mouseDx := 0; mouseDy := 0; mouseMoved := FALSE
+          IF mouseButton THEN a := 0 ELSE a := 80H END;   (* beyond 7 bits waits for the next Talk *)
+          b := Clamp(mouseDx); a := ORA(a, AND(Clamp(mouseDy), 7FH));
+          mouseDy := mouseDy - Clamp(mouseDy); mouseDx := mouseDx - b;
+          Answer(a, ORA(80H, AND(b, 7FH)));
+          mouseMoved := (mouseDx # 0) OR (mouseDy # 0)
         END
       ELSIF reg = 3 THEN
         IF mouseMoved OR mouseButton THEN a := 20H ELSE a := 0 END;

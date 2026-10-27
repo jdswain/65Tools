@@ -120,6 +120,23 @@ void EmHost__ClockStart(void) {
     clock_gettime(CLOCK_MONOTONIC, &start);
 }
 
+/* Real time: cycles at hz a second against the clock since the first
+   call, a sleep while they are ahead. A host that falls behind by more
+   than 0.1 s starts again from now, rather than hurrying the guest. */
+void EmHost__Pace(int64_t cycles, int64_t hz) {
+    static int on;
+    static int64_t c0;
+    static struct timespec t0;
+    struct timespec now;
+    double ahead;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    if (!on) { on = 1; c0 = cycles; t0 = now; return; }
+    ahead = (double)(cycles - c0) / (double)hz
+          - ((now.tv_sec - t0.tv_sec) + (now.tv_nsec - t0.tv_nsec) / 1000000000.0);
+    if (ahead > 0.001) usleep((useconds_t)(ahead * 1000000.0));
+    else if (ahead < -0.1) { c0 = cycles; t0 = now; }
+}
+
 /* As main.cpp wrote them with cout: the count in hex if cout << hex had
    been written before, the time and frequency with six digits. */
 void EmHost__Report(int64_t cycles, int hex) {

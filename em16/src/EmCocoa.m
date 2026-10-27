@@ -12,6 +12,7 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <math.h>
 
 /* the Oberon side */
 extern uint8_t EmVideo__mem[];
@@ -20,6 +21,7 @@ extern int EmVideo__dirty;
 extern int EmVideo__text;
 extern uint8_t EmVideo__font[];
 extern int EmHost__adb;
+extern int EmHost__pace;
 extern uint8_t EmLCD__fb[];
 extern int EmLCD__dirty, EmLCD__pwmDuty, EmLCD__cursorVisible, EmLCD__cursorBlink;
 extern int EmLCD__blinkRate, EmLCD__textCursorX, EmLCD__textCursorY, EmLCD__fontW, EmLCD__fontH;
@@ -43,9 +45,12 @@ static void mouse_button(int p) { if (EmHost__adb) EmADB__MouseButton(p); else E
 
 enum { videoWidth = 640, videoHeight = 480, videoScale = 2, lcdWidth = 800, lcdHeight = 480 };
 
+static volatile int cpu_done;   /* the CPU thread has returned: the guest stopped */
+
 static void *cpu_main(void *arg) {
     (void)arg;
     Em16__CpuThread();
+    cpu_done = 1;
     return NULL;
 }
 
@@ -76,8 +81,11 @@ static void draw_rgba(NSView *view, uint8_t *rgba, int w, int h, NSRect dest) {
 
 @interface VideoView : NSView {
     uint8_t *rgba;
+    BOOL captured;      /* the mouse is the guest's: the host's arrow hidden and held */
+    double fx, fy;      /* the moves' fractions of a pixel, still to send */
 }
 - (void)refresh;
+- (void)releaseMouse;
 @end
 
 @implementation VideoView
@@ -87,7 +95,7 @@ static void draw_rgba(NSView *view, uint8_t *rgba, int w, int h, NSRect dest) {
     if (self) {
         rgba = (uint8_t *)calloc(videoWidth * videoHeight, 4);
         NSTrackingArea *ta = [[NSTrackingArea alloc] initWithRect:self.bounds
-            options:(NSTrackingMouseMoved | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect)
+            options:(NSTrackingMouseMoved | NSTrackingActiveAlways | NSTrackingInVisibleRect)
             owner:self userInfo:nil];
         [self addTrackingArea:ta];
     }
@@ -99,15 +107,55 @@ static void draw_rgba(NSView *view, uint8_t *rgba, int w, int h, NSRect dest) {
     [super dealloc];
 }
 
+/* The window's title: how to capture the mouse, or to let it go */
+- (void)title {
+    [[self window] setTitle:(captured ? @"PC16 Display - Control-Command releases the mouse"
+                                      : @"PC16 Display - click to capture the mouse")];
+}
+
+/* The mouse captured, as a virtual machine's window takes it: the host's
+   arrow hidden and held at the middle of the view (the pointer and the
+   mouse dissociated), so that it cannot leave the window while the
+   guest's pointer moves; the mouse's moves all the guest's. */
+- (void)captureMouse {
+    NSRect r;
+    CGFloat top;
+    if (captured || cpu_done) return;
+    r = [[self window] convertRectToScreen:[self convertRect:self.bounds toView:nil]];
+    top = [[[NSScreen screens] objectAtIndex:0] frame].size.height;   /* CG's y is down from the main screen's top */
+    CGWarpMouseCursorPosition(CGPointMake(NSMidX(r), top - NSMidY(r)));
+    CGAssociateMouseAndMouseCursorPosition(false);
+    [NSCursor hide];
+    captured = YES; fx = 0; fy = 0;
+    [self title];
+}
+
+- (void)releaseMouse {
+    if (!captured) return;
+    CGAssociateMouseAndMouseCursorPosition(true);
+    [NSCursor unhide];
+    captured = NO;
+    [self title];
+}
+
 - (void)refresh {
     if (EmVideo__dirty) { EmVideo__dirty = 0; [self setNeedsDisplay:YES]; }
+    if (cpu_done) [self releaseMouse];   /* the guest stopped: nothing reads the mouse */
 }
+
+- (void)viewDidMoveToWindow { [self title]; }
 
 - (BOOL)acceptsFirstResponder { return YES; }
 
-- (void)keyDown:(NSEvent *)event { key_down([event keyCode]); }
+/* the click that brings the window forward captures the mouse too */
+- (BOOL)acceptsFirstMouse:(NSEvent *)event { (void)event; return YES; }
+
+/* a key held: one down, as an ADB keyboard sends; macOS's repeats ignored */
+- (void)keyDown:(NSEvent *)event { if (![event isARepeat]) key_down([event keyCode]); }
 - (void)keyUp:(NSEvent *)event { key_up([event keyCode]); }
 
+/* The modifier keys, to the guest; Control and Command held together
+   let the mouse go. */
 - (void)flagsChanged:(NSEvent *)event {
     static NSEventModifierFlags prev = 0;
     NSEventModifierFlags flags = [event modifierFlags];
@@ -125,13 +173,27 @@ static void draw_rgba(NSView *view, uint8_t *rgba, int w, int h, NSRect dest) {
     }
     if (press) key_down(kc); else key_up(kc);
     prev = flags;
+    if ((flags & NSEventModifierFlagControl) && (flags & NSEventModifierFlagCommand)) [self releaseMouse];
 }
 
-- (void)mouseDown:(NSEvent *)event { (void)event; mouse_button(1); }
-- (void)mouseUp:(NSEvent *)event { (void)event; mouse_button(0); }
+/* A click captures the mouse, and is not the guest's; then the button
+   is the guest's. */
+- (void)mouseDown:(NSEvent *)event {
+    (void)event;
+    if (captured) mouse_button(1); else [self captureMouse];
+}
+- (void)mouseUp:(NSEvent *)event { (void)event; if (captured) mouse_button(0); }
 
+/* While captured, the mouse's moves: the event's deltas, the device's
+   own (macOS's acceleration not in them; the guest's InputManager
+   accelerates, as for an ADB mouse), a point to a pixel, the fractions
+   carried over. */
 - (void)mouseMoved:(NSEvent *)event {
-    int dx = (int)[event deltaX], dy = (int)[event deltaY];
+    int dx, dy;
+    if (!captured) return;
+    fx += [event deltaX]; fy += [event deltaY];
+    dx = (int)fx; dy = (int)fy;
+    fx -= dx; fy -= dy;
     if (dx || dy) mouse_move(dx, dy);
 }
 
@@ -309,8 +371,15 @@ static void draw_rgba(NSView *view, uint8_t *rgba, int w, int h, NSRect dest) {
     [(id)view refresh];
 }
 
+/* the window put behind another, or closed: the mouse let go */
+- (void)windowDidResignKey:(NSNotification *)notification {
+    (void)notification;
+    if (!lcd) [(VideoView *)view releaseMouse];
+}
+
 - (void)windowWillClose:(NSNotification *)notification {
     (void)notification;
+    if (!lcd) [(VideoView *)view releaseMouse];
     [timer invalidate];
     timer = nil;
     EmCPU__Stop();
@@ -346,7 +415,8 @@ static void run_cocoa(BOOL lcd) {
     }
 }
 
-void EmHost__RunVideo(void) { start_cpu(); run_cocoa(NO); }
+/* the framebuffer's window: the SoC in real time once at rest (EmSoC.Run) */
+void EmHost__RunVideo(void) { EmHost__pace = 1; start_cpu(); run_cocoa(NO); }
 void EmHost__RunLCD(void) { start_cpu(); run_cocoa(YES); }
 
 void EmHost__StopDisplay(void) {

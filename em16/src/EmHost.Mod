@@ -21,6 +21,7 @@ MODULE EmHost; (* The host side of em16: standard output and error, the
     s: ARRAY 2 OF Stream;
     coutHex*: BOOLEAN;      (* cout << hex has been written: integers go out in hex *)
     adb*: INTEGER;          (* where the window's keys and mouse go: 0 the VIA, 1 the SoC *)
+    pace*: INTEGER;         (* 1: the SoC kept to real time once at rest (set by the window) *)
 
   (* --- the C side --- *)
 
@@ -55,6 +56,11 @@ MODULE EmHost; (* The host side of em16: standard output and error, the
 
   PROCEDURE ClockStart*;
   END ClockStart;
+
+  (* Kept to real time: a sleep while cycles at hz a second are ahead of
+     the clock since the first call. *)
+  PROCEDURE Pace*(cycles, hz: LONGINT);
+  END Pace;
 
   (* The closing statistics: "Executed n in s Secs", the frequency. *)
   PROCEDURE Report*(cycles: LONGINT; hex: INTEGER);
@@ -198,5 +204,5 @@ MODULE EmHost; (* The host side of em16: standard output and error, the
   BEGIN Drain(out); Drain(err)
   END DrainAll;
 
-BEGIN s[out].n := 0; s[err].n := 0; coutHex := FALSE; adb := 0
+BEGIN s[out].n := 0; s[err].n := 0; coutHex := FALSE; adb := 0; pace := 0
 END EmHost.

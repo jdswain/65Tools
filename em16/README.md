@@ -114,7 +114,7 @@ have 1 MB, its symbol table 200000 symbols.
 
     em16 -fpga [-bootrom rom.bin] [-font font.hex] [-video] [-fbdump ppm]
                [-disk0 img] [-disk1 img] [-wd1793] [-scsi img]
-               [-adbkey code] [file ...]
+               [-adbkey code] [-adbmouse dx dy] [file ...]
 
 `-fpga` emulates the SoC of `../../Verilog65C816/fpga` as its RTL
 describes it (`rtl/soc.v` and the modules below it, and `fpga/README.md`)
@@ -147,8 +147,23 @@ rather than em16's default machine:
   defines it, its 8x8 patterns included, its writes dropping the cache
   lines they touch;
 - the ADB host with a keyboard and a mouse that the `-video` window
-  feeds; `-adbkey code` (e.g. `0x2e`, M) holds a key down from power on,
-  for a boot ROM that looks for one;
+  feeds. A click in the window captures the mouse, as a virtual
+  machine's does (the click is not the guest's): the host's arrow is
+  hidden and held in the window, and the mouse's moves, the device's
+  own before macOS's acceleration (the guest accelerates, as for an
+  ADB mouse), go to the guest, a move beyond the 7 bits of a Talk in
+  the next. Control-Command lets the mouse go, as does the window going
+  behind another, closing, or the guest stopping; the title says which;
+- with `-video`, real time once the guest reads its keyboard and
+  mouse: em16 runs some six times the board's speed, flat out through
+  a boot; when the guest makes 200 ADB transactions in a second (OS16's
+  InputManager makes 400, the boot ROM 100), each millisecond of the
+  clock is kept in step with the host's from then on, so a key's repeat
+  and a double click take the person's time. Without `-video` it is all
+  flat out; `-adbkey code` (e.g. `0x2e`, M) holds a key down from
+  power on, for a boot ROM that looks for one, and `-adbmouse dx dy`
+  moves the mouse from power on (OS16's UITest checks its pointer with
+  it);
 - the disk controllers of the carrier board that `docs/Hardware.md`
   describes, at the addresses it gives: an 82077AA at $0800 (slot 0)
   and the SCSI half of the Z85C80, a 53C80, at $0830 (slot 3), with
