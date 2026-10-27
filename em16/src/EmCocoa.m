@@ -55,18 +55,16 @@ static void start_cpu(void) {
     pthread_detach(t);
 }
 
-/* An RGBA buffer drawn into the view, row 0 at the top if flip. */
-static void draw_rgba(NSView *view, uint8_t *rgba, int w, int h, NSRect dest, BOOL flip) {
+/* An RGBA buffer drawn into the view, row 0 at the top (a bitmap context's
+   first row is its image's top, and the view is not flipped), its pixels
+   not smoothed when scaled. */
+static void draw_rgba(NSView *view, uint8_t *rgba, int w, int h, NSRect dest) {
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     CGContextRef bmp = CGBitmapContextCreate(rgba, w, h, 8, w * 4, cs, (CGBitmapInfo)kCGImageAlphaNoneSkipLast);
     CGImageRef image = CGBitmapContextCreateImage(bmp);
     CGContextRef ctx = [[NSGraphicsContext currentContext] CGContext];
     CGContextSaveGState(ctx);
-    if (flip) {
-        CGContextTranslateCTM(ctx, 0, view.bounds.size.height);
-        CGContextScaleCTM(ctx, 1.0, -1.0);
-        CGContextSetInterpolationQuality(ctx, kCGInterpolationNone);
-    }
+    CGContextSetInterpolationQuality(ctx, kCGInterpolationNone);
     CGContextDrawImage(ctx, dest, image);
     CGContextRestoreGState(ctx);
     CGImageRelease(image);
@@ -164,7 +162,7 @@ static void draw_rgba(NSView *view, uint8_t *rgba, int w, int h, NSRect dest, BO
             p[4] = EmVideo__pal[c1 * 3]; p[5] = EmVideo__pal[c1 * 3 + 1]; p[6] = EmVideo__pal[c1 * 3 + 2]; p[7] = 255;
         }
     draw_rgba(self, rgba, videoWidth, videoHeight,
-              CGRectMake(0, 0, self.bounds.size.width, self.bounds.size.height), YES);
+              CGRectMake(0, 0, self.bounds.size.width, self.bounds.size.height));
 }
 
 @end
@@ -264,7 +262,7 @@ static void draw_rgba(NSView *view, uint8_t *rgba, int w, int h, NSRect dest, BO
     ctx = [[NSGraphicsContext currentContext] CGContext];
     CGContextSetRGBFillColor(ctx, 0, 0, 0, 1.0);
     CGContextFillRect(ctx, self.bounds);
-    draw_rgba(self, rgba, lcdWidth, lcdHeight, CGRectMake(0, 0, lcdWidth, lcdHeight), NO);
+    draw_rgba(self, rgba, lcdWidth, lcdHeight, CGRectMake(0, 0, lcdWidth, lcdHeight));
 }
 
 @end
