@@ -3,7 +3,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
    command line and the running.
 
    em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin]
-        [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-test-pattern]
+        [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-prof file cycles] [-test-pattern]
         [-console] [-disk0 file] [-disk1 file] [-wd1793]
         [-scsi file] [-adbkey code] [-adbmouse dx dy] file ...
 
@@ -30,7 +30,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
     customDp, customSp, entry: INTEGER;
     adbKeys: ARRAY 8 OF INTEGER; nAdbKeys: INTEGER;   (* -adbkey: held down at reset *)
     adbDx, adbDy: INTEGER;                            (* -adbmouse: moved at reset *)
-    fbdump, bootrom, font: EmLoad.Path;
+    fbdump, bootrom, font, profArg: EmLoad.Path;
 
   PROCEDURE ErrStr(s: ARRAY OF CHAR);
   BEGIN EmHost.Str(EmHost.err, s)
@@ -94,6 +94,9 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
         INC(index, 2)
       ELSIF Equal(arg, "-video") THEN videoEnabled := TRUE; INC(index)
       ELSIF Equal(arg, "-test-pattern") THEN testPattern := TRUE; INC(index)
+      ELSIF Equal(arg, "-prof") & (index + 2 < n) THEN Env.Arg(index + 1, val); Env.Arg(index + 2, profArg);
+        IF ~EmSoC.Profile(val, Number(profArg)) THEN ErrStr("Cannot write "); ErrStr(val); EmHost.Ln(EmHost.err); bad := TRUE END;
+        INC(index, 3)
       ELSIF Equal(arg, "-fbdump") & (index + 1 < n) THEN Env.Arg(index + 1, fbdump); INC(index, 2)
       ELSIF Equal(arg, "-fpga") THEN INC(index)
       ELSIF Equal(arg, "-bootrom") & (index + 1 < n) THEN Env.Arg(index + 1, bootrom); INC(index, 2)
@@ -113,7 +116,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       ELSIF Equal(arg, "-adbmouse") & (index + 2 < n) THEN
         Env.Arg(index + 1, val); adbDx := Number(val); Env.Arg(index + 2, val); adbDy := Number(val); INC(index, 3)
       ELSIF Equal(arg, "-?") THEN
-        ErrStr("Usage: em16 [-t] [-tfrom addr skip count] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-test-pattern] [-console] [-disk0 file] [-disk1 file] [-wd1793] [-scsi file] [-adbkey code] [-adbmouse dx dy] file ...");
+        ErrStr("Usage: em16 [-t] [-tfrom addr skip count] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-prof file cycles] [-test-pattern] [-console] [-disk0 file] [-disk1 file] [-wd1793] [-scsi file] [-adbkey code] [-adbmouse dx dy] file ...");
         EmHost.Ln(EmHost.err); bad := TRUE
       ELSE ErrStr("Invalid: option '"); ErrStr(arg); ErrStr("'"); EmHost.Ln(EmHost.err); bad := TRUE
       END

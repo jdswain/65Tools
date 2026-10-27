@@ -24,7 +24,10 @@ source, so the sources are copied to `obj/` and compiled there.
 The extension of the output file selects the format: none = ELF
 executable, `.o` ELF object, `.bin` binary, `.hex` Intel hex, `.s19`
 `.s28` `.s37` S-records, `.tim` MOS paper tape, `.mem` Verilog memory file,
-`.816` Oberon module plus its `.smb` symbol file. A listing is written beside the first source file
+`.816` Oberon module plus its `.smb` symbol file and a map (`name.map`:
+each code label's offset in hex and its name, a line each, as `oc816 -m`
+writes them, which OS16's `tools/uiprof.py` reads to name a profile's
+samples). A listing is written beside the first source file
 (`name.lst`). The exit status is 1 if there was an error; no output file is
 written then.
 

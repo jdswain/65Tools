@@ -594,6 +594,30 @@ MODULE ASO; (* Output of the 65xx assembler.
      assembler has no strings or type descriptors, and its variables are
      not exported. Addresses in code and in bss are relocated by the
      loader: ASG.RelCode, RelLong and RelData. *)
+  (* name.map beside a module: each code label's offset in hex and its
+     name, a line each, as oc816 -m writes them, for a profile *)
+  PROCEDURE WriteMap(name: ARRAY OF CHAR);
+    VAR obj: ASB.Object; n, i: INTEGER; v: LONGINT; map: ASH.Path; hex: ARRAY 6 OF CHAR;
+  BEGIN ASH.SetExt(name, ".map", map);
+    obj := Symbols(n);
+    IF Create(map) THEN
+      WHILE obj # NIL DO
+        IF obj.val.base = ASB.CodeBase THEN v := obj.val.i - ASG.text.org;
+          FOR i := 5 TO 0 BY -1 DO
+            IF v MOD 16 < 10 THEN hex[i] := CHR(ORD("0") + v MOD 16) ELSE hex[i] := CHR(ORD("A") + v MOD 16 - 10) END;
+            v := v DIV 16
+          END;
+          FOR i := 0 TO 5 DO W1(ORD(hex[i])) END;
+          W1(ORD(" ")); i := 0;
+          WHILE obj.name[i] # 0X DO W1(ORD(obj.name[i])); INC(i) END;
+          W1(0AH)
+        END;
+        obj := obj.link
+      END;
+      Close
+    END
+  END WriteMap;
+
   PROCEDURE WriteModule(name: ARRAY OF CHAR; legacy: BOOLEAN);
     VAR text: ASG.Section; obj: ASB.Object; sig: ASB.Signature;
       i, version, nofTD: INTEGER; entry: LONGINT;
@@ -642,7 +666,7 @@ MODULE ASO; (* Output of the 65xx assembler.
       W4(ASG.nofReloc);
       FOR i := 0 TO ASG.nofReloc - 1 DO W4(ASG.Reloc(i)) END;
       W4(entry); W1(ORD("O"));
-      Close;
+      Close; WriteMap(name);
       ASH.Str("  "); ASH.Str(name); ASH.Str("  "); ASH.Int(text.size);
       ASH.Str(" bytes code, "); ASH.Int(nofExp); ASH.Str(" exports"); ASH.Ln
     END

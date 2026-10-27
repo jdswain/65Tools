@@ -15,6 +15,12 @@ from the skip+1th time the instruction at addr (`0xFF00`, say) is reached,
 for count instructions: one interrupt or a few, not a whole boot
 (`../../OS16/tools/irqprof.py` profiles such a trace).
 
+`-prof file cycles` (with `-fpga`) writes a sample to file each so many
+cycles: the core's PC (PBR:PC) and the time in thousands of cycles, two
+little-endian words; `../../OS16/tools/uiprof.py` names the samples by
+procedure, from the modules' bases the guest prints and the maps `oc816
+-m` and `as` write (OS16's `make prof-ui`).
+
 Oberon programs run on OS16, which boots on `-fpga` from a floppy as on
 the board: em16 has no loader of its own for Oberon modules any more, nor
 a heap for NEW. The tests of `../oc` and `../as/test816` and OS16's own
@@ -112,7 +118,7 @@ have 1 MB, its symbol table 200000 symbols.
 
 ## The SoC (-fpga)
 
-    em16 -fpga [-bootrom rom.bin] [-font font.hex] [-video] [-fbdump ppm]
+    em16 -fpga [-bootrom rom.bin] [-font font.hex] [-video] [-fbdump ppm] [-prof file cycles]
                [-disk0 img] [-disk1 img] [-wd1793] [-scsi img]
                [-adbkey code] [-adbmouse dx dy] [file ...]
 

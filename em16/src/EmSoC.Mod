@@ -39,7 +39,7 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
    $0340 also reads, and the SCC; setting bit 0 of $0340 resets the
    cards' chips (RES#). *)
 
-  IMPORT EmHost, EmCore, EmSDRAM, EmSCC, EmADB, EmBlit, EmFDC, Em82077, EmSCSI, EmDMA, EmTimer, EmVideo;
+  IMPORT Files, EmHost, EmCore, EmSDRAM, EmSCC, EmADB, EmBlit, EmFDC, Em82077, EmSCSI, EmDMA, EmTimer, EmVideo;
 
   CONST
     extCost = 14;             (* an external bus cycle *)
@@ -48,6 +48,8 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
 
   VAR
     now*: LONGINT;            (* cycles since reset *)
+    profEvery, nextProf: LONGINT;   (* -prof: a sample each profEvery cycles *)
+    profFile: Files.File; prof: Files.Rider;
     rom: ARRAY 8000H OF BYTE;
     romBase: INTEGER;         (* where the boot ROM starts: $E000, $C000 or $8000 *)
     romEn, cardReset: BOOLEAN;
@@ -255,10 +257,26 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
      makes and a boot does not), at the board's speed from then on, each millisecond of the
      clock in step with the host's, so that its times (a key's repeat, a
      double click) are the person's, busy or not. *)
+  PROCEDURE Word(v: INTEGER);
+  BEGIN Files.WriteByte(prof, v MOD 100H); Files.WriteByte(prof, v DIV 100H MOD 100H);
+    Files.WriteByte(prof, v DIV 10000H MOD 100H); Files.WriteByte(prof, v DIV 1000000H MOD 100H)
+  END Word;
+
+  (* -prof name every: each every cycles, the core's PC (PBR:PC) and the
+     time (in thousands of cycles) to name, as two little-endian words *)
+  PROCEDURE Profile*(name: ARRAY OF CHAR; every: INTEGER): BOOLEAN;
+  BEGIN profFile := Files.New(name);
+    IF (profFile # NIL) & (every > 0) THEN Files.Set(prof, profFile, 0); profEvery := every; nextProf := 0 END
+  RETURN profFile # NIL
+  END Profile;
+
   PROCEDURE Run*;
   BEGIN
     nextPace := now; rested := FALSE; ms := 0; talks0 := EmADB.talks;
     WHILE ~EmCore.stopped DO EmCore.Step(now);
+      IF (profEvery > 0) & (now >= nextProf) THEN
+        Word(EmCore.PBR * 10000H + EmCore.PC); Word(now DIV 1000); nextProf := now + profEvery
+      END;
       IF (EmHost.pace # 0) & (now >= nextPace) THEN
         IF rested THEN EmHost.Pace(now, Hz)
         ELSE
@@ -268,8 +286,9 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
         nextPace := now + Hz DIV 1000
       END
     END;
+    IF profEvery > 0 THEN Files.Register(profFile); profEvery := 0 END;
     EmHost.DrainAll
   END Run;
 
-BEGIN romEn := TRUE; romBase := 0E000H; now := 0; wd1793 := FALSE
+BEGIN profEvery := 0; romEn := TRUE; romBase := 0E000H; now := 0; wd1793 := FALSE
 END EmSoC.
