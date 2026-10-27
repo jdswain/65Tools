@@ -32,7 +32,7 @@ MODULE ASB; (* Base of the 65xx assembler: values and the symbol table.
 
     (* symbol files: object classes and type forms of ORB *)
     Const = 1; Var = 2; Typ = 5; Meth = 9;
-    IntF* = 4; RealF = 5; Pointer = 7; Proc = 10; Array* = 12; Record* = 13; Intfc = 14;
+    IntF* = 4; RealF = 5; Pointer = 7; Proc* = 10; Array* = 12; Record* = 13; Intfc = 14;
     NoTyp* = 9;      (* type reference of a procedure without result *)
     maxRef = 64;
 
@@ -70,9 +70,11 @@ MODULE ASB; (* Base of the 65xx assembler: values and the symbol table.
     END;
 
     (* an Oberon type, for the symbol file: a predeclared one, LONGINT, an
-       array (len < 0: open) or a record, declared with ".type" or not *)
+       array (len < 0: open), a record or a procedure type, declared with
+       ".type" or not *)
     Type* = POINTER TO TypeDesc;
     Field* = POINTER TO FieldDesc;
+    Signature* = POINTER TO SigDesc;
     TypeDesc* = RECORD
       form*: INTEGER;      (* ORB's: IntF, RealF, ..., Array, Record *)
       ref*: INTEGER;       (* of a predeclared type, else 0 *)
@@ -80,6 +82,7 @@ MODULE ASB; (* Base of the 65xx assembler: values and the symbol table.
       size*: INTEGER;
       base*: Type;         (* an array's elements *)
       fields*: Field;      (* a record's, in order *)
+      sig*: Signature;     (* a procedure type's parameters and result *)
       name*: ASS.Ident;    (* declared with ".type", else empty *)
       td*: INTEGER;        (* a record's descriptor: its offset in the data *)
       out*: INTEGER;       (* its reference in the symbol file being written *)
@@ -93,8 +96,8 @@ MODULE ASB; (* Base of the 65xx assembler: values and the symbol table.
     END;
 
     (* signature of an exported procedure, declared with ".proc" so that
-       the symbol file tells Oberon importers how to call it *)
-    Signature* = POINTER TO SigDesc;
+       the symbol file tells Oberon importers how to call it, or of a
+       procedure type *)
     SigDesc* = RECORD
       name*: ASS.Ident;
       nofpar*: INTEGER;
@@ -275,6 +278,13 @@ MODULE ASB; (* Base of the 65xx assembler: values and the symbol table.
     RETURN s
   END NewSignature;
 
+  (* sig, a procedure type's, for the exported procedure name *)
+  PROCEDURE AddSignature*(name: ARRAY OF CHAR; sig: Signature);
+    VAR s: Signature; i: INTEGER;
+  BEGIN s := NewSignature(name); s.nofpar := sig.nofpar; s.restype := sig.restype;
+    FOR i := 0 TO sig.nofpar - 1 DO s.partype[i] := sig.partype[i]; s.parvar[i] := sig.parvar[i] END
+  END AddSignature;
+
   PROCEDURE ThisSignature*(name: ARRAY OF CHAR): Signature;
     VAR s: Signature;
   BEGIN s := sigs;
@@ -287,9 +297,17 @@ MODULE ASB; (* Base of the 65xx assembler: values and the symbol table.
   PROCEDURE NewType*(form, size: INTEGER): Type;
     VAR t: Type;
   BEGIN NEW(t); t.form := form; t.size := size; t.ref := 0; t.len := 0;
-    t.base := NIL; t.fields := NIL; t.name[0] := 0X; t.td := 0; t.out := 0; t.next := NIL;
+    t.base := NIL; t.fields := NIL; t.sig := NIL; t.name[0] := 0X; t.td := 0; t.out := 0; t.next := NIL;
     RETURN t
   END NewType;
+
+  (* a procedure type, without parameters or result as yet *)
+  PROCEDURE NewProcType*(): Type;
+    VAR t: Type; s: Signature;
+  BEGIN t := NewType(Proc, 4); NEW(s); s.name[0] := 0X; s.nofpar := 0; s.restype := NIL;
+    s.next := NIL; t.sig := s;
+    RETURN t
+  END NewProcType;
 
   (* Enter t, made by NewType, as the type called name. *)
   PROCEDURE DeclareType*(t: Type; name: ARRAY OF CHAR);

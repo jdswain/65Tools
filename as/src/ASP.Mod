@@ -402,20 +402,41 @@ MODULE ASP; (* Parser of the 65xx assembler.
   END SkipEols;
 
   (* type = qualident | ARRAY [length] OF type | RECORD fields END
+       | PROCEDURE formals
      fields = [fieldlist {("," | eol) fieldlist}]
      fieldlist = ident {"," ident} ":" type
+     formals = ["(" [[VAR] type {"," [VAR] type}] ")"] [":" type]
      An array without a length is open, for a parameter only; a record
      may run over several lines. INTEGER, LONGINT, REAL and the other
-     basic types are predeclared; others are declared with ".type". *)
-  PROCEDURE TypeSpec(open: BOOLEAN): ASB.Type;
-    VAR t, ft: ASB.Type; names: ARRAY 16 OF ASS.Ident; n, i, len: INTEGER;
+     basic types are predeclared; others are declared with ".type".
+     With formals, the formals of a procedure type, PROCEDURE read. *)
+  PROCEDURE TypeSpec(open, formals: BOOLEAN): ASB.Type;
+    VAR t, ft: ASB.Type; names: ARRAY 16 OF ASS.Ident; n, i, len: INTEGER; var: BOOLEAN;
   BEGIN t := NIL;
-    IF IsName(TRUE) & ASH.Same(ASS.id, "ARRAY") THEN Get; len := -1;
+    IF formals THEN t := ASB.NewProcType();
+      IF sym = ASS.lparen THEN Get;
+        WHILE (sym # ASS.rparen) & ~AtEnd() DO
+          var := sym = ASS.var;
+          IF var THEN Get END;
+          ft := TypeSpec(TRUE, FALSE);
+          IF ft # NIL THEN
+            IF t.sig.nofpar < ASB.maxPar THEN
+              t.sig.partype[t.sig.nofpar] := ft; t.sig.parvar[t.sig.nofpar] := var; INC(t.sig.nofpar)
+            ELSE ASS.Mark("too many parameters")
+            END
+          END;
+          IF sym = ASS.comma THEN Get END
+        END;
+        Check(ASS.rparen, ") expected")
+      END;
+      IF sym = ASS.colon THEN Get; t.sig.restype := TypeSpec(FALSE, FALSE) END
+    ELSIF IsName(TRUE) & ASH.Same(ASS.id, "PROCEDURE") THEN Get; t := TypeSpec(FALSE, TRUE)
+    ELSIF IsName(TRUE) & ASH.Same(ASS.id, "ARRAY") THEN Get; len := -1;
       IF sym = ASS.int THEN len := ASS.ival; Get
       ELSIF ~open THEN ASS.Mark("array length expected")
       END;
       IF IsName(TRUE) & ASH.Same(ASS.id, "OF") THEN Get ELSE ASS.Mark("OF expected") END;
-      ft := TypeSpec(FALSE);
+      ft := TypeSpec(FALSE, FALSE);
       IF ft # NIL THEN
         IF len < 0 THEN t := ASB.NewType(ASB.Array, 6)   (*pointer and length*)
         ELSE t := ASB.NewType(ASB.Array, len * ft.size)
@@ -432,7 +453,7 @@ MODULE ASP; (* Parser of the 65xx assembler.
           IF sym = ASS.comma THEN Get END
         END;
         Check(ASS.colon, ": expected");
-        ft := TypeSpec(FALSE);
+        ft := TypeSpec(FALSE, FALSE);
         IF ft # NIL THEN
           FOR i := 0 TO n - 1 DO ASB.AddField(t, names[i], ft) END
         END;
@@ -458,7 +479,7 @@ MODULE ASP; (* Parser of the 65xx assembler.
     ELSE ASH.Copy(ASS.id, name); Get;
       IF sym = ASS.times THEN Get END;
       Check(ASS.becomes, "= expected");
-      t := TypeSpec(FALSE);
+      t := TypeSpec(FALSE, FALSE);
       IF t # NIL THEN
         IF t.name[0] # 0X THEN ASS.MarkS("a new type expected: ", t.name)
         ELSE ASB.DeclareType(t, name)
@@ -467,29 +488,13 @@ MODULE ASP; (* Parser of the 65xx assembler.
     END
   END TypeDeclaration;
 
-  (* ".proc" name ["(" [VAR] type {"," [VAR] type} ")"] [":" type]
-     declares the Oberon signature of an exported procedure. *)
+  (* ".proc" name formals declares the Oberon signature of an exported
+     procedure. *)
   PROCEDURE Signature;
-    VAR sig: ASB.Signature; var: BOOLEAN; t: ASB.Type;
+    VAR name: ASS.Ident; t: ASB.Type;
   BEGIN
     IF ~IsName(TRUE) THEN ASS.Mark("procedure name expected"); Skip
-    ELSE sig := ASB.NewSignature(ASS.id); Get;
-      IF sym = ASS.lparen THEN Get;
-        WHILE (sym # ASS.rparen) & ~AtEnd() DO
-          var := sym = ASS.var;
-          IF var THEN Get END;
-          t := TypeSpec(TRUE);
-          IF t # NIL THEN
-            IF sig.nofpar < ASB.maxPar THEN
-              sig.partype[sig.nofpar] := t; sig.parvar[sig.nofpar] := var; INC(sig.nofpar)
-            ELSE ASS.Mark("too many parameters")
-            END
-          END;
-          IF sym = ASS.comma THEN Get END
-        END;
-        Check(ASS.rparen, ") expected")
-      END;
-      IF sym = ASS.colon THEN Get; sig.restype := TypeSpec(FALSE) END
+    ELSE ASH.Copy(ASS.id, name); Get; t := TypeSpec(FALSE, TRUE); ASB.AddSignature(name, t.sig)
     END
   END Signature;
 

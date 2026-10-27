@@ -52,13 +52,17 @@ declares with `.type`, which the symbol file describes as ORB does:
         sgn, exp: INTEGER
         sig: ARRAY 29 OF CHAR
     END
+    .type Halt = PROCEDURE (INTEGER, INTEGER)
     .proc Num2Dec(DecForm, Extended, VAR Decimal)
+    .proc SetHaltVector(Halt)
 
 A record's fields are laid out as oc816 lays them out (one larger than a
 byte at an even offset), separated by commas or lines; each record gets a
 type descriptor after the variables, as ORG makes them, so that an
 importer can pass its tag. An array or record value parameter is passed
-by reference, as ORP passes it. A name exported with `*` whose value is a
+by reference, as ORP passes it. A procedure type's formals are written as
+a `.proc`'s; its value is 4 bytes, the address and the bank, in two
+registers. A name exported with `*` whose value is a
 number, not an address (`Inexact* = $10`), is a constant of the module,
 INTEGER or, if it does not fit, LONGINT.
 

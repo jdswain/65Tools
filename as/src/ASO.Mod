@@ -477,7 +477,7 @@ MODULE ASO; (* Output of the 65xx assembler.
      reference, one described before by minus its reference, else its
      form and parts; a declared type or a record gets a reference. *)
   PROCEDURE OutType(t: ASB.Type; VAR ref: INTEGER);
-    VAR f: ASB.Field;
+    VAR f: ASB.Field; i: INTEGER;
   BEGIN
     IF t = NIL THEN TypeByte(ASB.NoTyp)
     ELSIF t.ref > 0 THEN TypeByte(t.ref)
@@ -496,6 +496,20 @@ MODULE ASO; (* Output of the 65xx assembler.
         WHILE f # NIL DO W1(Fld); WString(f.name); OutType(f.type, ref); WNum(f.off); f := f.next END;
         W1(0);   (*end of fields and methods*)
         W1(0)    (*no interfaces*)
+      ELSIF t.form = ASB.Proc THEN
+        W1(0);   (*not a method*)
+        OutType(t.sig.restype, ref);
+        (* the parameters, last one first; an array or record value
+           parameter is passed by reference, read only, as ORP does *)
+        i := t.sig.nofpar;
+        WHILE i > 0 DO DEC(i);
+          IF t.sig.parvar[i] THEN W1(Par); W1(0)
+          ELSIF t.sig.partype[i].form >= ASB.Array THEN W1(Par); W1(1)
+          ELSE W1(Var); W1(0)
+          END;
+          OutType(t.sig.partype[i], ref)
+        END;
+        W1(0)    (*end of parameters*)
       END;
       W1(0)   (*not re-exported*)
     END
