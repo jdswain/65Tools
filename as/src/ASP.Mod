@@ -14,6 +14,7 @@ MODULE ASP; (* Parser of the 65xx assembler.
                     {ELSE IF expression "{" block "}"} [ELSE "{" block "}"]
                 | "{" block "}"
                 | ".proc" ident ["(" [VAR] type {"," [VAR] type} ")"] [":" type]
+                | ".type" ident "=" type
                 | END.
      label      = identdef.
      identdef   = ["."] ident ["*"] [":"].
@@ -25,7 +26,8 @@ MODULE ASP; (* Parser of the 65xx assembler.
                 | ("!" | "~" | "-" | "+" | "<" | ">" | "^") factor.
 
    A "." before a name makes it local to the label last defined, and "*"
-   after a name exports it. As prefix operators "<", ">" and "^" select
+   after a name exports it. A label may be spelled like a mnemonic, a
+   directive, DIV or MOD if "*" or ":" follows it. As prefix operators "<", ">" and "^" select
    the low, high and bank byte of a value. *)
 
   IMPORT ASH, ASC, ASS, ASB, ASG, ASI;
@@ -75,7 +77,7 @@ MODULE ASP; (* Parser of the 65xx assembler.
 
   (* sym is an identifier or a reserved word; ASS.id holds its spelling *)
   PROCEDURE IsWord(): BOOLEAN;
-  BEGIN RETURN (sym = ASS.ident) OR (sym >= ASS.regA)
+  BEGIN RETURN (sym = ASS.ident) OR (sym >= ASS.regA) OR (sym = ASS.div) OR (sym = ASS.mod)
   END IsWord;
 
   (* A name is expected. After a "." any word will do, so that a local
@@ -226,11 +228,11 @@ MODULE ASP; (* Parser of the 65xx assembler.
     END
   END Indirect;
 
-  PROCEDURE Instruction;
-    VAR mnemonic, mode, modifier: INTEGER; local: BOOLEAN;
-  BEGIN mnemonic := sym - ASS.instr; modifier := ASG.MNone; local := FALSE;
+  (* The operands of an instruction, its mnemonic read. *)
+  PROCEDURE Operands(mnemonic: INTEGER);
+    VAR mode, modifier: INTEGER; local: BOOLEAN;
+  BEGIN modifier := ASG.MNone; local := FALSE;
     mode := ASC.mImpl;
-    Get;
     IF sym = ASS.period THEN  (*a modifier, or the "." of a local label*)
       Get;
       IF IsWord() & (ASS.id[1] = 0X) THEN modifier := Modifier(ASS.id[0], FALSE) END;
@@ -259,6 +261,11 @@ MODULE ASP; (* Parser of the 65xx assembler.
       END
     END;
     ASI.Instr(mnemonic, mode, modifier)
+  END Operands;
+
+  PROCEDURE Instruction;
+    VAR mnemonic: INTEGER;
+  BEGIN mnemonic := sym - ASS.instr; Get; Operands(mnemonic)
   END Instruction;
 
   (* --- directives --- *)
@@ -295,10 +302,10 @@ MODULE ASP; (* Parser of the 65xx assembler.
     END
   END Section;
 
-  PROCEDURE Directive;
-    VAR dir, modifier, n: INTEGER;
-  BEGIN dir := sym; modifier := ASG.MNone;
-    Get;
+  (* The rest of a directive, its keyword dir read. *)
+  PROCEDURE DirectiveRest(dir: INTEGER);
+    VAR modifier, n: INTEGER;
+  BEGIN modifier := ASG.MNone;
     IF sym = ASS.period THEN Get;
       IF (sym = ASS.int) & (ASS.ival = 0) THEN modifier := ASG.MZero
       ELSIF (sym = ASS.int) & (ASS.ival = 7) THEN modifier := ASG.MBit7
@@ -339,6 +346,11 @@ MODULE ASP; (* Parser of the 65xx assembler.
     ELSIF dir = ASS.double THEN ASS.Mark("double precision is not supported"); Skip
     ELSE ASS.Mark("directive not implemented"); Skip
     END
+  END DirectiveRest;
+
+  PROCEDURE Directive;
+    VAR dir: INTEGER;
+  BEGIN dir := sym; Get; DirectiveRest(dir)
   END Directive;
 
   (* --- macros --- *)
@@ -382,10 +394,83 @@ MODULE ASP; (* Parser of the 65xx assembler.
 
   (* --- statements --- *)
 
+  (* --- Oberon types and signatures --- *)
+
+  PROCEDURE SkipEols;
+  BEGIN
+    WHILE sym = ASS.eol DO Get END
+  END SkipEols;
+
+  (* type = qualident | ARRAY [length] OF type | RECORD fields END
+     fields = [fieldlist {("," | eol) fieldlist}]
+     fieldlist = ident {"," ident} ":" type
+     An array without a length is open, for a parameter only; a record
+     may run over several lines. INTEGER, LONGINT, REAL and the other
+     basic types are predeclared; others are declared with ".type". *)
+  PROCEDURE TypeSpec(open: BOOLEAN): ASB.Type;
+    VAR t, ft: ASB.Type; names: ARRAY 16 OF ASS.Ident; n, i, len: INTEGER;
+  BEGIN t := NIL;
+    IF IsName(TRUE) & ASH.Same(ASS.id, "ARRAY") THEN Get; len := -1;
+      IF sym = ASS.int THEN len := ASS.ival; Get
+      ELSIF ~open THEN ASS.Mark("array length expected")
+      END;
+      IF IsName(TRUE) & ASH.Same(ASS.id, "OF") THEN Get ELSE ASS.Mark("OF expected") END;
+      ft := TypeSpec(FALSE);
+      IF ft # NIL THEN
+        IF len < 0 THEN t := ASB.NewType(ASB.Array, 6)   (*pointer and length*)
+        ELSE t := ASB.NewType(ASB.Array, len * ft.size)
+        END;
+        t.len := len; t.base := ft
+      END
+    ELSIF IsName(TRUE) & ASH.Same(ASS.id, "RECORD") THEN Get; SkipEols;
+      t := ASB.NewType(ASB.Record, 0);
+      WHILE IsName(FALSE) & (sym # ASS.end) DO
+        n := 0;
+        WHILE IsName(FALSE) & (sym # ASS.end) DO
+          IF n < LEN(names) THEN ASH.Copy(ASS.id, names[n]); INC(n) ELSE ASS.Mark("too many fields") END;
+          Get;
+          IF sym = ASS.comma THEN Get END
+        END;
+        Check(ASS.colon, ": expected");
+        ft := TypeSpec(FALSE);
+        IF ft # NIL THEN
+          FOR i := 0 TO n - 1 DO ASB.AddField(t, names[i], ft) END
+        END;
+        IF sym = ASS.comma THEN Get END;
+        SkipEols
+      END;
+      IF sym = ASS.end THEN Get ELSE ASS.Mark("END expected") END
+    ELSIF IsName(TRUE) THEN t := ASB.ThisType(ASS.id);
+      IF t = NIL THEN ASS.MarkS("unknown type: ", ASS.id) END;
+      Get
+    ELSE ASS.Mark("type expected");
+      IF ~AtEnd() THEN Get END
+    END;
+    RETURN t
+  END TypeSpec;
+
+  (* ".type" ident "=" type declares an Oberon type for the symbol file. *)
+  PROCEDURE TypeDeclaration;
+    VAR name: ASS.Ident; t: ASB.Type;
+  BEGIN
+    IF ~IsName(TRUE) THEN ASS.Mark("type name expected"); Skip
+    ELSIF ASB.ThisType(ASS.id) # NIL THEN ASS.MarkS("type declared twice: ", ASS.id); Skip
+    ELSE ASH.Copy(ASS.id, name); Get;
+      IF sym = ASS.times THEN Get END;
+      Check(ASS.becomes, "= expected");
+      t := TypeSpec(FALSE);
+      IF t # NIL THEN
+        IF t.name[0] # 0X THEN ASS.MarkS("a new type expected: ", t.name)
+        ELSE ASB.DeclareType(t, name)
+        END
+      END
+    END
+  END TypeDeclaration;
+
   (* ".proc" name ["(" [VAR] type {"," [VAR] type} ")"] [":" type]
      declares the Oberon signature of an exported procedure. *)
   PROCEDURE Signature;
-    VAR sig: ASB.Signature; var: BOOLEAN; ref: INTEGER;
+    VAR sig: ASB.Signature; var: BOOLEAN; t: ASB.Type;
   BEGIN
     IF ~IsName(TRUE) THEN ASS.Mark("procedure name expected"); Skip
     ELSE sig := ASB.NewSignature(ASS.id); Get;
@@ -393,27 +478,18 @@ MODULE ASP; (* Parser of the 65xx assembler.
         WHILE (sym # ASS.rparen) & ~AtEnd() DO
           var := sym = ASS.var;
           IF var THEN Get END;
-          IF IsName(TRUE) THEN ref := ASB.TypeRef(ASS.id);
-            IF ref = ASB.NoTyp THEN ASS.MarkS("unknown type: ", ASS.id) END;
+          t := TypeSpec(TRUE);
+          IF t # NIL THEN
             IF sig.nofpar < ASB.maxPar THEN
-              sig.partype[sig.nofpar] := ref; sig.parvar[sig.nofpar] := var; INC(sig.nofpar)
+              sig.partype[sig.nofpar] := t; sig.parvar[sig.nofpar] := var; INC(sig.nofpar)
             ELSE ASS.Mark("too many parameters")
-            END;
-            Get
-          ELSE ASS.Mark("type expected");
-            IF ~AtEnd() THEN Get END
+            END
           END;
           IF sym = ASS.comma THEN Get END
         END;
         Check(ASS.rparen, ") expected")
       END;
-      IF sym = ASS.colon THEN Get;
-        IF IsName(TRUE) THEN sig.restype := ASB.TypeRef(ASS.id);
-          IF sig.restype = ASB.NoTyp THEN ASS.MarkS("unknown type: ", ASS.id) END;
-          Get
-        ELSE ASS.Mark("type expected")
-        END
-      END
+      IF sym = ASS.colon THEN Get; sig.restype := TypeSpec(FALSE) END
     END
   END Signature;
 
@@ -484,12 +560,25 @@ MODULE ASP; (* Parser of the 65xx assembler.
   END Named;
 
   PROCEDURE Statement;
-    VAR ref: ASI.Ref; m: ASI.Macro; name: ASS.Ident; errs: INTEGER;
+    VAR ref: ASI.Ref; m: ASI.Macro; name: ASS.Ident; errs, mnemonic: INTEGER;
   BEGIN
     IF sym = ASS.eol THEN Get
     ELSE errs := ASS.errcnt;
-      IF ASS.IsInstr(sym) THEN Instruction
-      ELSIF ASS.IsDirective(sym) THEN Directive
+      IF ASS.IsInstr(sym) THEN  (*a mnemonic followed by "*" or ":" is a label*)
+        mnemonic := sym - ASS.instr; ASH.Copy(ASS.id, name); Get;
+        IF (sym = ASS.times) OR (sym = ASS.colon) THEN ref := ASI.NewRef(name); Named(ref)
+        ELSE Operands(mnemonic)
+        END
+      ELSIF ASS.IsDirective(sym) THEN  (*so is a directive*)
+        mnemonic := sym; ASH.Copy(ASS.id, name); Get;
+        IF (sym = ASS.times) OR (sym = ASS.colon) THEN ref := ASI.NewRef(name); Named(ref)
+        ELSE DirectiveRest(mnemonic)
+        END
+      ELSIF (sym = ASS.div) OR (sym = ASS.mod) THEN  (*and DIV or MOD*)
+        ASH.Copy(ASS.id, name); Get;
+        IF (sym = ASS.times) OR (sym = ASS.colon) THEN ref := ASI.NewRef(name); Named(ref)
+        ELSE Unexpected
+        END
       ELSIF sym = ASS.ident THEN m := ASI.ThisMacro(ASS.id);
         IF m # NIL THEN MacroCall(m)
         ELSE ref := ASI.NewRef(ASS.id); Get; Named(ref)
@@ -497,6 +586,7 @@ MODULE ASP; (* Parser of the 65xx assembler.
       ELSIF sym = ASS.period THEN Get;
         IF ~IsName(TRUE) THEN ASS.Mark("identifier expected"); Skip
         ELSIF ASH.Same(ASS.id, "proc") THEN Get; Signature
+        ELSIF ASH.Same(ASS.id, "type") THEN Get; TypeDeclaration
         ELSE ref := ASI.NewRef(ASS.id); ref.local := TRUE; Get; Named(ref)
         END
       ELSIF sym = ASS.var THEN Get; Definition(FALSE, FALSE)

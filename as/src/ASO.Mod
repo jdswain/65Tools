@@ -28,12 +28,16 @@ MODULE ASO; (* Output of the 65xx assembler.
 
     (* symbol files *)
     SymVersion = 6; LegacySymVersion = 1;
-    Const = 1; Var = 2; Par = 3; Proc = 10;
+    Const = 1; Var = 2; Par = 3; Fld = 4; Typ = 5; Proc = 10;
+    FirstRef = 14;      (* the first reference ORB gives a described type *)
+    TDSize = 22;        (* bytes of a record's type descriptor *)
 
     RecLen = 16;        (* data bytes of a record in the text formats *)
     MemFill = 0FFH;     (* between the runs of code in a memory file *)
 
   VAR F: Files.File; R: Files.Rider;
+    expList, body: ASB.Object;  (* of the module, WriteSymbols' *)
+    nofExp: INTEGER;
     sum: ARRAY 4 OF LONGINT;   (* of the bytes written, by position in a word *)
     count: LONGINT;            (* bytes written *)
 
@@ -408,14 +412,19 @@ MODULE ASO; (* Output of the 65xx assembler.
 
   (* --- Oberon modules --- *)
 
-  (* The exported symbols, in alphabetical order, which is the order of
+  (* An exported symbol that is a number, not an address: a constant. *)
+  PROCEDURE IsConst(obj: ASB.Object): BOOLEAN;
+  BEGIN RETURN (obj.val.form = ASB.Int) & (obj.val.base = ASB.Abs)
+  END IsConst;
+
+  (* The exported procedures, in alphabetical order, which is the order of
      their export numbers; "_init" is the module body, not an export. *)
   PROCEDURE Exports(VAR n: INTEGER; VAR init: ASB.Object): ASB.Object;
     VAR list, obj, prev, next: ASB.Object; m: INTEGER;
   BEGIN list := Symbols(m); n := 0; init := NIL; prev := NIL; obj := list;
     WHILE obj # NIL DO next := obj.link;
       IF obj.name = "_init" THEN init := obj END;
-      IF obj.expo & (obj.name # "_init") THEN INC(n); prev := obj
+      IF obj.expo & (obj.name # "_init") & ~IsConst(obj) THEN INC(n); prev := obj
       ELSIF prev = NIL THEN list := next
       ELSE prev.link := next
       END;
@@ -428,31 +437,126 @@ MODULE ASO; (* Output of the 65xx assembler.
   BEGIN W1(-ref)
   END TypeByte;
 
-  (* The symbol file, as ORB.Export writes it for a module that exports
-     procedures only. Every export is a procedure; without a ".proc"
-     declaration it has no parameters and no result. key is the
-     checksum that identifies this version of the interface. *)
-  PROCEDURE WriteSymbols(name, modid: ARRAY OF CHAR; exports: ASB.Object;
-      version: INTEGER; VAR key: ARRAY OF INTEGER);
-    VAR obj: ASB.Object; sig: ASB.Signature; exno, i: INTEGER; s: LONGINT;
+  (* The type descriptors of the records declared with ".type", after the
+     variables (the module has no strings), as ORG.GenTDs makes them: the
+     size, the record's own tag and three empty levels of extension, no
+     methods, no pointers. The first words of each are its tag. *)
+  PROCEDURE PlaceTDs(VAR n: INTEGER);
+    VAR t: ASB.Type;
+  BEGIN n := 0; t := ASB.types;
+    WHILE t # NIL DO
+      IF t.form = ASB.Record THEN t.td := ASG.bss.size + n * TDSize; INC(n) END;
+      t := t.next
+    END
+  END PlaceTDs;
+
+  PROCEDURE WriteTDs;
+    VAR t: ASB.Type; i: INTEGER;
+  BEGIN t := ASB.types;
+    WHILE t # NIL DO
+      IF t.form = ASB.Record THEN
+        W2(t.size); W2(t.td); W2(0);
+        FOR i := 1 TO 6 DO W2(0FFFFH) END;
+        W2(0); W2(0FFFFH)
+      END;
+      t := t.next
+    END
+  END WriteTDs;
+
+  (* the tags, which the loader relocates by the module's data address *)
+  PROCEDURE WriteTDFixups(n: INTEGER);
+    VAR t: ASB.Type;
+  BEGIN W4(n); t := ASB.types;
+    WHILE t # NIL DO
+      IF t.form = ASB.Record THEN W2(t.td + 2); W2(0) END;
+      t := t.next
+    END
+  END WriteTDFixups;
+
+  (* A type, as ORB.OutType describes it: a predeclared one by its
+     reference, one described before by minus its reference, else its
+     form and parts; a declared type or a record gets a reference. *)
+  PROCEDURE OutType(t: ASB.Type; VAR ref: INTEGER);
+    VAR f: ASB.Field;
+  BEGIN
+    IF t = NIL THEN TypeByte(ASB.NoTyp)
+    ELSIF t.ref > 0 THEN TypeByte(t.ref)
+    ELSIF t.out > 0 THEN W1(-t.out)
+    ELSE
+      IF (t.name[0] # 0X) OR (t.form = ASB.Record) THEN W1(ref); t.out := ref; INC(ref)
+      ELSE W1(0)
+      END;
+      W1(t.form);
+      IF t.form = ASB.IntF THEN WNum(t.size)
+      ELSIF t.form = ASB.Array THEN OutType(t.base, ref); WNum(t.len); WNum(t.size)
+      ELSIF t.form = ASB.Record THEN
+        TypeByte(ASB.NoTyp);   (*no base type*)
+        WNum(t.td); WNum(0); WNum(t.size); WNum(0);   (*descriptor, level, size, methods*)
+        f := t.fields;
+        WHILE f # NIL DO W1(Fld); WString(f.name); OutType(f.type, ref); WNum(f.off); f := f.next END;
+        W1(0);   (*end of fields and methods*)
+        W1(0)    (*no interfaces*)
+      END;
+      W1(0)   (*not re-exported*)
+    END
+  END OutType;
+
+  (* The symbol file, as ORB.Export writes it: the types declared with
+     ".type", the constants (exported names of numbers), and the
+     procedures. A procedure without a ".proc" declaration has no
+     parameters and no result. key is the checksum that identifies this
+     version of the interface. The exported procedures go to expList
+     (nofExp of them), the module's body to body. *)
+  PROCEDURE WriteSymbols(name, modid: ARRAY OF CHAR; version: INTEGER; VAR key: ARRAY OF INTEGER);
+    VAR obj, list: ASB.Object; sig: ASB.Signature; t: ASB.Type;
+      exno, i, ref, m: INTEGER; s: LONGINT;
   BEGIN
     FOR i := 0 TO 3 DO key[i] := 0 END;
+    expList := NIL; body := NIL; nofExp := 0;
     IF Create(name) THEN
       W4(0); W4(0);   (*the key goes here*)
       WString(modid); W1(version);
-      obj := exports; exno := 1;
+      ref := FirstRef;
+      t := ASB.types;
+      WHILE t # NIL DO t.out := 0; t := t.next END;
+      IF version >= SymVersion THEN
+        t := ASB.types;
+        WHILE t # NIL DO
+          W1(Typ); WString(t.name); OutType(t, ref);
+          W1(0);   (*no pointer types to it*)
+          t := t.next
+        END;
+        list := Symbols(m); obj := list;
+        WHILE obj # NIL DO
+          IF obj.expo & IsConst(obj) THEN
+            W1(Const); WString(obj.name);
+            IF (obj.val.i >= -32768) & (obj.val.i < 32768) THEN TypeByte(4)
+            ELSE OutType(ASB.ThisType("LONGINT"), ref)
+            END;
+            WNum(obj.val.i)
+          END;
+          obj := obj.link
+        END
+      END;
+      (* Exports sorts the symbols again, relinking them *)
+      expList := Exports(nofExp, body);
+      obj := expList; exno := 1;
       WHILE obj # NIL DO
         sig := ASB.ThisSignature(obj.name);
         W1(Const); WString(obj.name);
         W1(0); W1(Proc);   (*an anonymous procedure type*)
         IF version >= SymVersion THEN W1(0) END;   (*not a method*)
         IF sig = NIL THEN TypeByte(ASB.NoTyp)
-        ELSE TypeByte(sig.restype);
-          (* the parameters, last one first *)
+        ELSE OutType(sig.restype, ref);
+          (* the parameters, last one first; an array or record value
+             parameter is passed by reference, read only, as ORP does *)
           i := sig.nofpar;
           WHILE i > 0 DO DEC(i);
-            IF sig.parvar[i] THEN W1(Par) ELSE W1(Var) END;
-            W1(0); TypeByte(sig.partype[i])
+            IF sig.parvar[i] THEN W1(Par); W1(0)
+            ELSIF sig.partype[i].form >= ASB.Array THEN W1(Par); W1(1)
+            ELSE W1(Var); W1(0)
+            END;
+            OutType(sig.partype[i], ref)
           END
         END;
         W1(0);   (*end of parameters*)
@@ -477,16 +581,16 @@ MODULE ASO; (* Output of the 65xx assembler.
      not exported. Addresses in code and in bss are relocated by the
      loader: ASG.RelCode, RelLong and RelData. *)
   PROCEDURE WriteModule(name: ARRAY OF CHAR; legacy: BOOLEAN);
-    VAR text: ASG.Section; exports, init, obj: ASB.Object; sig: ASB.Signature;
-      nofExp, i, version: INTEGER; entry: LONGINT;
+    VAR text: ASG.Section; obj: ASB.Object; sig: ASB.Signature;
+      i, version, nofTD: INTEGER; entry: LONGINT;
       modid: ASS.Ident; smb: ASH.Path; key: ARRAY 4 OF INTEGER;
   BEGIN text := ASG.text;
     ASH.Base(name, modid); ASH.SetExt(name, ".smb", smb);
-    exports := Exports(nofExp, init);
     IF legacy THEN version := LegacySymVersion ELSE version := SymVersion END;
-    WriteSymbols(smb, modid, exports, version, key);
+    PlaceTDs(nofTD);
+    WriteSymbols(smb, modid, version, key);
     (* with no body, an RTL after the code is the entry *)
-    IF init # NIL THEN entry := init.val.i - text.org ELSE entry := text.size END;
+    IF body # NIL THEN entry := body.val.i - text.org ELSE entry := text.size END;
     IF ASG.RelocOverflow() THEN ASS.Error(NIL, 0, "too many relocatable calls", "") END;
     IF (ASS.errcnt = 0) & Create(name) THEN
       WString(modid);
@@ -497,17 +601,17 @@ MODULE ASO; (* Output of the 65xx assembler.
         WString(ASB.imports[i].name); W4(ASB.imports[i].key)
       END;
       W1(0);
-      W4(0);   (*type descriptors*)
+      W4(nofTD * TDSize); WriteTDs;   (*type descriptors*)
       W4(ASG.bss.size);   (*variables*)
       W4(0);   (*strings*)
-      IF init # NIL THEN W4(text.size); WCode(text, 0, text.size)
+      IF body # NIL THEN W4(text.size); WCode(text, 0, text.size)
       ELSE W4(text.size + 1); WCode(text, 0, text.size); W1(6BH)   (*RTL*)
       END;
       (* commands: the procedures without parameters and result *)
-      obj := exports;
+      obj := expList;
       WHILE obj # NIL DO
         sig := ASB.ThisSignature(obj.name);
-        IF (sig = NIL) OR (sig.nofpar = 0) & (sig.restype = ASB.NoTyp) THEN
+        IF (sig = NIL) OR (sig.nofpar = 0) & (sig.restype = NIL) THEN
           WString(obj.name); W4(obj.val.i - text.org)
         END;
         obj := obj.link
@@ -515,11 +619,11 @@ MODULE ASO; (* Output of the 65xx assembler.
       W1(0);
       W4(nofExp + 1); W4(entry);
       (* entries, by export number *)
-      obj := exports;
+      obj := expList;
       WHILE obj # NIL DO W4(obj.val.i - text.org); obj := obj.link END;
       W4(-1);   (*no pointer variables*)
       W4(0); W4(0); W4(0);   (*no fixup chains*)
-      W4(0);   (*no type descriptor fixups*)
+      WriteTDFixups(nofTD);
       IF ~legacy THEN W4(0) END;   (*no method table fixups*)
       W4(ASG.nofReloc);
       FOR i := 0 TO ASG.nofReloc - 1 DO W4(ASG.Reloc(i)) END;

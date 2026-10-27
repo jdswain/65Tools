@@ -48,7 +48,7 @@ run section_if -o out/section_if.hex section_if.s
 check section_if section_if.hex section_if.log
 
 # Oberon modules, with their symbol files
-for t in MathLib TestAsm TestReloc TestImport TestImport6; do
+for t in MathLib TestAsm TestReloc TestImport TestImport6 TestTypes; do
   run $t -o out/$t.816 $t.s
   check $t $t.816 $t.smb $t.log
 done

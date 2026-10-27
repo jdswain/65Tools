@@ -32,7 +32,7 @@ MODULE ASB; (* Base of the 65xx assembler: values and the symbol table.
 
     (* symbol files: object classes and type forms of ORB *)
     Const = 1; Var = 2; Typ = 5; Meth = 9;
-    IntF = 4; RealF = 5; Pointer = 7; Proc = 10; Array = 12; Record = 13; Intfc = 14;
+    IntF* = 4; RealF = 5; Pointer = 7; Proc = 10; Array* = 12; Record* = 13; Intfc = 14;
     NoTyp* = 9;      (* type reference of a procedure without result *)
     maxRef = 64;
 
@@ -69,15 +69,38 @@ MODULE ASB; (* Base of the 65xx assembler: values and the symbol table.
       key*: LONGINT
     END;
 
+    (* an Oberon type, for the symbol file: a predeclared one, LONGINT, an
+       array (len < 0: open) or a record, declared with ".type" or not *)
+    Type* = POINTER TO TypeDesc;
+    Field* = POINTER TO FieldDesc;
+    TypeDesc* = RECORD
+      form*: INTEGER;      (* ORB's: IntF, RealF, ..., Array, Record *)
+      ref*: INTEGER;       (* of a predeclared type, else 0 *)
+      len*: INTEGER;       (* an array's *)
+      size*: INTEGER;
+      base*: Type;         (* an array's elements *)
+      fields*: Field;      (* a record's, in order *)
+      name*: ASS.Ident;    (* declared with ".type", else empty *)
+      td*: INTEGER;        (* a record's descriptor: its offset in the data *)
+      out*: INTEGER;       (* its reference in the symbol file being written *)
+      next*: Type          (* in types *)
+    END;
+    FieldDesc* = RECORD
+      name*: ASS.Ident;
+      type*: Type;
+      off*: INTEGER;
+      next*: Field
+    END;
+
     (* signature of an exported procedure, declared with ".proc" so that
        the symbol file tells Oberon importers how to call it *)
     Signature* = POINTER TO SigDesc;
     SigDesc* = RECORD
       name*: ASS.Ident;
       nofpar*: INTEGER;
-      partype*: ARRAY maxPar OF INTEGER;   (* type references *)
+      partype*: ARRAY maxPar OF Type;
       parvar*: ARRAY maxPar OF BOOLEAN;
-      restype*: INTEGER;
+      restype*: Type;      (* NIL: none *)
       next: Signature
     END;
 
@@ -92,6 +115,9 @@ MODULE ASB; (* Base of the 65xx assembler: values and the symbol table.
     scopes: ARRAY maxScopes OF Object;   (* open scopes, innermost last *)
     nofScopes: INTEGER;
     sigs: Signature;
+    types*: Type;                        (* declared with ".type", in order *)
+    lastType: Type;
+    predef: ARRAY 8 OF Type;             (* BYTE .. SET, LONGINT *)
 
     version: INTEGER;                    (* of the symbol file being read *)
     forms: ARRAY maxRef OF INTEGER;      (* form of each type read from it *)
@@ -244,7 +270,7 @@ MODULE ASB; (* Base of the 65xx assembler: values and the symbol table.
 
   PROCEDURE NewSignature*(name: ARRAY OF CHAR): Signature;
     VAR s: Signature;
-  BEGIN NEW(s); ASH.Copy(name, s.name); s.nofpar := 0; s.restype := NoTyp;
+  BEGIN NEW(s); ASH.Copy(name, s.name); s.nofpar := 0; s.restype := NIL;
     s.next := sigs; sigs := s;
     RETURN s
   END NewSignature;
@@ -256,22 +282,60 @@ MODULE ASB; (* Base of the 65xx assembler: values and the symbol table.
     RETURN s
   END ThisSignature;
 
-  (* Type reference of a basic Oberon type, NoTyp if name is none. The
-     references are those ORB gives the predeclared types, so a symbol
-     file can refer to them without describing them. *)
-  PROCEDURE TypeRef*(name: ARRAY OF CHAR): INTEGER;
-    VAR ref: INTEGER;
-  BEGIN
-    IF ASH.Same(name, "BYTE") THEN ref := 1
-    ELSIF ASH.Same(name, "BOOLEAN") THEN ref := 2
-    ELSIF ASH.Same(name, "CHAR") THEN ref := 3
-    ELSIF ASH.Same(name, "INTEGER") THEN ref := 4
-    ELSIF ASH.Same(name, "REAL") THEN ref := 5
-    ELSIF ASH.Same(name, "SET") THEN ref := 6
-    ELSE ref := NoTyp
+  (* --- types --- *)
+
+  PROCEDURE NewType*(form, size: INTEGER): Type;
+    VAR t: Type;
+  BEGIN NEW(t); t.form := form; t.size := size; t.ref := 0; t.len := 0;
+    t.base := NIL; t.fields := NIL; t.name[0] := 0X; t.td := 0; t.out := 0; t.next := NIL;
+    RETURN t
+  END NewType;
+
+  (* Enter t, made by NewType, as the type called name. *)
+  PROCEDURE DeclareType*(t: Type; name: ARRAY OF CHAR);
+  BEGIN ASH.Copy(name, t.name);
+    IF lastType = NIL THEN types := t ELSE lastType.next := t END;
+    lastType := t
+  END DeclareType;
+
+  (* Add a field of type ft to record t, laid out as ORP lays it out: a
+     field larger than a byte at an even offset. *)
+  PROCEDURE AddField*(t: Type; name: ARRAY OF CHAR; ft: Type);
+    VAR f, g: Field;
+  BEGIN NEW(f); ASH.Copy(name, f.name); f.type := ft; f.next := NIL;
+    IF ft.size > 1 THEN t.size := (t.size + 1) DIV 2 * 2 END;
+    f.off := t.size; t.size := t.size + ft.size;
+    IF t.fields = NIL THEN t.fields := f
+    ELSE g := t.fields;
+      WHILE g.next # NIL DO g := g.next END;
+      g.next := f
+    END
+  END AddField;
+
+  (* The type called name: a basic Oberon type, LONGINT, or one declared
+     with ".type"; NIL if there is none. The basic types carry the
+     references ORB gives the predeclared types, so a symbol file can
+     refer to them without describing them. *)
+  PROCEDURE ThisType*(name: ARRAY OF CHAR): Type;
+    VAR t: Type;
+  BEGIN t := types;
+    WHILE (t # NIL) & (t.name # name) DO t := t.next END;
+    IF t = NIL THEN
+      IF ASH.Same(name, "BYTE") THEN t := predef[1]
+      ELSIF ASH.Same(name, "BOOLEAN") THEN t := predef[2]
+      ELSIF ASH.Same(name, "CHAR") THEN t := predef[3]
+      ELSIF ASH.Same(name, "INTEGER") THEN t := predef[4]
+      ELSIF ASH.Same(name, "REAL") THEN t := predef[5]
+      ELSIF ASH.Same(name, "SET") THEN t := predef[6]
+      ELSIF ASH.Same(name, "LONGINT") THEN t := predef[7]
+      END
     END;
-    RETURN ref
-  END TypeRef;
+    RETURN t
+  END ThisType;
+
+  PROCEDURE Predef(ref, form, size: INTEGER);
+  BEGIN predef[ref] := NewType(form, size); predef[ref].ref := ref
+  END Predef;
 
   (* --- symbol files --- *)
 
@@ -463,7 +527,7 @@ MODULE ASB; (* Base of the 65xx assembler: values and the symbol table.
   BEGIN
     FOR h := 0 TO HashSize - 1 DO hash[h] := NIL END;
     topScope := NewScope(); scopes[0] := topScope; nofScopes := 1;
-    nofImports := 0; sigs := NIL
+    nofImports := 0; sigs := NIL; types := NIL; lastType := NIL
   END Init;
 
 BEGIN
@@ -472,5 +536,9 @@ BEGIN
   Enter("false", 0); Enter("true", 1);
   Enter("no", 0); Enter("yes", 1);
   Enter("__65AS__", 100);  (* version 0.1.0 as major * 10000 + minor * 100 + patch *)
+  (* sizes of oc816's: ORG.IntSize, LongSize, RealSize, SetSize *)
+  Predef(1, 1, 1); Predef(2, 2, 1); Predef(3, 3, 1); Predef(4, IntF, 2);
+  Predef(5, RealF, 4); Predef(6, 6, 2);
+  predef[7] := NewType(IntF, 4);   (* LONGINT: no reference, described where used *)
   Init
 END ASB.

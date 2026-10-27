@@ -43,6 +43,25 @@ A procedure is exported with `*` and declared to Oberon importers with
 compiler's registers, R0 at `$02` upward, and a result goes back in R0
 (`../oc/doc/DP.md`).
 
+The types of a `.proc` are BYTE, BOOLEAN, CHAR, INTEGER, LONGINT, REAL,
+SET, `ARRAY OF T` (open, for a parameter) and the types the module
+declares with `.type`, which the symbol file describes as ORB does:
+
+    .type Extended = ARRAY 5 OF INTEGER
+    .type Decimal = RECORD
+        sgn, exp: INTEGER
+        sig: ARRAY 29 OF CHAR
+    END
+    .proc Num2Dec(DecForm, Extended, VAR Decimal)
+
+A record's fields are laid out as oc816 lays them out (one larger than a
+byte at an even offset), separated by commas or lines; each record gets a
+type descriptor after the variables, as ORG makes them, so that an
+importer can pass its tag. An array or record value parameter is passed
+by reference, as ORP passes it. A name exported with `*` whose value is a
+number, not an address (`Inexact* = $10`), is a constant of the module,
+INTEGER or, if it does not fit, LONGINT.
+
 Addresses in a module are relocated by the loader (OS16's ModuleManager
 and tools/mklink.py): a label in `text` or `bss` is relative to the
 module's code or data, and stays so plus or minus a number; the difference
@@ -125,6 +144,10 @@ Language:
 - `end` ends the source only on a line of its own; elsewhere it is a name
   (`operators.s` has a label `end`).
 - Names after a `.` may be spelled like a keyword (`Out.Char`, `.loop`).
+- A label may be spelled like a mnemonic, a directive, `DIV` or `MOD` when
+  `*` or `:` follows it (`Add*:`, `Long:`), so that an Oberon procedure can
+  have such a name; it is referred to as `Module.Add` by an importer.
+- `.type` and exported constants, for Oberon importers (above).
 - `dpage` is honoured: an address in the page it points to is assembled
   direct (`816.s` expects this).
 - `(addr)` and `[addr]` become direct page forms when they fit;
