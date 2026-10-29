@@ -7,7 +7,10 @@ MODULE L11_FarLocal;
    kernel's variables there and read back other than a VAR parameter
    saw. And a procedure's start stores its parameters only, not into its
    locals after them (LoadEx's, in ModuleManager, where it was found:
-   past 255 bytes). *)
+   past 255 bytes). And dp,X's offset, S + v less the direct page's
+   place, added without the carry of the first sum: with S above the
+   page (a process's banked stack) it was a byte high, and a VAR
+   parameter, at the true address, read another value. *)
   IMPORT Out;
 
   TYPE Big = RECORD pad: ARRAY 300 OF BYTE; x, y: INTEGER END;
