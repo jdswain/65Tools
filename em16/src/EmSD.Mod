@@ -72,10 +72,10 @@ MODULE EmSD; (* The SoC's microSD slot in SPI mode, rtl/sd_spi.v, with an
 
   (* CRC16-CCITT of buf, as a read sends it *)
   PROCEDURE Crc16(): INTEGER;
-    VAR n, b, c, v: INTEGER;
+    VAR n, b, c: INTEGER;
   BEGIN c := 0;
     FOR n := 0 TO blockSize - 1 DO
-      v := buf[n]; c := EOR(c, v * 100H);     (* not ASL(buf[n], 8): a BYTE *)
+      c := EOR(c, ASL(buf[n], 8));
       FOR b := 0 TO 7 DO
         IF ODD(c DIV 8000H) THEN c := EOR(AND(ASL(c, 1), 0FFFFH), 1021H)
         ELSE c := AND(ASL(c, 1), 0FFFFH)
