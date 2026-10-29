@@ -78,7 +78,8 @@ MODULE EmHost; (* The host side of em16: standard output and error, the
   BEGIN RETURN 0
   END FileExists;
 
-  (* Disk images, by number: 0 and 1 the floppy drives, 2 the SCSI disk.
+  (* Disk images, by number: 0 and 1 the floppy drives, 2 the SCSI disk,
+     3 the SD card.
      Open returns 0 failed, 1 read-write, 2 read-only. *)
   PROCEDURE DiskOpen*(drive: INTEGER; name: ARRAY OF CHAR): INTEGER;
   BEGIN RETURN 0

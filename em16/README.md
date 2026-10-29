@@ -119,7 +119,7 @@ have 1 MB, its symbol table 200000 symbols.
 ## The SoC (-fpga)
 
     em16 -fpga [-bootrom rom.bin] [-font font.hex] [-video] [-fbdump ppm] [-prof file cycles]
-               [-disk0 img] [-disk1 img] [-wd1793] [-scsi img]
+               [-disk0 img] [-disk1 img] [-wd1793] [-scsi img] [-sd img]
                [-adbkey code] [-adbmouse dx dy] [file ...]
 
 `-fpga` emulates the SoC of `../../Verilog65C816/fpga` as its RTL
@@ -240,6 +240,13 @@ engine). The comments at the top of `Em82077.Mod`, `EmSCSI.Mod` and
   then a write to register 5, send, or 7, initiator receive) asks for
   each byte with DRQ while the phase matches; EOP sets End of DMA, and
   the target changing phase first interrupts.
+- **SD card**, `-sd`: an SDHC card in the microSD slot (`rtl/sd_spi.v`,
+  `$02C0`), its blocks the image's from block 0. The controller is the
+  RTL's, an access to DATA or NEXT waiting for the exchange running, which
+  takes 16 * (DIVIDER + 1) + 1 cycles; the card is the Verilog
+  repository's `sim/sd_card_model.v`: CMD0 and CMD8 with their CRCs, CMD9
+  (the image's size), CMD10, CMD12, CMD13, CMD16, CMD17, CMD18, CMD24,
+  CMD25, CMD55 and ACMD41, CMD58. Without `-sd` the slot reads `$FF`.
 
 `tools/mkdisk.sh` makes FAT images with the Mac's `hdiutil`, and opens
 them in the Finder to copy files in and out, as the floppy images were:
@@ -289,7 +296,11 @@ same ROM prints the same on the RTL's SoC simulation. `test/expand.sh` does
 the same for colour expansion (`test/expand.s`): 1-bit glyphs of widths 4 to
 16, odd and even destinations, glyph rows going up the screen, a negative
 source stride, background and transparent, OR and XOR, and fill winning; it
-too matches the RTL. The oc816 golden suite (`../oc`, make
+too matches the RTL. `test/sd.sh` drives the SD card (`test/sd.s`): the
+card's start-up, the CSD, block reads with NEXT, a block written and read
+back, CMD18 with CMD12 and CMD25; a model in the script checks what it
+prints and the image file afterwards, and the RTL's SoC simulation with
+its card model prints the same. The oc816 golden suite (`../oc`, make
 test_self), `as/test816`, OS16's tests and Business BASIC's run on em16
 -fpga.
 

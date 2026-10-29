@@ -159,8 +159,8 @@ void EmHost__Report(int64_t cycles, int hex) {
 
 /* --- disk images --- */
 
-/* 0 and 1 the floppy drives, 2 the SCSI disk */
-#define NDISK 3
+/* 0 and 1 the floppy drives, 2 the SCSI disk, 3 the SD card */
+#define NDISK 4
 static FILE *disk[NDISK];
 
 static void cname(const char *name, int len, char *path, int size) {

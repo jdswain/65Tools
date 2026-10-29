@@ -5,11 +5,12 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
    em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin]
         [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-prof file cycles] [-test-pattern]
         [-console] [-disk0 file] [-disk1 file] [-wd1793]
-        [-scsi file] [-adbkey code] [-adbmouse dx dy] file ...
+        [-scsi file] [-sd file] [-adbkey code] [-adbmouse dx dy] file ...
 
    On the default machine and under -fpga the floppy disks are the
    82077AA's, or the WD1793's with -wd1793, and -scsi puts a disk at ID 0
-   on the SCSI bus; the L28's are its WD1793's. Under -fpga, -adbkey
+   on the SCSI bus; -sd puts a card in the microSD slot, an SDHC card of
+   the file's raw blocks. The L28's are its WD1793's. Under -fpga, -adbkey
    holds an ADB key code down from power on (the keyboard reports it at
    the first Talk), as a key held while the board starts, and -adbmouse
    moves the mouse dx right and dy down from power on, reported at the
@@ -23,7 +24,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
      EmLoad   ELF loading, traps     EmHost  the host (C side: EmHost_rt.c)
      EmUART EmVIA EmFDC EmL28 EmVideo EmLCD  the devices *)
 
-  IMPORT Env, Files, EmHost, EmMem, EmCPU, EmLoad, EmFDC, Em82077, EmSCSI, EmADB, EmL28, EmVideo, EmLCD, EmCore, EmSoC, EmHarte;
+  IMPORT Env, Files, EmHost, EmMem, EmCPU, EmLoad, EmFDC, Em82077, EmSCSI, EmSD, EmADB, EmL28, EmVideo, EmLCD, EmCore, EmSoC, EmHarte;
 
   VAR
     trace, videoEnabled, testPattern, consoleMode, wantFpga, wantL28, bad: BOOLEAN;
@@ -110,13 +111,15 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       ELSIF Equal(arg, "-wd1793") THEN INC(index)
       ELSIF Equal(arg, "-scsi") & (index + 1 < n) THEN Env.Arg(index + 1, val);
         IF EmSCSI.Mount(val) THEN END; INC(index, 2)
+      ELSIF Equal(arg, "-sd") & (index + 1 < n) THEN Env.Arg(index + 1, val);
+        IF EmSD.Mount(val) THEN END; INC(index, 2)
       ELSIF Equal(arg, "-console") THEN consoleMode := TRUE; INC(index)
       ELSIF Equal(arg, "-adbkey") & (index + 1 < n) THEN Env.Arg(index + 1, val);
         IF nAdbKeys < LEN(adbKeys) THEN adbKeys[nAdbKeys] := Number(val); INC(nAdbKeys) END; INC(index, 2)
       ELSIF Equal(arg, "-adbmouse") & (index + 2 < n) THEN
         Env.Arg(index + 1, val); adbDx := Number(val); Env.Arg(index + 2, val); adbDy := Number(val); INC(index, 3)
       ELSIF Equal(arg, "-?") THEN
-        ErrStr("Usage: em16 [-t] [-tfrom addr skip count] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-prof file cycles] [-test-pattern] [-console] [-disk0 file] [-disk1 file] [-wd1793] [-scsi file] [-adbkey code] [-adbmouse dx dy] file ...");
+        ErrStr("Usage: em16 [-t] [-tfrom addr skip count] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-prof file cycles] [-test-pattern] [-console] [-disk0 file] [-disk1 file] [-wd1793] [-scsi file] [-sd file] [-adbkey code] [-adbmouse dx dy] file ...");
         EmHost.Ln(EmHost.err); bad := TRUE
       ELSE ErrStr("Invalid: option '"); ErrStr(arg); ErrStr("'"); EmHost.Ln(EmHost.err); bad := TRUE
       END
