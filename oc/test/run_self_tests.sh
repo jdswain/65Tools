@@ -120,7 +120,7 @@ for lvl in "${LEVELS[@]}"; do
     if ! python3 "$MKFLOPPY" -d . -x "$(echo $KERNEL | tr ' ' ,)" -m "$bn" -n "RUN.TXT=$bn" -S KERNEL.IMG boot.img 2> floppy.err; then
       echo "FAIL  $bn (floppy: $(cat floppy.err))"; FAIL=$((FAIL + 1)); continue
     fi
-    full="$(echo "" | perl -e "alarm $TIMEOUT_SECS; exec @ARGV" "$EM16" -fpga -bootrom boot.rom -disk0 boot.img 2>/dev/null | tr -d '\r')"
+    full="$(perl -e "alarm $TIMEOUT_SECS; exec @ARGV" "$EM16" -fpga -bootrom boot.rom -disk0 boot.img < /dev/null 2>/dev/null | tr -d '\r')"
     [ $? -eq 142 ] && { echo "FAIL  $bn (timeout)"; FAIL=$((FAIL + 1)); continue; }
     # Output from Out's "OK", as the kernel starts, up to em16's statistics
     # (the blank line before "Executed"): what the goldens capture.
