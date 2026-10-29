@@ -83,6 +83,7 @@ test: $(TARGET)
 	@sh test/dma.sh
 	@sh test/timer.sh
 	@sh test/pattern.sh
+	@sh test/expand.sh
 	@sh test/romsize.sh
 	@sh test/banked.sh
 

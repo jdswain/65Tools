@@ -150,7 +150,7 @@ rather than em16's default machine:
   the Verilog repository's `fpga/rom/font_st8x16.hex` (or `-font`). The
   font comes from EmuTOS and is GPL v2, so it is read, not copied here;
 - the blitter (`rtl/blitter.v`) as its test bench's reference model
-  defines it, its 8x8 patterns included, its writes dropping the cache
+  defines it, its 8x8 patterns and 1-bit expansion included, its writes dropping the cache
   lines they touch;
 - the ADB host with a keyboard and a mouse that the `-video` window
   feeds. A click in the window captures the mouse, as a virtual
@@ -285,7 +285,11 @@ stack of the board's 65C816. `test/pattern.sh` draws with the blitter's
 patterns (`test/pattern.s`): odd left and right edges, copy, OR, XOR and
 BIC, fill set as well, a transparent colour, and a PATTERN write while
 busy; a model in the script, from the definition, checks every pixel. The
-same ROM prints the same on the RTL's SoC simulation. The oc816 golden suite (`../oc`, make
+same ROM prints the same on the RTL's SoC simulation. `test/expand.sh` does
+the same for colour expansion (`test/expand.s`): 1-bit glyphs of widths 4 to
+16, odd and even destinations, glyph rows going up the screen, a negative
+source stride, background and transparent, OR and XOR, and fill winning; it
+too matches the RTL. The oc816 golden suite (`../oc`, make
 test_self), `as/test816`, OS16's tests and Business BASIC's run on em16
 -fpga.
 

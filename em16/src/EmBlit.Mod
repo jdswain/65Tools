@@ -8,9 +8,11 @@ MODULE EmBlit; (* The SoC's blitter, rtl/blitter.v: copies or fills a
      $04-$06 DST   destination pixel address $0E-$0F HEIGHT
      $08-$09 SRC_STRIDE, signed              $10 OP     low 4 bits
      $0A-$0B DST_STRIDE, signed              $11 COLOUR fill, transparent<<4
-     $12 CONTROL   write: bit 0 start, 1 fill, 2 transparent, 3 pattern
-                   read: bit 7 busy, bits 3-1 as written
+     $12 CONTROL   write: bit 0 start, 1 fill, 2 transparent, 3 pattern,
+                          4 expand
+                   read: bit 7 busy, bits 4-1 as written
      $13 PAT_Y     bits 2-0: the pattern row for the first line
+     $14 BACKGROUND  low nibble: the background when expanding
      $20-$3F PATTERN  8 x 8 pixels, row r in bytes 4r..4r+3, the even pixel
                    of a byte in its low nibble
 
@@ -18,6 +20,12 @@ MODULE EmBlit; (* The SoC's blitter, rtl/blitter.v: copies or fills a
    its column the destination pixel address MOD 8, its row PAT_Y for the
    first line and one more, MOD 8, for each line after; on the screen that
    is x MOD 8, and PAT_Y = top MOD 8 aligns it to y.
+
+   With expand set (fill and pattern win over it) the source is 1 bit a
+   pixel, as a font's glyphs: SRC is a byte address, SRC_STRIDE is in bytes,
+   and a line's pixel x is bit 7 - x MOD 8 of byte SRC + x DIV 8. A set bit
+   is COLOUR's low nibble, a clear one BACKGROUND, or with transparent set
+   leaves the destination alone. SDRAM is 8 MB: bit 23 of SRC is ignored.
 
    A pixel address is twice the byte address, plus one for the high
    nibble. Each line is read whole before it is written, as the test
@@ -27,17 +35,20 @@ MODULE EmBlit; (* The SoC's blitter, rtl/blitter.v: copies or fills a
 
    It stays busy as long as on the board: a model fitted to the test
    bench's 409 timed blits (median error 6%) from the bursts and words
-   each line reads and writes. The pixels change when it finishes. *)
+   each line reads and writes; expanding blits fitted to 563 more (median
+   4%), counting the words actually written, since a transparent glyph
+   skips the empty ones. The pixels change when it finishes. *)
 
   IMPORT EmSDRAM;
 
   VAR
     src, dst, srcStride, dstStride, width, height, op, colour: INTEGER;
-    paty: INTEGER;
-    fill, trans, patt, busy: BOOLEAN;
+    paty, bg: INTEGER;
+    fill, trans, patt, expand, busy: BOOLEAN;
     pat: ARRAY 32 OF BYTE;
     endTime: LONGINT;
     line: ARRAY 2048 OF INTEGER;
+    bits: ARRAY 2048 OF BOOLEAN;      (* expanding: the line's source bits *)
 
   PROCEDURE GetPixel(p: INTEGER): INTEGER;
     VAR b, r: INTEGER;
@@ -52,6 +63,15 @@ MODULE EmBlit; (* The SoC's blitter, rtl/blitter.v: copies or fills a
     IF ODD(p) THEN b := b MOD 16 + v * 16 ELSE b := AND(b, 0F0H) + v END;
     EmSDRAM.Poke(a, b); EmSDRAM.Invalidate(a)
   END SetPixel;
+
+  (* Bit x of a 1 bit a pixel line at byte address s, the leftmost in bit 7. *)
+  PROCEDURE GetBit(s, x: INTEGER): BOOLEAN;
+  BEGIN RETURN ODD(LSR(EmSDRAM.Peek(AND(s + x DIV 8, 7FFFFFH)), 7 - x MOD 8))
+  END GetBit;
+
+  PROCEDURE Expanding(): BOOLEAN;
+  BEGIN RETURN expand & ~fill & ~patt
+  END Expanding;
 
   PROCEDURE Rop(s, d: INTEGER): INTEGER;
     VAR r, b, sb, db: INTEGER;
@@ -71,14 +91,34 @@ MODULE EmBlit; (* The SoC's blitter, rtl/blitter.v: copies or fills a
   BEGIN RETURN (a + b - 1) DIV b
   END Ceil;
 
+  (* The destination words an expanding line writes: a word is skipped when
+     every one of its pixels is transparent. *)
+  PROCEDURE Writes(s, d: INTEGER): INTEGER;
+    VAR x, n, last, wd: INTEGER;
+  BEGIN
+    IF ~trans THEN n := Ceil(AND(d, 7) + width, 8)
+    ELSE n := 0; last := -1;
+      FOR x := 0 TO width - 1 DO
+        wd := (AND(d, 7) + x) DIV 8;
+        IF (wd # last) & GetBit(s, x) THEN INC(n); last := wd END
+      END
+    END;
+    RETURN n
+  END Writes;
+
   (* The cycles the blit takes on the board. *)
   PROCEDURE Cost(): LONGINT;
     VAR y, s, d, c: INTEGER; t: LONGINT;
   BEGIN t := 25;
     FOR y := 0 TO height - 1 DO
       s := AND(src + y * Signed16(srcStride), 0FFFFFFH); d := AND(dst + y * Signed16(dstStride), 0FFFFFFH);
-      c := 43 * Ceil(AND(d, 31) + width, 32) + 14 * Ceil(AND(d, 7) + width, 8) - 21;
-      IF ~fill & ~patt THEN c := c + 19 * Ceil(AND(s, 31) + width, 32) END;
+      IF Expanding() THEN
+        c := 32 * Ceil(AND(d, 31) + width, 32)
+          + 20 * Ceil(AND(s, 15) + Ceil(AND(d, 7) + width, 8), 16) - 10 + 14 * Writes(s, d)
+      ELSE
+        c := 43 * Ceil(AND(d, 31) + width, 32) + 14 * Ceil(AND(d, 7) + width, 8) - 21;
+        IF ~fill & ~patt THEN c := c + 19 * Ceil(AND(s, 31) + width, 32) END
+      END;
       IF c < 1 THEN c := 1 END;
       t := t + c
     END;
@@ -86,20 +126,24 @@ MODULE EmBlit; (* The SoC's blitter, rtl/blitter.v: copies or fills a
   END Cost;
 
   PROCEDURE Blit;
-    VAR x, y, s, d, k, p: INTEGER;
-  BEGIN
+    VAR x, y, s, d, k, p: INTEGER; ex: BOOLEAN;
+  BEGIN ex := Expanding();
     FOR y := 0 TO height - 1 DO
       s := src + y * Signed16(srcStride); d := dst + y * Signed16(dstStride);
       FOR x := 0 TO width - 1 DO
         IF patt THEN p := pat[(paty + y) MOD 8 * 4 + AND(d + x, 7) DIV 2];
           IF ODD(d + x) THEN line[x] := p DIV 16 ELSE line[x] := p MOD 16 END
         ELSIF fill THEN line[x] := colour MOD 16
+        ELSIF ex THEN bits[x] := GetBit(s, x);
+          IF bits[x] THEN line[x] := colour MOD 16 ELSE line[x] := bg END
         ELSE line[x] := GetPixel(s + x)
         END
       END;
       k := colour DIV 16;
       FOR x := 0 TO width - 1 DO p := line[x];
-        IF ~trans OR (p # k) THEN SetPixel(d + x, Rop(p, GetPixel(d + x))) END
+        IF ~trans OR ex & bits[x] OR ~ex & (p # k) THEN
+          SetPixel(d + x, Rop(p, GetPixel(d + x)))
+        END
       END
     END
   END Blit;
@@ -121,7 +165,8 @@ MODULE EmBlit; (* The SoC's blitter, rtl/blitter.v: copies or fills a
     VAR r: INTEGER;
   BEGIN Tick(now); reg := AND(reg, 3FH);
     IF reg = 12H THEN r := 0;
-      IF busy THEN r := 80H END; IF patt THEN r := r + 8 END;
+      IF busy THEN r := 80H END; IF expand THEN r := r + 16 END;
+      IF patt THEN r := r + 8 END;
       IF trans THEN r := r + 4 END; IF fill THEN r := r + 2 END
     ELSIF reg = 13H THEN r := paty
     ELSIF reg >= 20H THEN r := pat[reg - 20H]
@@ -145,8 +190,10 @@ MODULE EmBlit; (* The SoC's blitter, rtl/blitter.v: copies or fills a
       | 10H: op := v
       | 11H: colour := v
       | 13H: paty := AND(v, 7)
+      | 14H: bg := AND(v, 15)
       | 12H:
           fill := ODD(v DIV 2); trans := ODD(v DIV 4); patt := ODD(v DIV 8);
+          expand := ODD(v DIV 16);
           IF ODD(v) & (width # 0) & (height # 0) THEN busy := TRUE; endTime := now + Cost() END
       ELSE
       END
@@ -155,7 +202,8 @@ MODULE EmBlit; (* The SoC's blitter, rtl/blitter.v: copies or fills a
 
   PROCEDURE Reset*;
   BEGIN src := 0; dst := 0; srcStride := 0; dstStride := 0; width := 0; height := 0;
-    op := 3; colour := 0; paty := 0; fill := FALSE; trans := FALSE; patt := FALSE; busy := FALSE
+    op := 3; colour := 0; paty := 0; bg := 0; fill := FALSE; trans := FALSE; patt := FALSE;
+    expand := FALSE; busy := FALSE
   END Reset;
 
 BEGIN Reset
