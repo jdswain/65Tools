@@ -6,7 +6,7 @@
 # Compiles the sources of ../src with oc816 against OS16's kernel (its
 # Files and Out; Env, here, gives the arguments, which Seed sets) and
 # boots OS16 on em16 -fpga from a floppy with sample.s, the assembler's
-# modules and RUN.TXT: Seed, AS (which assembles sample.s into the files
+# modules and /Library/Startup.txt: Seed, AS (which assembles sample.s into the files
 # sample.bin and sample.lst on the floppy) and Dump (which prints them).
 # The output file and the listing must equal those of the host assembler
 # ../../bin/as. Name the tools with OC816, EM16, AS and OS16B (OS16's
@@ -21,7 +21,7 @@ OS16B=$(abs "${OS16B:-../../../OS16/build}")
 for t in "$OC816" "$EM16" "$AS"; do
   [ -x "$t" ] || { echo "test816 skipped: $t not found"; exit 0; }
 done
-[ -f "$OS16B/KERNEL.IMG" ] || { echo "test816 skipped: no OS16 kernel in $OS16B (cd ../../../OS16 && make)"; exit 0; }
+[ -f "$OS16B/Kernel.img" ] || { echo "test816 skipped: no OS16 kernel in $OS16B (cd ../../../OS16 && make)"; exit 0; }
 KERNEL=$(cat "$OS16B/KERNEL.TXT")
 
 MODS="ASC ASH ASS ASB ASG ASL ASI ASP ASO"
@@ -30,7 +30,7 @@ cp Env.Mod Dump.Mod ../src/*.Mod sample.s out/
 python3 mkseed.py sample.s sample.bin && mv Seed.Mod out/
 cd out || exit 1
 for k in $KERNEL; do cp "$OS16B/$k.smb" .; done
-cp "$OS16B/KERNEL.IMG" "$OS16B/boot.rom" .
+cp "$OS16B/Kernel.img" "$OS16B/boot.rom" .
 
 # compile, in order of import
 for m in Env $MODS Seed AS Dump; do
@@ -43,8 +43,8 @@ done
 # run: Startup loads Seed, which sets the arguments, AS, which assembles,
 # and Dump, which prints the results
 python3 ../../../../OS16/tools/mkfloppy.py -d . -x "$(echo $KERNEL | tr ' ' ,)" -m Seed -m AS -m Dump \
-  -n "RUN.TXT=Seed AS Dump" -S KERNEL.IMG boot.img sample.s || exit 1
-echo "" | perl -e 'alarm 300; exec @ARGV' "$EM16" -fpga -bootrom boot.rom -disk0 boot.img 2>&1 | tr -d '\r' > em16.log
+  -n "Library/Startup.txt=Seed AS Dump" -L Kernel.img boot.img sample.s || exit 1
+perl -e 'alarm 300; exec @ARGV' "$EM16" -fpga -bootrom boot.rom -disk0 boot.img < /dev/null 2>&1 | tr -d '\r' > em16.log
 sed -n '/^--- output$/,/^--- listing$/p' em16.log | sed '1d;$d' > sample.hex
 sed -n '/^--- listing$/,/^--- end$/p' em16.log | sed '1d;$d' > sample.lst
 
