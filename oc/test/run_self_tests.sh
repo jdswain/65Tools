@@ -13,7 +13,7 @@
 #
 # Each test runs on OS16, booted as on the board: em16 -fpga with OS16's
 # boot ROM and a floppy (OS16/tools/mkfloppy.py) holding the kernel image,
-# /Library/Startup.txt naming the test, and the test's module with the modules it
+# /Library/Settings/Startup.txt naming the test, and the test's module with the modules it
 # imports. OS16 must be built first (cd ../../OS16 && make): the tests link
 # to the kernel's modules (Out, HeapManager, ...) by its symbol files, and
 # their output is what follows Out's "OK" as the kernel starts.
@@ -117,7 +117,7 @@ for lvl in "${LEVELS[@]}"; do
       FAIL=$((FAIL + 1)); continue
     fi
     [ -f "$bn.816" ] || { echo "SKIP  $bn (no .816)"; SKIP=$((SKIP + 1)); continue; }
-    if ! python3 "$MKFLOPPY" -d . -x "$(echo $KERNEL | tr ' ' ,)" -m "$bn" -n "Library/Startup.txt=$bn" -L Kernel.img boot.img 2> floppy.err; then
+    if ! python3 "$MKFLOPPY" -d . -x "$(echo $KERNEL | tr ' ' ,)" -m "$bn" -n "Library/Settings/Startup.txt=$bn" -L Kernel.img boot.img 2> floppy.err; then
       echo "FAIL  $bn (floppy: $(cat floppy.err))"; FAIL=$((FAIL + 1)); continue
     fi
     full="$(perl -e "alarm $TIMEOUT_SECS; exec @ARGV" "$EM16" -fpga -bootrom boot.rom -disk0 boot.img < /dev/null 2>/dev/null | tr -d '\r')"
