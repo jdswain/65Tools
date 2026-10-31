@@ -14,9 +14,12 @@ MODULE EmSDRAM; (* The SoC's 8 MB of SDRAM and the cache in front of it.
    A miss fills its line from the port in 15 cycles more, 18 in all.
 
    The SDRAM controller (rtl/sdram_burst.v) serves the display first. It
-   reads each of the 480 lines shown, at the start of the 800 cycle line
-   before, in bursts that hold the port for about 210 cycles (105 in
-   text mode, which reads half as much); and it refreshes every 190
+   reads each of the 768 lines shown, at the start of the line before
+   (1344 pixels at 64.8 MHz, 523 of these cycles), in bursts that hold
+   the port for about 137 cycles (69 in text mode, which reads half as
+   much): the share of a line that 640 x 480's took, 210 of 800, as the
+   SoC leaves the CPU a slot between its bursts and is little slower at
+   1024 x 768 (in simulation, by some 2%); and it refreshes every 190
    cycles, for 6. A fill or a store waits for these; a store is still
    acknowledged at once, but the next waits for it to finish. Which rows
    are open, which would add a cycle or two, is not modelled.
@@ -28,7 +31,7 @@ MODULE EmSDRAM; (* The SoC's 8 MB of SDRAM and the cache in front of it.
   CONST
     size* = 800000H;
     hitHeld = 1; hit = 3; fill = 15; portBusy = 10;
-    lineTime = 800; lines = 525; shown = 480; fetchGraphics = 210; fetchText = 105;
+    lineTime = 523; lines = 806; shown = 768; fetchGraphics = 137; fetchText = 69;
     refreshTime = 190; refreshBusy = 6;
     (* On the board the core starts once the SDRAM is initialised, 5088
        cycles after reset, by when the display and refresh have been

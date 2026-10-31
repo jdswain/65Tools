@@ -1,4 +1,4 @@
-/* EmCocoa.m - the display windows of em16: the 640 x 480 framebuffer of
+/* EmCocoa.m - the display windows of em16: the 1024 x 768 framebuffer of
    the FPGA SoC (-video) and the L28's 800 x 480 RA8889 LCD (-console).
 
    The Cocoa event loop runs on the main thread and the CPU, Em16.CpuThread,
@@ -62,7 +62,7 @@ static void key_up(int kc) { kc = adb_code(kc); if (EmHost__adb) EmADB__KeyUp(kc
 static void mouse_move(int dx, int dy) { if (EmHost__adb) EmADB__MouseMove(dx, dy); else EmVIA__AdbMouseMove(dx, dy); }
 static void mouse_button(int p) { if (EmHost__adb) EmADB__MouseButton(p); else EmVIA__AdbMouseButton(p); }
 
-enum { videoWidth = 640, videoHeight = 480, videoScale = 2, lcdWidth = 800, lcdHeight = 480 };
+enum { videoWidth = 1024, videoHeight = 768, videoScale = 1, videoTextBpr = 256, lcdWidth = 800, lcdHeight = 480 };
 
 static volatile int cpu_done;   /* the CPU thread has returned: the guest stopped */
 
@@ -219,14 +219,14 @@ static void draw_rgba(NSView *view, uint8_t *rgba, int w, int h, NSRect dest) {
 - (void)mouseDragged:(NSEvent *)event { [self mouseMoved:event]; }
 
 /* 4 bits a pixel, the left one in the low nibble, through the palette;
-   or in text mode 80 x 30 cells of character and attribute, 8 x 16 */
+   or in text mode 128 x 48 cells of character and attribute, 8 x 16 */
 - (void)drawRect:(NSRect)dirtyRect {
     (void)dirtyRect;
     int bpr = videoWidth / 2;
     if (EmVideo__text) {
         for (int y = 0; y < videoHeight; y++)
             for (int x = 0; x < videoWidth; x++) {
-                int cell = (y / 16) * 160 + (x / 8) * 2;
+                int cell = (y / 16) * videoTextBpr + (x / 8) * 2;
                 int ch = EmVideo__mem[cell], at = EmVideo__mem[cell + 1];
                 int on = (EmVideo__font[ch * 16 + y % 16] >> (7 - x % 8)) & 1;
                 int c = on ? (at & 0x0F) : (at >> 4);

@@ -5,7 +5,8 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
      $00_0200-$00_0FFF  the I/O block, a device per 64 byte slot:
        $0200 unclaimed: $FF       $0300 system control: bit 0 boot ROM
        $0240 palette, write only  $0340 external bus control
-       $0280 ADB host (EmADB)     $0380 video control: bit 0 text
+       $0280 ADB host (EmADB)     $0380 video control: bit 0 text,
+                                  bit 7 (read) 1024 x 768
        $02C0 microSD slot (EmSD)  $03C0 blitter (EmBlit)
        $0400 the DMA engine (EmDMA), mirrored at $0420
        $0440 interrupt status (read): 0 the timer, 1 DMA channel 0,
@@ -164,7 +165,7 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
       ELSIF slot = 17 THEN r := IntRead(a)
       ELSIF slot = 12 THEN IF romEn THEN r := 1 ELSE r := 0 END
       ELSIF slot = 13 THEN IF CardIrq() THEN r := 1 ELSE r := 0 END
-      ELSIF slot = 14 THEN r := EmVideo.text
+      ELSIF slot = 14 THEN r := EmVideo.text + 80H   (* 1024 x 768 *)
       ELSIF slot = 15 THEN r := EmBlit.Read(a, now)
       ELSE r := 0FFH                                  (* palette, unclaimed *)
       END

@@ -1,9 +1,12 @@
-MODULE EmVideo; (* The framebuffer of the FPGA SoC: 640 x 480 pixels of 4
-   bits at $70_0000, 320 bytes a row, the left pixel of a pair in the low
-   nibble; and its 16 entry palette, which the SoC has at $0240.
+MODULE EmVideo; (* The framebuffer of the FPGA SoC: 1024 x 768 pixels of 4
+   bits at $70_0000, 512 bytes a row, the left pixel of a pair in the low
+   nibble; and its 16 entry palette, which the SoC has at $0240. (The SoC
+   built for 640 x 480, 320 bytes a row, is not emulated; $0380 bit 7
+   reads 1, 1024 x 768.)
 
    In text mode (the SoC's video control register, $0380 bit 0) the same
-   memory holds 80 x 30 cells of a character and an attribute, ink in the
+   memory holds 128 x 48 cells of a character and an attribute, 256 bytes
+   a row of them, ink in the
    low nibble and paper in the high one, drawn 8 x 16 in the SoC's font:
    the Atari ST system font of EmuTOS (GPL v2), read at run time from the
    Verilog repository's rom/font_st8x16.hex rather than copied in.
@@ -14,16 +17,17 @@ MODULE EmVideo; (* The framebuffer of the FPGA SoC: 640 x 480 pixels of 4
   IMPORT Files;
 
   CONST
-    width* = 640; height* = 480;
-    bpr* = 320;                 (* bytes per row *)
-    size* = 153600;             (* bytes of framebuffer *)
+    width* = 1024; height* = 768;
+    bpr* = 512;                 (* bytes per row *)
+    size* = 393216;             (* bytes of framebuffer *)
+    textBpr* = 256;             (* bytes per row of cells, 128 of them *)
     base* = 700000H;
 
   VAR
     mem*: ARRAY size OF BYTE;
     pal*: ARRAY 48 OF BYTE;     (* red, green, blue of each colour *)
     dirty*: INTEGER;            (* written since the window last looked *)
-    text*: INTEGER;             (* 1: 80 x 30 text *)
+    text*: INTEGER;             (* 1: 128 x 48 text *)
     font*: ARRAY 4096 OF BYTE;  (* 16 bytes a glyph, bit 7 leftmost *)
     fontLoaded*: BOOLEAN;
 
@@ -83,7 +87,7 @@ MODULE EmVideo; (* The framebuffer of the FPGA SoC: 640 x 480 pixels of 4
     IF text = 0 THEN b := mem[y * bpr + x DIV 2];
       IF ODD(x) THEN r := b DIV 16 ELSE r := b MOD 16 END
     ELSE
-      c := mem[(y DIV 16) * 160 + (x DIV 8) * 2]; a := mem[(y DIV 16) * 160 + (x DIV 8) * 2 + 1];
+      c := mem[(y DIV 16) * textBpr + (x DIV 8) * 2]; a := mem[(y DIV 16) * textBpr + (x DIV 8) * 2 + 1];
       IF ODD(LSR(font[c * 16 + y MOD 16], 7 - x MOD 8)) THEN r := a MOD 16 ELSE r := a DIV 16 END
     END;
     RETURN r

@@ -5,7 +5,7 @@ MODULE EmMem; (* The memory and the devices in it, for the three machines
    a 6551 at $C000, a 6522 at $C020 (0: none), the carrier board's disk
    controllers at the SoC's addresses, the 82077AA floppy controller at
    $0800 (or with -wd1793 the WD1793) and the 53C80 SCSI controller at
-   $0830, and the 640 x 480 framebuffer at $70_0000. The 82077AA's time
+   $0830, and the 1024 x 768 framebuffer at $70_0000. The 82077AA's time
    is the processor's cycles (clock), three of the SoC's 25.2 MHz to
    each, as if the processor ran at 8.4 MHz.
 

@@ -163,7 +163,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       Files.Set(r, f, 0);
       head := "P6"; head[2] := 0AX; head[3] := 0X;
       i := 0; WHILE head[i] # 0X DO Files.WriteByte(r, ORD(head[i])); INC(i) END;
-      head := "640 480"; head[7] := 0AX; head[8] := "2"; head[9] := "5"; head[10] := "5"; head[11] := 0AX; head[12] := 0X;
+      head := "1024 768"; head[8] := 0AX; head[9] := "2"; head[10] := "5"; head[11] := "5"; head[12] := 0AX; head[13] := 0X;
       i := 0; WHILE head[i] # 0X DO Files.WriteByte(r, ORD(head[i])); INC(i) END;
       FOR y := 0 TO EmVideo.height - 1 DO
         FOR x := 0 TO EmVideo.width - 1 DO
