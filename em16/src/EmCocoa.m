@@ -37,9 +37,28 @@ void EmADB__MouseButton(int pressed);
 void EmCPU__Stop(void);
 void Em16__CpuThread(void);
 
-/* keys and the mouse go to the VIA's ADB, or with -fpga to the SoC's */
-static void key_down(int kc) { if (EmHost__adb) EmADB__KeyDown(kc); else EmVIA__AdbKeyDown(kc); }
-static void key_up(int kc) { if (EmHost__adb) EmADB__KeyUp(kc); else EmVIA__AdbKeyUp(kc); }
+/* A macOS key code as an ADB keyboard sends it. macOS's virtual key
+   codes are ADB's but for these: Control, the arrows, and the right-hand
+   modifiers (an extended ADB keyboard's; ADB has one Command, $37). */
+static int adb_code(int kc) {
+    switch (kc) {
+    case 0x3B: return 0x36;   /* Control */
+    case 0x3E: return 0x7D;   /* right Control */
+    case 0x3C: return 0x7B;   /* right Shift */
+    case 0x3D: return 0x7C;   /* right Option */
+    case 0x36: return 0x37;   /* right Command: Command */
+    case 0x7B: return 0x3B;   /* Left */
+    case 0x7C: return 0x3C;   /* Right */
+    case 0x7D: return 0x3D;   /* Down */
+    case 0x7E: return 0x3E;   /* Up */
+    default: return kc;
+    }
+}
+
+/* keys and the mouse go to the VIA's ADB, or with -fpga to the SoC's,
+   in ADB's key codes */
+static void key_down(int kc) { kc = adb_code(kc); if (EmHost__adb) EmADB__KeyDown(kc); else EmVIA__AdbKeyDown(kc); }
+static void key_up(int kc) { kc = adb_code(kc); if (EmHost__adb) EmADB__KeyUp(kc); else EmVIA__AdbKeyUp(kc); }
 static void mouse_move(int dx, int dy) { if (EmHost__adb) EmADB__MouseMove(dx, dy); else EmVIA__AdbMouseMove(dx, dy); }
 static void mouse_button(int p) { if (EmHost__adb) EmADB__MouseButton(p); else EmVIA__AdbMouseButton(p); }
 
