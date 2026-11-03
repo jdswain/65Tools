@@ -377,7 +377,11 @@ MODULE ASG; (* Code generator of the 65xx assembler.
     ELSIF mode = ASC.mAbsX THEN
       IF dp THEN m := ASC.mDPX ELSIF long OR (a > 0FFFFH) THEN m := ASC.mAbsLX END
     ELSIF mode = ASC.mAbsY THEN
-      IF dp THEN m := ASC.mDPY END
+      IF dp THEN m := ASC.mDPY
+      ELSIF final & (long OR (a > 0FFFFH) & (modifier # MAbs)) THEN
+        (* there is no long,Y: the bank would be lost *)
+        ASS.Error(src, line, "no long,Y addressing mode; use [dp],Y or the data bank", "")
+      END
     ELSIF mode = ASC.mAbsIndX THEN
       IF dp THEN m := ASC.mDPIndX END
     ELSIF mode = ASC.mAbsInd THEN
