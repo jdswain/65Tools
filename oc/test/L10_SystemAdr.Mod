@@ -12,7 +12,8 @@ BEGIN
     Out.Int(0, 1); Out.Ln()
   END;
 
-  (* Write through address using GET/PUT *)
-  SYSTEM.PUT(0, addr, 99);
+  (* Write through address using GET/PUT: in the variable's bank (a
+     module's variables are in whatever bank the loader put them, .816 v4) *)
+  SYSTEM.PUT(SYSTEM.BANK(x), addr, 99);
   Out.Int(x, 1); Out.Ln()
 END L10_SystemAdr.

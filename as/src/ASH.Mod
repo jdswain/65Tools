@@ -5,7 +5,7 @@ MODULE ASH; (* Host interface of the 65xx assembler.
    them here leaves one module to adapt when the assembler is moved to
    another system. *)
 
-  IMPORT Out;
+  IMPORT ASE;
 
   CONST PathLen* = 256;
 
@@ -14,15 +14,15 @@ MODULE ASH; (* Host interface of the 65xx assembler.
   (* --- console --- *)
 
   PROCEDURE Ch*(ch: CHAR);
-  BEGIN Out.Write(ch)
+  BEGIN ASE.Write(ch)
   END Ch;
 
   PROCEDURE Str*(s: ARRAY OF CHAR);
-  BEGIN Out.WriteString(s)
+  BEGIN ASE.WriteString(s)
   END Str;
 
   PROCEDURE Ln*;
-  BEGIN Out.Ln
+  BEGIN ASE.Ln
   END Ln;
 
   (* x as decimal digits *)
@@ -65,12 +65,12 @@ MODULE ASH; (* Host interface of the 65xx assembler.
 
   PROCEDURE Int*(x: LONGINT);
     VAR s: ARRAY 24 OF CHAR;
-  BEGIN IntStr(x, s); Out.WriteString(s)
+  BEGIN IntStr(x, s); ASE.WriteString(s)
   END Int;
 
   PROCEDURE Hex*(x: LONGINT; n: INTEGER);
     VAR s: ARRAY 12 OF CHAR;
-  BEGIN HexStr(x, n, FALSE, s); Out.WriteString(s)
+  BEGIN HexStr(x, n, FALSE, s); ASE.WriteString(s)
   END Hex;
 
   (* --- process --- *)

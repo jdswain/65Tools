@@ -19,7 +19,7 @@ BINDIR := ../bin
 TARGET := $(BINDIR)/as
 
 # In order of import: each module needs the symbol files of those before it.
-MODS := ASC ASH ASS ASB ASG ASL ASI ASP ASO AS
+MODS := ASE ASC ASH ASS ASB ASG ASL ASI ASP ASO AS ASMain
 OBJS := $(MODS:%=$(OBJDIR)/%.o)
 
 # Runtime modules the assembler imports. Their .smb/.o are build
@@ -52,6 +52,7 @@ $(OBJDIR)/%.Mod: $(SRCDIR)/%.Mod | $(OBJDIR)
 $(OBJDIR)/%.o: $(OBJDIR)/%.Mod $(RT_SMB)
 	cd $(OBJDIR) && $(OC) -s $*.Mod
 
+$(OBJDIR)/ASH.o: $(OBJDIR)/ASE.o
 $(OBJDIR)/ASS.o: $(OBJDIR)/ASC.o $(OBJDIR)/ASH.o
 $(OBJDIR)/ASB.o: $(OBJDIR)/ASS.o
 $(OBJDIR)/ASG.o: $(OBJDIR)/ASS.o
@@ -60,11 +61,12 @@ $(OBJDIR)/ASI.o: $(OBJDIR)/ASL.o
 $(OBJDIR)/ASP.o: $(OBJDIR)/ASI.o
 $(OBJDIR)/ASO.o: $(OBJDIR)/ASB.o $(OBJDIR)/ASG.o
 $(OBJDIR)/AS.o: $(OBJDIR)/ASP.o $(OBJDIR)/ASO.o
+$(OBJDIR)/ASMain.o: $(OBJDIR)/AS.o
 
-# -o links AS with every module it imports, the runtime, and the C part
-# of the host interface.
+# -o links ASMain, the program, with every module it imports, the runtime,
+# and the C part of the host interface.
 $(TARGET): $(OBJS) $(SRCDIR)/ASH_rt.c | $(BINDIR)
-	cd $(OBJDIR) && $(OC) -o $(abspath $(TARGET)) AS.Mod $(abspath $(SRCDIR)/ASH_rt.c)
+	cd $(OBJDIR) && $(OC) -o $(abspath $(TARGET)) ASMain.Mod $(abspath $(SRCDIR)/ASH_rt.c)
 
 test: $(TARGET)
 	@sh test/run_tests.sh $(abspath $(TARGET))

@@ -4,9 +4,9 @@
 #   sh run.sh [-v]
 #
 # Compiles the sources of ../src with oc816 against OS16's kernel (its
-# Files and Out; Env, here, gives the arguments, which Seed sets) and
+# Files and Out; ASE, here, gives the arguments, which Seed sets) and
 # boots OS16 on em16 -fpga from a floppy with sample.s, the assembler's
-# modules and /Library/Settings/Startup.txt: Seed, AS (which assembles sample.s into the files
+# modules and /Library/Settings/Startup.txt: Seed, ASMain (AS.Run, which assembles sample.s into the files
 # sample.bin and sample.lst on the floppy) and Dump (which prints them).
 # The output file and the listing must equal those of the host assembler
 # ../../bin/as. Name the tools with OC816, EM16, AS and OS16B (OS16's
@@ -26,24 +26,24 @@ KERNEL=$(cat "$OS16B/KERNEL.TXT")
 
 MODS="ASC ASH ASS ASB ASG ASL ASI ASP ASO"
 rm -rf out; mkdir -p out/host
-cp Env.Mod Dump.Mod ../src/*.Mod sample.s out/
+cp Dump.Mod ../src/*.Mod sample.s out/ && cp ASE.Mod out/   # OS16's ASE in place of the POSIX one
 python3 mkseed.py sample.s sample.bin && mv Seed.Mod out/
 cd out || exit 1
 for k in $KERNEL; do cp "$OS16B/$k.smb" .; done
 cp "$OS16B/Kernel.img" "$OS16B/boot.rom" .
 
 # compile, in order of import
-for m in Env $MODS Seed AS Dump; do
+for m in ASE $MODS Seed AS ASMain Dump; do
   if ! "$OC816" $m.Mod -s > $m.log 2>&1 || grep -q "  pos " $m.log; then
     echo "FAIL: oc816 $m.Mod"; grep -E "pos|rror" $m.log | head; exit 1
   fi
 done
 [ "$1" = "-v" ] && ls -l *.816 | awk '{ printf "  %-10s %6d bytes\n", $NF, $5 }'
 
-# run: Startup loads Seed, which sets the arguments, AS, which assembles,
+# run: Startup loads Seed, which sets the arguments, ASMain, which assembles,
 # and Dump, which prints the results
-python3 ../../../../OS16/tools/mkfloppy.py -d . -x "$(echo $KERNEL | tr ' ' ,)" -m Seed -m AS -m Dump \
-  -n "Library/Settings/Startup.txt=Seed AS Dump" -L Kernel.img boot.img sample.s || exit 1
+python3 ../../../../OS16/tools/mkfloppy.py -d . -x "$(echo $KERNEL | tr ' ' ,)" -m Seed -m ASMain -m Dump \
+  -n "Library/Settings/Startup.txt=Seed ASMain Dump" -L Kernel.img boot.img sample.s || exit 1
 perl -e 'alarm 300; exec @ARGV' "$EM16" -fpga -bootrom boot.rom -disk0 boot.img < /dev/null 2>&1 | tr -d '\r' > em16.log
 sed -n '/^--- output$/,/^--- listing$/p' em16.log | sed '1d;$d' > sample.hex
 sed -n '/^--- listing$/,/^--- end$/p' em16.log | sed '1d;$d' > sample.lst

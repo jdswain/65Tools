@@ -1,6 +1,9 @@
-MODULE Env;
-  (* Program arguments for the assembler on OS16: Seed sets them before the
-     assembler starts. *)
+MODULE ASE;
+  (* The assembler's environment on OS16 under em16: the arguments, which
+     Seed sets before ASMain runs the assembler, and the console, OS16's Out
+     (the serial port). *)
+
+  IMPORT Out;
 
   CONST maxArgs = 8;
 
@@ -16,6 +19,18 @@ MODULE Env;
     END
   END Add;
 
+  PROCEDURE Write*(ch: CHAR);
+  BEGIN Out.Write(ch)
+  END Write;
+
+  PROCEDURE WriteString*(s: ARRAY OF CHAR);
+  BEGIN Out.WriteString(s)
+  END WriteString;
+
+  PROCEDURE Ln*;
+  BEGIN Out.Ln
+  END Ln;
+
   PROCEDURE ArgCount*(): INTEGER;
   BEGIN RETURN n
   END ArgCount;
@@ -30,4 +45,4 @@ MODULE Env;
   END Arg;
 
 BEGIN n := 0
-END Env.
+END ASE.

@@ -2,7 +2,7 @@ MODULE Dump;
   (* Prints the files the assembler wrote, for comparison with those of
      the host assembler: the output file in hexadecimal, 16 bytes to a
      line, and the listing as it is. *)
-  IMPORT Files, Env, Out;
+  IMPORT Files, ASE, Out;
 
   VAR name: ARRAY 32 OF CHAR;
 
@@ -38,7 +38,7 @@ MODULE Dump;
 
 BEGIN
   Out.WriteString("--- output"); Out.Ln;
-  Env.Arg(2, name); Hex(name);
+  ASE.Arg(2, name); Hex(name);
   Out.WriteString("--- listing"); Out.Ln;
   Text("sample.lst");
   Out.WriteString("--- end"); Out.Ln

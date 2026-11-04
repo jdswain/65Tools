@@ -9,7 +9,7 @@ the rules for assembly routines that interoperate with Oberon modules.
 ```
 Address   Name         Description
 -------   ----------   ------------------------------------
-$00-$01   SB           Static Base — module variable area pointer
+$00-$01   (scratch)    The code generator's, within one statement (a far store's temp)
 $02-$03   R[0]         General register / 1st parameter / return value
 $04-$05   R[1]         General register / 2nd parameter
 $06-$07   R[2]         General register / 3rd parameter
@@ -42,7 +42,8 @@ $3A-$3B   FP_PROD2     FP workspace: product word 2
 $3C-$3D   FP_TEMP      FP workspace: scratch
 $3E-$3F   FP_TEMP2     FP workspace: scratch
 $40-$41   FP_CNT       FP workspace: loop counter
-$42-$45   BANK_DP      Own module's data bank byte
+$42-$43   SB           Static Base — module variable area pointer
+$44-$45   BANK_DP      Own module's data bank byte: with SB, the 24-bit pointer [SB]
 $46-$FF   (unused)     Available for future DP use
 $0100-$0845            Hardware stack (2K, SP init to $0845)
 ```
@@ -50,18 +51,23 @@ $0100-$0845            Hardware stack (2K, SP init to $0845)
 All registers and workspace entries are 16-bit (2 bytes), stored
 little-endian as per 65C816 convention.
 
-## Static Base ($00-$01)
+## Static Base ($42-$43) and BANK_DP ($44-$45)
 
-SB is a persistent register at the bottom of Direct Page that points to
-the current module's global variable area in bank 0. It is set during
-module initialisation and must remain valid for the lifetime of the module.
+SB points to the current module's global variable area, and BANK_DP
+holds its bank: the three bytes $42-$44 are a 24-bit pointer. Both are
+set by the module's initialisation and by every exported procedure's,
+method's and procedure variable's entry, and put back when it returns.
 
-Global variable access uses `(SB),Y` indirect indexed addressing, where
-Y holds the variable's offset within the module data area.
+Global variable access uses `[SB],Y` long indirect indexed addressing,
+where Y holds the variable's offset within the module data area, so a
+module's variables may be in any bank (.816 version 4; OS16's loader
+puts them above bank 0). An imported module's variables are reached in
+the same way through SB_TEMP: its base at $20-$21 and its bank at $22.
+The data bank register stays 0.
 
 **SB is never saved or restored by the compiler's calling convention.**
-Any code that overwrites $00 will corrupt all subsequent global variable
-access.
+Any code that overwrites $42-$45 will corrupt all subsequent global
+variable access.
 
 ## Register File ($02-$1F)
 
@@ -77,11 +83,12 @@ Pointer and REAL types occupy two consecutive registers (4 bytes total):
 the low word in R[n] and the high word (bank byte for pointers, upper
 IEEE bits for REAL) in R[n+1].
 
-## SB_TEMP ($20-$21)
+## SB_TEMP ($20-$22)
 
 Used by the compiler's code generator when accessing variables from
 imported modules. The import's variable base address is loaded into
-SB_TEMP, then used as the indirect base for the access. This is a
+SB_TEMP and its bank into $22 (SB_TEMP_BANK, over FP_A_LO), then
+`[SB_TEMP],Y` is the access. This is a
 transient value that exists only within a single generated instruction
 sequence.
 
@@ -114,7 +121,7 @@ When Oberon code calls an external procedure via JSL:
 **What SaveRegs saves:** Only R[0] through R[RH-1] — the registers
 that were in use at the call site.
 
-**What SaveRegs does NOT save:** SB ($00), SB_TEMP ($20), FP workspace
+**What SaveRegs does NOT save:** SB ($42), SB_TEMP ($20), FP workspace
 ($22-$41). These are either persistent (SB) or transient and not active
 across calls (SB_TEMP, FP workspace).
 
@@ -131,13 +138,14 @@ Assembly modules called from Oberon via JSL must follow these rules:
 | FP workspace | $22-$41 | Not active during external calls. |
 
 This gives **32 words** (64 bytes) of contiguous DP workspace from $02
-through $41 available to assembly, plus SB at $00 which must be preserved.
+through $41 available to assembly, plus $00-$01; SB and BANK_DP at
+$42-$45 must be preserved.
 
 ### Must preserve
 
 | Region | Addresses | Notes |
 |--------|-----------|-------|
-| SB | $00-$01 | Never saved by calling convention. Corruption breaks all global variable access in the calling module. |
+| SB, BANK_DP | $42-$45 | Never saved by calling convention. Corruption breaks all global variable access in the calling module. |
 
 ### Interaction with sub-calls
 

@@ -13,10 +13,11 @@ MODULE AS; (* The 65xx assembler: command line and control.
      ASL  listing
      ASO  output formats
      ASH  host interface
+     ASE  environment: arguments, console
 
-   The body of this module is the program. *)
+   Run is the program (ASMain's body, on a POSIX host; a command on OS16). *)
 
-  IMPORT Env, ASH, ASC, ASS, ASB, ASG, ASL, ASI, ASP, ASO;
+  IMPORT ASE, ASH, ASC, ASS, ASB, ASG, ASL, ASI, ASP, ASO;
 
   CONST maxFiles = 32; maxDefs = 32;
 
@@ -52,7 +53,7 @@ MODULE AS; (* The 65xx assembler: command line and control.
     IF arg[2] # 0X THEN j := 2;
       WHILE arg[j] # 0X DO val[j-2] := arg[j]; INC(j) END;
       val[j-2] := 0X
-    ELSIF i + 1 < Env.ArgCount() THEN INC(i); Env.Arg(i, val)
+    ELSIF i + 1 < ASE.ArgCount() THEN INC(i); ASE.Arg(i, val)
     ELSE val[0] := 0X; bad := TRUE;
       ASH.Str("Missing value for option "); ASH.Str(arg); ASH.Ln
     END
@@ -61,8 +62,8 @@ MODULE AS; (* The 65xx assembler: command line and control.
   PROCEDURE Arguments;
     VAR i: INTEGER; arg, val: ASH.Path;
   BEGIN i := 1;
-    WHILE i < Env.ArgCount() DO
-      Env.Arg(i, arg);
+    WHILE i < ASE.ArgCount() DO
+      ASE.Arg(i, arg);
       IF (arg[0] # "-") OR (arg[1] = 0X) THEN
         IF nofFiles < maxFiles THEN files[nofFiles] := i; INC(nofFiles)
         ELSE ASH.Str("Too many input files"); ASH.Ln; bad := TRUE
@@ -97,7 +98,7 @@ MODULE AS; (* The 65xx assembler: command line and control.
       ASG.SetDefaultCpu(ASO.DefaultCpu(format)); ASI.SetVerbose(verbose);
       ASG.SetModule(format = ASO.Mod816);
       FOR i := 0 TO nofDefs - 1 DO
-        Env.Arg(defs[i], arg);
+        ASE.Arg(defs[i], arg);
         IF defShared[i] THEN  (*drop the "-D"*)
           j := 0;
           REPEAT arg[j] := arg[j + 2]; INC(j) UNTIL arg[j - 1] = 0X
@@ -105,12 +106,12 @@ MODULE AS; (* The 65xx assembler: command line and control.
         ASP.Define(arg)
       END;
       FOR i := 0 TO nofFiles - 1 DO
-        Env.Arg(files[i], arg);
+        ASE.Arg(files[i], arg);
         ASH.Str("Assembling "); ASH.Str(arg); ASH.Ln;
         ASP.Compile(arg)
       END;
       IF ASS.errcnt = 0 THEN
-        Env.Arg(files[0], arg); ASH.SetExt(arg, ".lst", listName);
+        ASE.Arg(files[0], arg); ASH.SetExt(arg, ".lst", listName);
         ASI.Assemble(listName)
       END;
       IF ASS.errcnt = 0 THEN ASO.Write(outName, format, legacy) END;
@@ -122,14 +123,17 @@ MODULE AS; (* The 65xx assembler: command line and control.
     END
   END Assemble;
 
-BEGIN
-  nofFiles := 0; nofDefs := 0; outName[0] := 0X;
-  verbose := FALSE; legacy := FALSE; help := FALSE; bad := FALSE;
-  Arguments;
-  IF help OR (Env.ArgCount() < 2) THEN Help; ASH.Exit(1)
-  ELSIF bad THEN ASH.Exit(1)
-  ELSIF nofFiles = 0 THEN ASH.Str("No input files"); ASH.Ln; ASH.Exit(1)
-  ELSE Assemble;
-    IF bad OR (ASS.errcnt # 0) THEN ASH.Exit(1) END
-  END
+  PROCEDURE Run*;
+  BEGIN
+    nofFiles := 0; nofDefs := 0; outName[0] := 0X;
+    verbose := FALSE; legacy := FALSE; help := FALSE; bad := FALSE;
+    Arguments;
+    IF help OR (ASE.ArgCount() < 2) THEN Help; ASH.Exit(1)
+    ELSIF bad THEN ASH.Exit(1)
+    ELSIF nofFiles = 0 THEN ASH.Str("No input files"); ASH.Ln; ASH.Exit(1)
+    ELSE Assemble;
+      IF bad OR (ASS.errcnt # 0) THEN ASH.Exit(1) END
+    END
+  END Run;
+
 END AS.
