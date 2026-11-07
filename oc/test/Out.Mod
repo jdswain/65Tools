@@ -68,14 +68,14 @@ MODULE Out; (* Output on the serial port: channel A of the board's Z85C30
         buf: ARRAY 6 OF CHAR;
         neg: BOOLEAN;
   BEGIN
-    neg := FALSE;
-    IF x < 0 THEN
-      neg := TRUE; x := -x
-    END;
+    (* the digits from x made not positive, which -32768 can be: each
+       the last digit of -x, and x what is left of it *)
+    neg := x < 0;
+    IF ~neg THEN x := -x END;
     i := 0;
     REPEAT
-      d := x MOD 10;
-      x := x DIV 10;
+      d := (10 - x MOD 10) MOD 10;
+      x := (x + d) DIV 10;
       buf[i] := CHR(d + ORD("0"));
       i := i + 1
     UNTIL x = 0;
