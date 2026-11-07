@@ -191,7 +191,9 @@ static void write_module(const char *outdir, const char *modname) {
     exit(1);
   }
 
-  fprintf(f, "MODULE %s;\n", modname);
+  fprintf(f, "MODULE %s; (* a font: its glyphs' table T and their raster, given to\n"
+             "   FontManager when the module is loaded (Register) *)\n", modname);
+  fprintf(f, "  IMPORT FontManager;\n\n");
   fprintf(f, "  CONST\n");
   fprintf(f, "    height* = %d; minX* = %d; maxX* = %d; minY* = %d; maxY* = %d;\n",
           font_height, font_minX, font_maxX, font_minY, font_maxY);
@@ -214,6 +216,7 @@ static void write_module(const char *outdir, const char *modname) {
   }
   fprintf(f, "};\n");
 
+  fprintf(f, "\nBEGIN FontManager.Register(\"%s\", T, raster, height, minY, maxY)\n", modname);
   fprintf(f, "END %s.\n", modname);
   fclose(f);
 
