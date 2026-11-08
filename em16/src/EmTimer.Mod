@@ -45,8 +45,12 @@ MODULE EmTimer; (* The SoC's tick timer (rtl/timer.v of the Verilog
     RETURN p
   END Period;
 
-  PROCEDURE Counts(now: LONGINT): LONGINT;           (* counts since tEn *)
-  BEGIN RETURN (now - tEn) * TNUM DIV tden
+  (* The counts since the enabling, as a register access ending at cycle
+     now sees them: the enabling write (ending at tEn) and the access
+     each take effect in the cycle they began, 2 before they end, and
+     counting starts in the cycle after the write's. *)
+  PROCEDURE Counts(now: LONGINT): LONGINT;
+  BEGIN RETURN (now - tEn - 1) * TNUM DIV tden
   END Counts;
 
   (* The ticks due by now. The first is at next, which was set with the

@@ -1,6 +1,7 @@
 MODULE EmSCC; (* The SoC's emulated Z85C30 SCC, rtl/scc_85c30.v, with
-   channel A on standard input and output, with its timing: 2340 cycles
-   a character at 115200 baud, 10 of top_tang20k.v's DIVISOR.
+   channel A on standard input and output, with its timing: a character
+   at 115200 baud, 10 of top_tang20k.v's DIVISOR (3520 cycles at 40.5
+   MHz), its transmit buffer and shift register as the RTL's.
 
    Registers at $0820-$082F, mirrored every 4 bytes: 0 B control, 1 B data,
    2 A control, 3 A data. Each channel's control port has the SCC's
@@ -44,7 +45,7 @@ MODULE EmSCC; (* The SoC's emulated Z85C30 SCC, rtl/scc_85c30.v, with
     count: INTEGER;
     overrun, txFull, interactive: BOOLEAN;
     txBuf: INTEGER;
-    txFree, rxNext, nextPoll: LONGINT;
+    txFree, txAt, rxNext, nextPoll: LONGINT;
 
   PROCEDURE ResetChannel(c: INTEGER);
   BEGIN ptr[c] := 0; wr1[c] := 0; wr3[c] := AND(wr3[c], 0FEH); wr5[c] := AND(wr5[c], 61H);
@@ -61,18 +62,24 @@ MODULE EmSCC; (* The SoC's emulated Z85C30 SCC, rtl/scc_85c30.v, with
       wr14[c] := 30H; wr15[c] := 0F8H; txIP[c] := FALSE; extIP[c] := FALSE; zero[c] := 0
     END;
     wr2 := 0; wr9 := 0; count := 0; overrun := FALSE; txFull := FALSE; txBuf := 0;
-    txFree := 0; rxNext := 0; nextPoll := 0
+    txFree := 0; txAt := 0; rxNext := 0; nextPoll := 0
   END Reset;
 
-  (* The transmitter: the buffer goes to the shift register once the
-     previous character has gone. *)
+  (* The transmitter, up to cycle now: the buffer goes to the shift
+     register in the first cycle it is full (txAt on) and the shift register
+     is free (txFree on), and is empty from the next; the shift register
+     loads in the cycle after that and is busy for the character's time. *)
   PROCEDURE Send(now: LONGINT);
+    VAR t: LONGINT;
   BEGIN
-    IF txFull & (now >= txFree) & ODD(wr5[A] DIV 8) THEN
-      IF interactive THEN EmHost.RawMode END;
-      EmHost.Drain(EmHost.out); EmHost.PutChar(txBuf);
-      txFull := FALSE; txFree := now + 1 + charTime;
-      IF ODD(wr1[A] DIV 2) THEN txIP[A] := TRUE END
+    IF txFull & ODD(wr5[A] DIV 8) THEN
+      t := txAt; IF txFree > t THEN t := txFree END;
+      IF now > t THEN
+        IF interactive THEN EmHost.RawMode END;
+        EmHost.Drain(EmHost.out); EmHost.PutChar(txBuf);
+        txFull := FALSE; txFree := t + 2 + charTime;
+        IF ODD(wr1[A] DIV 2) THEN txIP[A] := TRUE END
+      END
     END
   END Send;
 
@@ -144,7 +151,7 @@ MODULE EmSCC; (* The SoC's emulated Z85C30 SCC, rtl/scc_85c30.v, with
       IF c = B THEN r := 7
       ELSE
         IF overrun THEN r := ORA(r, 20H) END;
-        IF ~txFull & (now >= txFree) THEN r := ORA(r, 1) END
+        IF ~txFull & (now - 2 >= txFree) THEN r := ORA(r, 1) END
       END
     ELSIF (n = 2) OR (n = 6) THEN
       IF (c = A) OR ~ODD(wr9) THEN r := wr2
@@ -175,9 +182,10 @@ MODULE EmSCC; (* The SoC's emulated Z85C30 SCC, rtl/scc_85c30.v, with
     RETURN r
   END RR;
 
+  (* An access ending at cycle now: the SCC sees it 2 cycles before (cs) *)
   PROCEDURE Read*(reg: INTEGER; now: LONGINT): INTEGER;
     VAR c, r: INTEGER;
-  BEGIN reg := AND(reg, 3); c := reg DIV 2; Poll(now);
+  BEGIN reg := AND(reg, 3); c := reg DIV 2; Poll(now - 2);
     IF ODD(reg) THEN IF c = A THEN r := Pop() ELSE r := 0 END
     ELSE r := RR(c, ptr[c], now); ptr[c] := 0
     END;
@@ -186,14 +194,14 @@ MODULE EmSCC; (* The SoC's emulated Z85C30 SCC, rtl/scc_85c30.v, with
 
   PROCEDURE TxData(c, data: INTEGER; now: LONGINT);
   BEGIN
-    IF c = A THEN txBuf := data; txFull := TRUE; txIP[A] := FALSE; Send(now)
+    IF c = A THEN txBuf := data; txFull := TRUE; txAt := now - 1; txIP[A] := FALSE
     ELSIF ODD(wr1[B] DIV 2) THEN txIP[B] := TRUE
     END
   END TxData;
 
   PROCEDURE Write*(reg, data: INTEGER; now: LONGINT);
     VAR c, n, cmd: INTEGER;
-  BEGIN reg := AND(reg, 3); c := reg DIV 2; Send(now);
+  BEGIN reg := AND(reg, 3); c := reg DIV 2; Send(now - 1);
     IF ODD(reg) THEN TxData(c, data, now)
     ELSIF ptr[c] = 0 THEN                         (* WR0 *)
       cmd := AND(data DIV 8, 7); n := AND(data, 7);

@@ -32,7 +32,8 @@ MODULE EmDMA; (* The SoC's DMA engine (rtl/dma.v of the Verilog repository;
    byte lands in, as there. Not modelled: the RTL's gathering into words
    and its line buffer (the order of the bytes in memory is the same), the
    SDRAM port's time, and the CPU waiting for the external bus while a DMA
-   cycle has it. *)
+   cycle has it. A channel starts no sooner than the CPU's write buffer
+   is empty (EmSDRAM.BufferEmpty), as wr_busy holds the engine. *)
 
   IMPORT EmHost, Em82077, EmSCSI, EmEth, EmSDRAM;
 
@@ -148,7 +149,7 @@ MODULE EmDMA; (* The SoC's DMA engine (rtl/dma.v of the Verilog repository;
       ELSIF ~en[c] THEN
         dir[c] := ODD(v DIV 2); tc[c] := ODD(v DIV 4) & (c < 2); done[c] := FALSE;
         IF cnt[c] = 0 THEN done[c] := TRUE
-        ELSE IF ~Running() THEN t := now END; en[c] := TRUE
+        ELSE IF ~Running() THEN t := now; IF EmSDRAM.BufferEmpty() > t THEN t := EmSDRAM.BufferEmpty() END END; en[c] := TRUE   (* once wr_busy falls *)
         END
       END
     ELSIF (r = 9) & ODD(v) THEN done[c] := FALSE

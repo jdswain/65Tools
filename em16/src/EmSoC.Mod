@@ -27,20 +27,25 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
                    Ethernet controller (EmEth); 6-7 empty: $FF. A CPU access
                    to a /DACK slot is pseudo-DMA, a byte without TC.
          $0820-$082F the emulated Z85C30 SCC (EmSCC), the serial port,
-                   which answers in place of slot 2 and takes 3 cycles
+                   which answers in place of slot 2 in 2 cycles (3
+                   straight after another access to it)
      $00_E000-$00_FFFF  the boot ROM while system control bit 0 is set,
                    or from $C000 or $8000 for an image over 8 or 16K
                    (LoadROM); writes there always go to the SDRAM
    $80_0000-$FF_FFFF  unmapped: $FF
 
    Time is the SoC's system clock, EmHost.hz: the board's 40.5 MHz, or
-   -sysclk's (25.2 MHz for soc.v's simulation). Each bus cycle of the core
-   takes the cycles soc.v gives it: the boot ROM, the I/O block and
-   unmapped addresses 2, the SDRAM what the cache takes, the external bus
-   3T + H + 4, T and H the bridge's bus clock and edge gap in system clocks
-   (21 at 40.5 MHz, 14 at 25.2: its Intel cycle on the 8.4 MHz timing, as
-   the CPU sees it); an access to the
-   SD slot's DATA or NEXT also waits for an exchange running to end. The devices are
+   -sysclk's (25.2 MHz for soc.v's simulation). The core runs clock by
+   clock (EmCore), and each of its bus cycles takes the cycles soc.v gives
+   it: the boot ROM, the I/O block and unmapped addresses 2, the SDRAM
+   what the cache takes (EmSDRAM), the emulated SCC 2 (3 straight after
+   another access to it), the external bus 3T + H + 4, T and H the
+   bridge's bus clock and edge gap in system clocks (21 at 40.5 MHz, 14
+   at 25.2: its Intel cycle on the 8.4 MHz timing, as the CPU sees it);
+   an access to the SD slot's DATA or NEXT also waits for an exchange
+   running to end. A fill of the core's instruction queue (Fetch) takes
+   a word of the boot ROM in 2 cycles and of the SDRAM as the cache does,
+   and a byte of anything else. The devices are
    given the time as it passes. The IRQ line is the sources of $0440
    that $0441 lets through: the timer, the DMA engine's channels, the
    cards' IRQ# (the 82077AA's INT, the 53C80's IRQ and the ENC424J600's
@@ -69,6 +74,8 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
     rested: BOOLEAN;          (* the guest reads its input: real time *)
     ms: INTEGER;              (* milliseconds of this second *)
     talks0: LONGINT;          (* EmADB.talks at its start *)
+    sccEnd: LONGINT;          (* the cycle after the SCC's last access *)
+    irq, irqDue: BOOLEAN;     (* the IRQ line; to be worked out again *)
 
   PROCEDURE UseWD1793*;
   BEGIN wd1793 := TRUE; EmDMA.NoFloppy
@@ -92,7 +99,7 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
   BEGIN now := now + c;
     IF now >= nextTick THEN
       EmSCC.Tick(now); EmADB.Tick(now); EmBlit.Tick(now); EmDMA.Tick(now); EmTimer.Tick(now); Em82077.Tick(now); EmEth.Tick(now); EmPower.Tick(now);
-      nextTick := now + 64
+      nextTick := now + 64; irqDue := TRUE
     END
   END Pass;
 
@@ -163,10 +170,17 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
   BEGIN RETURN (a >= 800H) & (AND(a DIV 16, 7) = 2)
   END SCC;
 
+  (* The emulated SCC answers in 2 cycles, and is not ready again until
+     a cycle after: an access straight after another takes 3. *)
+  PROCEDURE SCCCycles(): INTEGER;
+    VAR c: INTEGER;
+  BEGIN IF now = sccEnd THEN c := 3 ELSE c := 2 END; sccEnd := now + c; RETURN c
+  END SCCCycles;
+
   PROCEDURE IORead(a: INTEGER): INTEGER;
     VAR r, slot: INTEGER;
   BEGIN
-    IF SCC(a) THEN Pass(3); r := EmSCC.Read(a, now)
+    IF SCC(a) THEN slot := SCCCycles(); r := EmSCC.Read(a, now + slot); Pass(slot)
     ELSIF a >= 800H THEN
       IF cardReset THEN Pass(2); r := 0FFH                  (* RES#: the bridge ends the access at once *)
       ELSE Pass(extCost); r := CardRead(a)
@@ -190,7 +204,7 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
   PROCEDURE IOWrite(a, v: INTEGER);
     VAR slot: INTEGER;
   BEGIN
-    IF SCC(a) THEN Pass(3); EmSCC.Write(a, v, now)
+    IF SCC(a) THEN slot := SCCCycles(); EmSCC.Write(a, v, now + slot); Pass(slot)
     ELSIF a >= 800H THEN
       IF cardReset THEN Pass(2) ELSE Pass(extCost); CardWrite(a, v) END
     ELSE Pass(2); slot := a DIV 40H;
@@ -220,7 +234,7 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
     VAR r: INTEGER;
   BEGIN
     IF a >= EmSDRAM.size THEN Pass(2); r := 0FFH
-    ELSIF IO(a) THEN r := IORead(a)
+    ELSIF IO(a) THEN r := IORead(a); irqDue := TRUE
     ELSIF romEn & (a >= romBase) & (a <= 0FFFFH) THEN Pass(2); r := rom[a - romBase]
     ELSE Pass(EmSDRAM.ReadCost(a, now)); r := EmSDRAM.Peek(a)
     END;
@@ -230,18 +244,45 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
   PROCEDURE Write*(a, v: INTEGER);
   BEGIN
     IF a >= EmSDRAM.size THEN Pass(2)
-    ELSIF IO(a) THEN IOWrite(a, v)
+    ELSIF IO(a) THEN IOWrite(a, v); irqDue := TRUE
     ELSE Pass(EmSDRAM.WriteCost(a, now)); EmSDRAM.Poke(a, v)
     END
   END Write;
 
-  (* an internal cycle *)
-  PROCEDURE Idle*;
-  BEGIN Pass(1)
-  END Idle;
+  (* A fill of the core's instruction queue, its bus cycle from cycle at:
+     the word of the SDRAM or the boot ROM (from a to its end), a byte of
+     anything else ($FF: a fill of the I/O block, which no code runs from,
+     reads nothing), and the cycles to its ready. *)
+  PROCEDURE Fetch*(a: INTEGER; at: LONGINT; VAR w: ARRAY OF INTEGER; VAR n: INTEGER): INTEGER;
+    VAR c, i: INTEGER;
+  BEGIN
+    IF (a >= EmSDRAM.size) OR IO(a) THEN n := 1; w[0] := 0FFH;
+      c := 2; IF IO(a) & SCC(a) & (at = sccEnd) THEN c := 3 ELSIF IO(a) & (a >= 800H) & ~cardReset THEN c := extCost END
+    ELSE n := 4 - a MOD 4;
+      IF romEn & (a >= romBase) & (a <= 0FFFFH) THEN c := 2;
+        FOR i := 0 TO n - 1 DO w[i] := rom[a + i - romBase] END
+      ELSE c := EmSDRAM.FetchCost(a, at);
+        FOR i := 0 TO n - 1 DO w[i] := EmSDRAM.Peek(a + i) END
+      END
+    END;
+    RETURN c
+  END Fetch;
 
+  (* cycles of the core without a bus cycle of its own *)
+  PROCEDURE Wait*(c: INTEGER);
+  BEGIN Pass(c)
+  END Wait;
+
+  PROCEDURE Clock*(): LONGINT;
+  BEGIN RETURN now
+  END Clock;
+
+  (* The IRQ line: the sources change as the devices are given the time
+     and as they are accessed, so it is worked out again only then. *)
   PROCEDURE Irq*(): BOOLEAN;
-  BEGIN RETURN AND(IStat(), imask) # 0
+  BEGIN
+    IF irqDue THEN irq := AND(IStat(), imask) # 0; irqDue := FALSE END;
+    RETURN irq
   END Irq;
 
   (* --- without taking time, for loading and the trace --- *)
@@ -263,11 +304,11 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
   (* --- running --- *)
 
   PROCEDURE Reset*;
-  BEGIN now := 0; nextTick := 0; romEn := TRUE; cardReset := FALSE; Hz := EmHost.hz;
+  BEGIN now := 0; nextTick := 0; sccEnd := -1; irq := FALSE; irqDue := TRUE; romEn := TRUE; cardReset := FALSE; Hz := EmHost.hz;
     extCost := 3 * ((Hz + 8399999) DIV 8400000) + (Hz + 25199999) DIV 25200000 + 4;
     EmSDRAM.Reset; EmBlit.Reset; EmSD.Reset; EmADB.Reset; EmSCC.Reset; EmVideo.SetText(FALSE);
     ResetCards; EmSCSI.Reset; EmEth.Reset; EmPower.SetClock(Hz); EmPower.Reset; EmDMA.Reset; EmTimer.Reset; imask := 0FFH;
-    EmCore.SetBus(Read, Peek, Write, Idle, Irq);
+    EmCore.SetBus(Read, Write, Fetch, Wait, Clock, Irq);
     EmCore.Reset
   END Reset;
 

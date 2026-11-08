@@ -2,7 +2,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
    testing programs of the assembler and the Oberon compiler: the
    command line and the running.
 
-   em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-sysclk hz] [-bootrom rom.bin]
+   em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-sysclk hz] [-smc] [-nodisplay] [-bootrom rom.bin]
         [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-prof file cycles] [-test-pattern]
         [-console] [-disk0 file] [-disk1 file] [-wd1793]
         [-scsi file] [-sd file] [-net vmnet|vmnet-host|vmnet-bridged:IF|udp:LPORT:RPORT[:HOST]] [-mac aa:bb:cc:dd:ee:ff] [-adbkey code] [-adbmouse dx dy] file ...
@@ -24,7 +24,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
      EmLoad   ELF loading, traps     EmHost  the host (C side: EmHost_rt.c)
      EmUART EmVIA EmFDC EmL28 EmVideo EmLCD  the devices *)
 
-  IMPORT Env, Files, EmHost, EmMem, EmCPU, EmLoad, EmFDC, Em82077, EmSCSI, EmSD, EmEth, EmADB, EmL28, EmVideo, EmLCD, EmCore, EmSoC, EmHarte;
+  IMPORT Env, Files, EmHost, EmMem, EmCPU, EmLoad, EmFDC, Em82077, EmSCSI, EmSD, EmEth, EmADB, EmL28, EmVideo, EmLCD, EmCore, EmSDRAM, EmSoC, EmHarte;
 
   VAR
     trace, videoEnabled, testPattern, consoleMode, wantFpga, wantL28, bad: BOOLEAN;
@@ -101,6 +101,8 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
         INC(index, 3)
       ELSIF Equal(arg, "-fbdump") & (index + 1 < n) THEN Env.Arg(index + 1, fbdump); INC(index, 2)
       ELSIF Equal(arg, "-fpga") THEN INC(index)
+      ELSIF Equal(arg, "-smc") THEN EmCore.SetSMC(TRUE); INC(index)
+      ELSIF Equal(arg, "-nodisplay") THEN EmSDRAM.NoDisplay; INC(index)
       ELSIF Equal(arg, "-sysclk") & (index + 1 < n) THEN INC(index, 2)
       ELSIF Equal(arg, "-bootrom") & (index + 1 < n) THEN Env.Arg(index + 1, bootrom); INC(index, 2)
       ELSIF Equal(arg, "-font") & (index + 1 < n) THEN Env.Arg(index + 1, font); INC(index, 2)
@@ -126,7 +128,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       ELSIF Equal(arg, "-adbmouse") & (index + 2 < n) THEN
         Env.Arg(index + 1, val); adbDx := Number(val); Env.Arg(index + 2, val); adbDy := Number(val); INC(index, 3)
       ELSIF Equal(arg, "-?") THEN
-        ErrStr("Usage: em16 [-t] [-tfrom addr skip count] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-prof file cycles] [-test-pattern] [-console] [-disk0 file] [-disk1 file] [-wd1793] [-scsi file] [-sd file] [-adbkey code] [-adbmouse dx dy] file ...");
+        ErrStr("Usage: em16 [-t] [-tfrom addr skip count] [-cpu l28|rockwell|wdc|816] [-fpga] [-sysclk hz] [-smc] [-nodisplay] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-prof file cycles] [-test-pattern] [-console] [-disk0 file] [-disk1 file] [-wd1793] [-scsi file] [-sd file] [-adbkey code] [-adbmouse dx dy] file ...");
         EmHost.Ln(EmHost.err); bad := TRUE
       ELSE ErrStr("Invalid: option '"); ErrStr(arg); ErrStr("'"); EmHost.Ln(EmHost.err); bad := TRUE
       END
@@ -290,6 +292,9 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       ELSE CpuThread
       END;
       IF fbdump[0] # 0X THEN FBDump END;
+      IF EmMem.fpga & (EmCore.smcHits > 0) THEN
+        EmHost.Int(EmHost.err, EmCore.smcHits); ErrStr(" stores to queued code"); EmHost.Ln(EmHost.err)
+      END;
       IF EmMem.fpga THEN cycles := EmSoC.now ELSE cycles := EmCPU.cycles END;
       IF EmHost.coutHex THEN EmHost.Report(cycles, 1) ELSE EmHost.Report(cycles, 0) END
     ELSE EmHost.Exit(1)

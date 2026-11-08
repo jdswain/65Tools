@@ -5,9 +5,12 @@ MODULE EmHarte; (* EmCore against the SingleStepTests (TomHarte) vectors,
 
    dir holds the vectors as harte_run.py of the Verilog repository
    converts them (harte/bin/NN.e.hex, NN.n.hex: a byte a line, in hex).
-   For each test the registers and memory are set, one instruction runs
-   to the next fetch (or into WAI or STP), and the registers and the
-   memory the vector lists are compared. As for the Verilog core, MVN and
+   For each test the registers and memory are set, the instruction queue
+   empty, and one instruction runs, a cycle at a time with memory that is
+   always ready (fills bring a word), until it has begun (left the fetch
+   state, or moved PC) and is back at the next fetch (or in WAI or STP);
+   its deferred execute is run (EmCore.Settle), and the registers and the
+   memory the vector lists are compared, as tb_harte does. As for the Verilog core, MVN and
    MVP (44, 54) are expected to fail: the vectors stop a block move part
    of the way through. *)
 
@@ -21,6 +24,7 @@ MODULE EmHarte; (* EmCore against the SingleStepTests (TomHarte) vectors,
     mem: ARRAY 1000000H OF BYTE;
     r: Files.Rider; f: Files.File;
     shown: INTEGER;
+    time: LONGINT;
 
   PROCEDURE Read(a: INTEGER): INTEGER;
   BEGIN RETURN mem[AND(a, 0FFFFFFH)]
@@ -30,8 +34,18 @@ MODULE EmHarte; (* EmCore against the SingleStepTests (TomHarte) vectors,
   BEGIN mem[AND(a, 0FFFFFFH)] := d
   END Write;
 
-  PROCEDURE Idle;
-  END Idle;
+  PROCEDURE Fetch(a: INTEGER; at: LONGINT; VAR w: ARRAY OF INTEGER; VAR n: INTEGER): INTEGER;
+    VAR i: INTEGER;
+  BEGIN n := 4 - a MOD 4; FOR i := 0 TO n - 1 DO w[i] := mem[AND(a + i, 0FFFFFFH)] END; RETURN 1
+  END Fetch;
+
+  PROCEDURE Wait(c: INTEGER);
+  BEGIN time := time + c
+  END Wait;
+
+  PROCEDURE Clock(): LONGINT;
+  BEGIN RETURN time
+  END Clock;
 
   PROCEDURE NoIrq(): BOOLEAN;
   BEGIN RETURN FALSE
@@ -82,7 +96,7 @@ MODULE EmHarte; (* EmCore against the SingleStepTests (TomHarte) vectors,
 
   (* One file of vectors; the number of failures. *)
   PROCEDURE RunFile(name: ARRAY OF CHAR; VAR pass, fail: INTEGER);
-    VAR n, t, i, ni, nf, a, v, cyc, s, x, y: INTEGER; ini, fin: Regs; ok: BOOLEAN;
+    VAR n, t, i, ni, nf, a, v, cyc, s, x, y: INTEGER; ini, fin: Regs; ok, started: BOOLEAN;
       fa, fv: ARRAY 64 OF INTEGER;
   BEGIN pass := 0; fail := 0;
     f := Files.Old(name);
@@ -102,9 +116,13 @@ MODULE EmHarte; (* EmCore against the SingleStepTests (TomHarte) vectors,
         ELSIF ODD(ini.p DIV 16) THEN x := AND(x, 0FFH); y := AND(y, 0FFH)
         END;
         EmCore.SetState(ini.pc, s, ini.p, ini.a, x, y, ini.dbr, ini.d, ini.pbr, ini.e);
-        cyc := 0;
-        REPEAT EmCore.Step(0); INC(cyc)
-        UNTIL EmCore.AtFetch() OR (EmCore.state = 19) OR (EmCore.state = 20) OR (cyc >= 200);
+        (* begun once the state leaves the fetch or PC moves (an implied
+           opcode stays there): the queue starts empty *)
+        cyc := 0; started := FALSE;
+        REPEAT EmCore.Step(0); INC(cyc);
+          IF ~EmCore.AtFetch() OR (EmCore.PC # ini.pc) THEN started := TRUE END
+        UNTIL started & (EmCore.AtFetch() OR (EmCore.state = 19) OR (EmCore.state = 20)) OR (cyc >= 200);
+        EmCore.Settle;
         ok := (cyc < 200) & (EmCore.PC = fin.pc) & (EmCore.S = fin.s) & (EmCore.A = fin.a)
           & (EmCore.X = fin.x) & (EmCore.Y = fin.y) & (EmCore.D = fin.d) & (EmCore.DBR = fin.dbr)
           & (EmCore.PBR = fin.pbr) & (EmCore.GetP() = fin.p) & (EmCore.fE = fin.e);
@@ -141,7 +159,7 @@ MODULE EmHarte; (* EmCore against the SingleStepTests (TomHarte) vectors,
   PROCEDURE Run*(dir: ARRAY OF CHAR; VAR names: Names; n: INTEGER);
     VAR name, file: ARRAY 512 OF CHAR; op, m, pass, fail, tp, tf, k: INTEGER; hex: ARRAY 17 OF CHAR;
   BEGIN
-    EmCore.SetBus(Read, Read, Write, Idle, NoIrq);
+    EmCore.SetBus(Read, Write, Fetch, Wait, Clock, NoIrq); time := 0;
     FOR k := 0 TO 15 DO IF k < 10 THEN hex[k] := CHR(ORD("0") + k) ELSE hex[k] := CHR(ORD("a") + k - 10) END END;
     tp := 0; tf := 0; shown := 0;
     op := 0; k := 0;

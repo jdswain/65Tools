@@ -10,10 +10,12 @@ suites, `as/test816` and Business BASIC use.
     make test       the disk controllers, DMA and the banked direct page
 
 `-t` traces every instruction to standard error: where, the opcode, the
-registers and the cycles so far. `-tfrom addr skip count` traces only
-from the skip+1th time the instruction at addr (`0xFF00`, say) is reached,
-for count instructions: one interrupt or a few, not a whole boot
-(`../../OS16/tools/irqprof.py` profiles such a trace).
+registers and the cycles so far (under `-fpga`, the opcode the core's
+instruction queue holds and the cycle it is taken in). `-tfrom addr skip
+count` traces only from the skip+1th time the instruction at addr
+(`0xFF00`, say) is reached, for count instructions: one interrupt or a
+few, not a whole boot (`../../OS16/tools/irqprof.py` profiles such a
+trace).
 
 `-prof file cycles` (with `-fpga`) writes a sample to file each so many
 cycles: the core's PC (PBR:PC) and the time in thousands of cycles, two
@@ -55,7 +57,7 @@ This port is a derivative of it and under the same licence.
     and for the SoC (-fpga):
 
     EmSoC     its memory map, I/O block, boot ROM, time
-    EmCore    its processor, cpu_65c816.v state for state
+    EmCore    its processor, cpu_65c816.v state for state, cycle for cycle
     EmSDRAM   the 8 MB, the cache, the SDRAM port's time
     EmSCC     the emulated Z85C30 SCC of rtl/scc_85c30.v
     EmADB     the ADB host, with a keyboard and a mouse
@@ -123,7 +125,7 @@ have 1 MB, its symbol table 200000 symbols.
 
 ## The SoC (-fpga)
 
-    em16 -fpga [-sysclk hz] [-bootrom rom.bin] [-font font.hex] [-video] [-fbdump ppm] [-prof file cycles]
+    em16 -fpga [-sysclk hz] [-smc] [-nodisplay] [-bootrom rom.bin] [-font font.hex] [-video] [-fbdump ppm] [-prof file cycles]
                [-disk0 img] [-disk1 img] [-wd1793] [-scsi img] [-sd img]
                [-net vmnet|vmnet-host|vmnet-bridged:IF|udp:LPORT:RPORT[:HOST]]
                [-mac aa:bb:cc:dd:ee:ff] [-adbkey code] [-adbmouse dx dy] [file ...]
@@ -133,10 +135,16 @@ describes it (`rtl/soc.v` and the modules below it, and `fpga/README.md`)
 rather than em16's default machine:
 
 - the processor is `EmCore`, a translation of `cpu_65c816.v` state by
-  state: its bus cycles, its idle cycles and its departures from the
-  WDC chip are those of the core on the board, not EmCPU's. It passes
-  the Harte tests as the core does (`em16 -harte dir [names]`: the
-  same 5,080,011 pass, and the same MVN/MVP files fail). It has the
+  state and cycle by cycle: its 8-byte instruction queue, the opcode
+  taken from it in a cycle and all the operand bytes in the next, a
+  read's and an implied opcode's execute in the next opcode's cycle, a
+  push's setup cycle, its bus cycles, its idle cycles and its departures
+  from the WDC chip are those of the core on the board, not EmCPU's. It
+  passes the Harte tests as the core does (`em16 -harte dir [names]`:
+  with the vectors of 2026-10-31, 5,079,989 pass, file for file as
+  `tb_harte` has it, MVN/MVP's counts included, and the same files
+  fail: the block moves, one SBC and JSR (a,X) at $0100 in emulation
+  mode). It has the
   core's banked direct page and stack too (`WDM #$B1` on, `WDM #$B0`
   off; docs/BankedDP.md in the Verilog repository), which
   `test/banked.sh` checks with the core's own test, banked.s;
@@ -167,8 +175,8 @@ rather than em16's default machine:
   the next. Control-Command lets the mouse go, as does the window going
   behind another, closing, or the guest stopping; the title says which;
 - with `-video`, real time once the guest reads its keyboard and
-  mouse: em16 runs some six times the board's speed, flat out through
-  a boot; when the guest makes 200 ADB transactions in a second (OS16's
+  mouse: em16 runs some 1.8 times the board's speed (70 million of its
+  cycles a second), flat out through a boot; when the guest makes 200 ADB transactions in a second (OS16's
   InputManager makes 400, the boot ROM 100), each millisecond of the
   clock is kept in step with the host's from then on, so a key's repeat
   and a double click take the person's time. Without `-video` it is all
@@ -207,48 +215,73 @@ Time is counted in the SoC's system clock, the board's 40.5 MHz
 (`top_tang20k.v`), or `-sysclk hz`'s (25.2 MHz is the RTL simulation's,
 `tb_soc`'s default). The devices take their times from it as the RTL
 does from `SYS_HZ`: the external bus, the DMA byte, the SCC's character,
-ADB's microsecond, the SD divider's reset value, the SDRAM's refresh, the
-display's line, the tick timer's counts. Each bus cycle of the core takes
-what the board would take:
+ADB's microsecond, the SD divider's reset value, the SDRAM's
+initialisation and refresh, the display's line, the tick timer's counts.
+The core runs a clock at a time, as the RTL's does (Verilog65C816
+0fab85c, f0dd5e8, afc158f): its instruction queue fills in the cycles it
+is off the bus, a state that uses the bus waits for a fill in flight,
+and each bus cycle takes what the board would take:
 
-- boot ROM and I/O block 2 cycles, the external bus 3T + H + 4, T and H
-  the bridge's bus clock and edge gap in system clocks (21 at 40.5 MHz,
-  14 at 25.2: its Intel cycle on the 8.4 MHz timing, as the CPU sees
-  it); while bit 0 of $0340 holds the cards in reset, 2, reading $FF;
+- boot ROM and I/O block 2 cycles (a queue fill from the 32-bit boot
+  ROM brings its word in 2), the external bus 3T + H + 4, T and H the
+  bridge's bus clock and edge gap in system clocks (21 at 40.5 MHz, 14
+  at 25.2: its Intel cycle on the 8.4 MHz timing, as the CPU sees it);
+  while bit 0 of $0340 holds the cards in reset, 2, reading $FF;
+- the emulated SCC 2 cycles, 3 straight after another access to it; its
+  transmitter's buffer and shift register as `scc_85c30.v`'s, ten bit
+  times a character (115200 baud), each way;
 - a DMA byte 3T + H + 5 + DRQ_HOLD cycles (25 at 40.5 MHz, 17 at 25.2);
-  the engine's SDRAM traffic and its hold on the
-  external bus are not counted against the CPU;
-- SDRAM as the cache's state machine: a byte of the held word 1 cycle,
-  another hit 3, a miss 18; a store is posted in 3 and holds the port
-  for 10, so a store or a miss after it may wait;
-- the display's line fetches (137 cycles of each 523 cycle line at 25.2
-  MHz in graphics, 69 in text, the same share at any clock) and refresh
-  (6 of every 190 at 25.2 MHz, 305 at 40.5) take the port first, phased
-  as on the board after the SDRAM's initialisation at 25.2 MHz;
-- the SCC ten bit times a character (115200 baud), each way;
-  an SCC access 3 cycles;
+  the engine's SDRAM traffic and its hold on the external bus are not
+  counted against the CPU;
+- SDRAM as the cache's state machine (`cache.v`, f0dd5e8) and the
+  controller's (`sdram_burst.v`): a data read in the held word 1 cycle,
+  a hit 2, a miss once the write buffer is empty, its burst 3 cycles
+  before the answer (16 with the port free and the row open); a queue
+  fill is a read that leaves the held word alone; a store goes into the
+  4-word write buffer in 2 cycles (merging into the newest word not yet
+  sent), into a full one once the oldest has left, and the buffer drains
+  a word a write transaction whenever the port is free; the blitter and
+  the DMA engine start once it is empty, as `wr_busy` holds them;
+- the controller's sharing as `sdram_burst.v` and `video.v` (7725fee)
+  have it: a refresh every FREQ / 133 kHz + 1 cycles (305 at 40.5 MHz)
+  first, then the display's bursts, 32 of four words for each of the 768
+  lines shown (16 in text mode), at the start of the line before (840
+  cycles a line at 40.5 MHz), each followed by a cycle in which a waiting
+  access of the cache goes first, then the cache; a burst 10 cycles, a
+  write 7, 2 more with the bank's row closed and 3 with another row open
+  (which rows are open is followed); phased from the core's start, once
+  the controller has initialised (FREQ / 5000 + 36 cycles), as `tb_soc`
+  measures them; `-nodisplay` leaves the display out, as `soc.v` with
+  `USE_VIDEO = 0`;
 - the blitter busy for a time fitted to the test bench's 409 timed blits
   (median error 6%); the pixels change when it finishes.
 
-A test program's fetches, timed in the RTL simulation (`tb_soc`, the
-SoC and pixel clocks equal as on the board), and in em16, stayed within
-4 cycles over 3,000, across three waits for the display. Not modelled:
-which SDRAM rows are open (a cycle or two on some misses), the
-display's fetch arbitration beyond its fixed windows, and a typed
-character arriving while one waits: on the board it overruns, here it
-is held back, as if by flow control.
+`fpga/rom/bench.s` of the Verilog repository, its kernels' cycles as its
+tick timer counts them, in `tb_soc` and in em16 (the SCC at the board's
+DIVISOR in both, `-Ptb_soc.DIVISOR=219` or `352`); every instruction is
+taken in the same cycle in both, all through the run:
 
-**Not yet the board's core.** The core and cache are those of the RTL
-before 2026-10-30. Since then the RTL has (Verilog65C816 0fab85c,
-f0dd5e8, afc158f, 7725fee):
-- an 8-byte instruction queue that takes all of an instruction's operand
-  bytes in one cycle;
-- reads and implied operations executed during the next opcode fetch;
-- cache hits in 2 cycles, and a write buffer of 4 merged entries;
-- the display fetched in short bursts that let the CPU in between.
+| Clock, display | sieve | sum | copy | walk |
+|---|---|---|---|---|
+| 25.2 MHz, none | 90,635 | 29,672 | 6,470 | 49,038 |
+| 40.5 MHz, none | 56,395 | 18,432 | 4,031 | 30,493 |
+| 40.5 MHz, 1024 x 768 graphics | 57,028 | 20,182 | 4,236 | 32,940 |
 
-So em16's cycle counts are those of the older core, at the new clock.
-They are still to be brought over, and checked against `tb_soc`.
+(The em16 before the queue gave 109,511, 40,650, 9,526 and 65,266 for the
+last.) Not modelled: the blitter's and the DMA engine's bursts on the
+controller's port 2, which outrank the cache's (a CPU access during a
+blit waits longer on the board); the CPU waiting for the external bus
+while a DMA cycle has it; a queue fill of I/O, which reads nothing here;
+and a typed character arriving while one waits: on the board it
+overruns, here it is held back, as if by flow control.
+
+As on the board, a store does not change bytes already in the core's
+queue (at most the 8 after the storing instruction): code written by
+stores runs as written only after a taken branch, jump, call, return or
+interrupt, or 8 bytes or more past the store (the core's README). `-smc`
+(and `-t`) reports each store into the queued bytes, "store to queued
+code at bb:aaaa, PC bb:aaaa" (the store's address and its instruction's),
+and their number at the end.
 
 ### Disks
 

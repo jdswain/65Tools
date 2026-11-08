@@ -1,13 +1,40 @@
 MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
-   ../../Verilog65C816, translated state for state.
+   ../../Verilog65C816, translated state for state and cycle for cycle.
 
-   The core is a state machine with one bus cycle a state and no dummy
-   cycles; so is this. Step runs one state: the bus access of that state
-   (or an internal cycle) through the procedures the system has set with
-   SetBus, which add the wait states, then the transition. A Verilog
-   clock edge assigns every register at once from the values before it;
-   here the assignments are ordered so that each reads the old values,
-   as there.
+   The core is a state machine with no dummy cycles; so is this. Its
+   states that use the bus (the pointer, data, stack, vector and block
+   move states) make one bus cycle each, through the procedures the
+   system has set with SetBus, which add the wait states. The others
+   (the opcode, the operands, the setup of a push, WAI, STP) take no
+   bus cycle: they run a clock at a time, and take their bytes from the
+   instruction queue.
+
+   The queue holds the 8 bytes from PC on, as the core read them: a fill
+   reads the aligned word holding the next byte to fetch and keeps the
+   bytes from it to the word's end (4 - addr MOD 4; one byte from
+   memory that has no 32-bit read, the I/O block and the external bus),
+   in the cycles the core is off the bus, when the bytes will fit (at
+   most 4 queued once this cycle's bytes are taken) or after a jump. A
+   fill holds the bus until its memory is ready, so a state that uses
+   the bus first waits for one in flight; the states that do not keep
+   running. The opcode is taken from the queue in one cycle and all the
+   operand bytes in the next, once they are there. A jump (a taken
+   branch, a jump, call or return, an interrupt) empties the queue and
+   starts a fill at its target in the next cycle off the bus; a fill
+   then in flight still holds the bus, and its bytes are dropped. A
+   store to bytes already queued does not change them (Store reports
+   it, with SetSMC).
+
+   A read's operand and an implied opcode are executed in the next
+   cycle, as the next opcode is taken (xp, lp), and an interrupt, a pull
+   or return taken behind one, or an empty queue wait a cycle for it; a
+   push, WAI and STP take a cycle of setup (sImp). So a CLI's effect,
+   like a REP or SEP's, comes an instruction late for an IRQ.
+
+   Step runs a clock (a state without a bus cycle) or a state with its
+   bus cycle. A Verilog clock edge assigns every register at once from
+   the values before it; here the assignments are ordered so that each
+   reads the old values, as there.
 
    Its semantics are those of the WDC chip, which the core was checked
    against with the SingleStepTests vectors (em16 -harte checks this
@@ -25,15 +52,16 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
    it; in native mode with it set, D is a page number, the direct page is
    at D * 100H and the stack at Hi(D) * 10000H + S.
 
-   For em16, a fetch from 00:0000 stops the processor, and so does STP. *)
+   For em16, taking an opcode at 00:0000 stops the processor, and so
+   does STP. *)
 
   IMPORT EmHost, EmSym;
 
   CONST
     (* states *)
-    sFetch = 0; sOp1 = 1; sOp2 = 2; sOp3 = 3; sPtrL = 4; sPtrH = 5; sPtrB = 6;
+    sFetch = 0; sOps = 1; sPtrL = 4; sPtrH = 5; sPtrB = 6;
     sRdL = 7; sRdH = 8; sWrL = 9; sWrH = 10; sWbL = 11; sWbH = 12; sPush = 13; sPull = 14;
-    sVecL = 15; sVecH = 16; sMvR = 17; sMvW = 18; sWai = 19; sStp = 20;
+    sVecL = 15; sVecH = 16; sMvR = 17; sMvW = 18; sWai = 19; sStp = 20; sImp = 21;
     (* addressing modes *)
     mdnon = 0; mdimm = 1; mddp = 2; mddpx = 3; mddpy = 4; mdabs = 5; mdabx = 6; mdaby = 7;
     mdabl = 8; mdalx = 9; mdidx = 10; mdidp = 11; mdidy = 12; mdidl = 13; mdily = 14;
@@ -47,11 +75,19 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
     optsb = 22; optrb = 23; oprep = 24; opsep = 25; opnop = 26;
     (* after the last push *)
     ppFetch = 0; ppVec = 1; ppPtr = 2;
+    (* kinds of opcode at the queue's head *)
+    kOps = 0; kLocal = 1; kSetup = 2; kPull = 3;
 
   TYPE
     Reader* = PROCEDURE (addr: INTEGER): INTEGER;
     Writer* = PROCEDURE (addr, data: INTEGER);
-    Idler* = PROCEDURE;
+    (* A queue fill of the word holding addr, its bus cycle starting at
+       cycle at: the bytes from addr to the word's end, or the one byte of
+       a memory without a 32-bit read, in word[0..n-1]; the cycles to its
+       ready, at least 1. It does not pass the time. *)
+    Fetcher* = PROCEDURE (addr: INTEGER; at: LONGINT; VAR word: ARRAY OF INTEGER; VAR n: INTEGER): INTEGER;
+    Waiter* = PROCEDURE (cycles: INTEGER);
+    Clock* = PROCEDURE (): LONGINT;
     Line* = PROCEDURE (): BOOLEAN;
 
   VAR
@@ -61,23 +97,44 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
     xb*: BOOLEAN;            (* banked direct page and stack *)
     (* the state machine *)
     state*, IR: INTEGER;
-    dMode, dCls, dOp: INTEGER;
+    dMode, dCls, dOp, dLen: INTEGER;
     tlo, tmid, tptr, ptrBank, taddr, tdata: INTEGER;
     wrap16, stk16: BOOLEAN;
     pushQ: ARRAY 4 OF INTEGER;    (* bytes to push, the first at pushQ[0] *)
     pushN, postPush, pullIdx, vec: INTEGER;
+    xp, lp: BOOLEAN;              (* an execute pending: of xm (a read), of IR (implied) *)
+    xm: INTEGER;
     irq1, irq2: BOOLEAN;          (* the IRQ input's synchronizer; TRUE: asserted *)
+    (* the instruction queue: qn bytes, the first, at PC, in q[qh]; fa the
+       offset in PBR of the next byte to fetch. The fill in flight: of
+       faddr, ready in the cycle before fEnd, its bytes fw[0..fn-1];
+       fdrop: a jump since, its bytes are dropped. *)
+    q: ARRAY 8 OF INTEGER;
+    qh, qn, fa, faddr, fn: INTEGER;
+    fw: ARRAY 4 OF INTEGER;
+    fbusy, fdrop: BOOLEAN;
+    fEnd: LONGINT;
+    take: INTEGER;                (* this cycle: bytes taken from the queue *)
+    jmp: BOOLEAN; jpc, jbank: INTEGER;   (* this cycle: PC out of sequence, to jbank:jpc *)
+    opAt: INTEGER;                (* the instruction's opcode's address *)
     stopped*, trace*: BOOLEAN;
+    smc: BOOLEAN; smcHits*: INTEGER;      (* stores to queued bytes: SetSMC *)
     traceAt, traceSkip, traceLeft: INTEGER;   (* TraceFrom's *)
     (* the decode table *)
-    mode, cls, op: ARRAY 256 OF INTEGER;
+    mode, cls, op, kind, len: ARRAY 256 OF INTEGER;
     mnem: ARRAY 800 OF CHAR;
     (* the bus *)
-    read, peek: Reader; write: Writer; idle: Idler; irqLine: Line;
+    read: Reader; write: Writer; fetch: Fetcher; wait: Waiter; clock: Clock; irqLine: Line;
 
   PROCEDURE SetTrace*(on: BOOLEAN);
   BEGIN trace := on
   END SetTrace;
+
+  (* Report each store to bytes in the queue: code written by stores that
+     the board would not run as written. *)
+  PROCEDURE SetSMC*(on: BOOLEAN);
+  BEGIN smc := on
+  END SetSMC;
 
   (* The trace on when the instruction at at is reached for the skip+1th
      time, and off again after count instructions. *)
@@ -85,8 +142,8 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
   BEGIN traceAt := at; traceSkip := skip; traceLeft := count
   END TraceFrom;
 
-  PROCEDURE SetBus*(r, p: Reader; w: Writer; i: Idler; irq: Line);
-  BEGIN read := r; peek := p; write := w; idle := i; irqLine := irq
+  PROCEDURE SetBus*(r: Reader; w: Writer; f: Fetcher; wt: Waiter; c: Clock; irq: Line);
+  BEGIN read := r; write := w; fetch := f; wait := wt; clock := c; irqLine := irq
   END SetBus;
 
   (* --- helpers --- *)
@@ -302,6 +359,65 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
     END
   END RmwCore;
 
+  (* An implied opcode (IR), the cycle after its fetch. *)
+  PROCEDURE ExecImp;
+    VAR o, t: INTEGER;
+  BEGIN o := IR;
+    CASE o OF
+      18H: fC := 0
+    | 38H: fC := 1
+    | 58H: fI := 0
+    | 78H: fI := 1
+    | 0B8H: fV := 0
+    | 0D8H: fD := 0
+    | 0F8H: fD := 1
+    | 0AH: RmwCore(opasl, Av(), TRUE)
+    | 2AH: RmwCore(oprol, Av(), TRUE)
+    | 4AH: RmwCore(oplsr, Av(), TRUE)
+    | 6AH: RmwCore(opror, Av(), TRUE)
+    | 1AH: RmwCore(opinc, Av(), TRUE)
+    | 3AH: RmwCore(opdec, Av(), TRUE)
+    | 0AAH: LdX(A)
+    | 0A8H: LdY(A)
+    | 8AH: LdA(X)
+    | 98H: LdA(Y)
+    | 0BAH: LdX(S)
+    | 9AH: IF fE # 0 THEN S := 100H + Lo(X) ELSE S := X END
+    | 9BH: LdY(X)
+    | 0BBH: LdX(Y)
+    | 1BH: IF fE # 0 THEN S := 100H + Lo(A) ELSE S := A END
+    | 3BH: A := S; fN := Bit(S, 15); fZ := B(S = 0)
+    | 5BH: D := A; fN := Bit(A, 15); fZ := B(A = 0)
+    | 7BH: A := D; fN := Bit(D, 15); fZ := B(D = 0)
+    | 0E8H: LdX(X + 1)
+    | 0CAH: LdX(X - 1)
+    | 0C8H: LdY(Y + 1)
+    | 88H: LdY(Y - 1)
+    | 0EBH: fN := Bit(A, 15); fZ := B(Hi(A) = 0); A := Lo(A) * 256 + Hi(A)
+    | 0FBH: t := fE; fE := fC; fC := t;
+        IF fE # 0 THEN fM := 1; fX := 1; X := Lo(X); Y := Lo(Y); S := 100H + Lo(S) END
+    ELSE (* NOP *)
+    END
+  END ExecImp;
+
+  (* The pending execute, if any *)
+  PROCEDURE Pending;
+  BEGIN
+    IF xp THEN ExecRd(xm) END;
+    IF lp THEN ExecImp END;
+    xp := FALSE; lp := FALSE
+  END Pending;
+
+  (* PC out of sequence: the queue empties, a fill in flight is dropped *)
+  PROCEDURE Jump(v: INTEGER);
+  BEGIN PC := W16(v); jmp := TRUE; jpc := PC; jbank := PBR
+  END Jump;
+
+  (* ... and PBR with it *)
+  PROCEDURE JumpL(b, v: INTEGER);
+  BEGIN PBR := b; Jump(v); jbank := b
+  END JumpL;
+
   PROCEDURE Push8(v: INTEGER);
   BEGIN pushQ[0] := Lo(v); pushN := 1; stk16 := FALSE; postPush := ppFetch; state := sPush
   END Push8;
@@ -416,6 +532,11 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
   BEGIN IF dCls = clwr THEN r := sWrL ELSE r := sRdL END; RETURN r
   END DataState;
 
+  (* the queue's ith byte *)
+  PROCEDURE Qb(i: INTEGER): INTEGER;
+  BEGIN RETURN q[AND(qh + i, 7)]
+  END Qb;
+
   (* --- the trace --- *)
 
   PROCEDURE ErrStr(s: ARRAY OF CHAR);
@@ -443,158 +564,152 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
     EmHost.Ln(EmHost.err)
   END Trace;
 
-  (* --- the state machine --- *)
+  PROCEDURE Addr(a: INTEGER);
+  BEGIN EmHost.ToHex(EmHost.err, a DIV 10000H, 2); EmHost.Ch(EmHost.err, ":"); EmHost.ToHex(EmHost.err, W16(a), 4)
+  END Addr;
 
-  (* The fetch state: an interrupt, or an opcode read and the one cycle
-     instructions done at once. *)
-  PROCEDURE Fetch(cycles: LONGINT);
-    VAR o, t: INTEGER;
+  (* A store by a state of the core: the bytes queued from PC on are not
+     changed by it (on the board; nor here, as the queue holds what was
+     read). *)
+  PROCEDURE Store(a, v: INTEGER);
   BEGIN
-    IF Intr() THEN idle; IntEntry(PC, 0, 0FFEEH + 10H * fE)   (* IRQ: native $FFEE, emulation $FFFE *)
-    ELSIF (PBR = 0) & (PC = 0) THEN stopped := TRUE; idle
-    ELSE
-      IF (traceAt >= 0) & (PBR * 10000H + PC = traceAt) THEN
-        IF traceSkip > 0 THEN DEC(traceSkip) ELSE trace := TRUE; traceAt := -1 END
-      END;
-      IF trace THEN Trace(peek(PBR * 10000H + PC), cycles);
-        IF traceLeft > 0 THEN DEC(traceLeft); IF traceLeft = 0 THEN trace := FALSE END END
-      END;
-      o := read(PBR * 10000H + PC);
-      PC := W16(PC + 1);
-      CASE o OF
-        18H: fC := 0
-      | 38H: fC := 1
-      | 58H: fI := 0
-      | 78H: fI := 1
-      | 0B8H: fV := 0
-      | 0D8H: fD := 0
-      | 0F8H: fD := 1
-      | 0EAH:
-      | 0AH: RmwCore(opasl, Av(), TRUE)
-      | 2AH: RmwCore(oprol, Av(), TRUE)
-      | 4AH: RmwCore(oplsr, Av(), TRUE)
-      | 6AH: RmwCore(opror, Av(), TRUE)
-      | 1AH: RmwCore(opinc, Av(), TRUE)
-      | 3AH: RmwCore(opdec, Av(), TRUE)
-      | 0AAH: LdX(A)
-      | 0A8H: LdY(A)
-      | 8AH: LdA(X)
-      | 98H: LdA(Y)
-      | 0BAH: LdX(S)
-      | 9AH: IF fE # 0 THEN S := 100H + Lo(X) ELSE S := X END
-      | 9BH: LdY(X)
-      | 0BBH: LdX(Y)
-      | 1BH: IF fE # 0 THEN S := 100H + Lo(A) ELSE S := A END
-      | 3BH: A := S; fN := Bit(S, 15); fZ := B(S = 0)
-      | 5BH: D := A; fN := Bit(A, 15); fZ := B(A = 0)
-      | 7BH: A := D; fN := Bit(D, 15); fZ := B(D = 0)
-      | 0E8H: LdX(X + 1)
-      | 0CAH: LdX(X - 1)
-      | 0C8H: LdY(Y + 1)
-      | 88H: LdY(Y - 1)
-      | 0EBH: fN := Bit(A, 15); fZ := B(Hi(A) = 0); A := Lo(A) * 256 + Hi(A)
-      | 0FBH: t := fE; fE := fC; fC := t;
-          IF fE # 0 THEN fM := 1; fX := 1; X := Lo(X); Y := Lo(Y); S := 100H + Lo(S) END
-      | 08H: Push8(Pbyte(1))
-      | 0BH: Push16(D)
-      | 48H: IF M16() THEN Push16(A) ELSE Push8(A) END
-      | 4BH: Push8(PBR)
-      | 5AH: IF X16() THEN Push16(Y) ELSE Push8(Y) END
-      | 8BH: Push8(DBR)
-      | 0DAH: IF X16() THEN Push16(X) ELSE Push8(X) END
-      | 28H, 2BH, 68H, 7AH, 0ABH, 0FAH, 40H, 60H, 6BH:
-          Decode(o); pullIdx := 0; state := sPull;
-          stk16 := (o = 2BH) OR (o = 6BH) OR (o = 0ABH)
-      | 0CBH: state := sWai
-      | 0DBH: state := sStp; stopped := TRUE
-      ELSE Decode(o); state := sOp1
+    IF (smc OR trace) & (qn > 0) & (a DIV 10000H = PBR) & (W16(a - PC) < qn) THEN INC(smcHits);
+      ErrStr("store to queued code at "); Addr(a); ErrStr(", PC "); Addr(opAt); EmHost.Ln(EmHost.err)
+    END;
+    write(a, v)
+  END Store;
+
+  (* --- the states without a bus cycle: a clock each --- *)
+
+  (* The opcode: the pending execute, an interrupt, or the opcode taken
+     from the queue's head. *)
+  PROCEDURE Fetch(intr: BOOLEAN; cycles: LONGINT);
+    VAR o, k: INTEGER;
+  BEGIN o := Qb(0);
+    IF (xp OR lp) & (intr OR (qn = 0) OR (kind[o] = kPull)) THEN Pending   (* the execute first: fetch again *)
+    ELSIF intr THEN IntEntry(PC, 0, 0FFEEH + 10H * fE)   (* IRQ: native $FFEE, emulation $FFFE *)
+    ELSIF qn # 0 THEN Pending;
+      IF (PBR = 0) & (PC = 0) THEN stopped := TRUE
+      ELSE
+        IF (traceAt >= 0) & (PBR * 10000H + PC = traceAt) THEN
+          IF traceSkip > 0 THEN DEC(traceSkip) ELSE trace := TRUE; traceAt := -1 END
+        END;
+        IF trace THEN Trace(o, cycles);
+          IF traceLeft > 0 THEN DEC(traceLeft); IF traceLeft = 0 THEN trace := FALSE END END
+        END;
+        opAt := PBR * 10000H + PC; PC := W16(PC + 1); take := 1;
+        Decode(o); k := kind[o];
+        IF k = kPull THEN pullIdx := 0; state := sPull; stk16 := (o = 2BH) OR (o = 6BH) OR (o = 0ABH)
+        ELSE dLen := len[o];
+          IF k = kLocal THEN lp := TRUE
+          ELSIF k = kSetup THEN state := sImp
+          ELSE state := sOps
+          END
+        END
       END
     END
   END Fetch;
 
-  PROCEDURE Op1;
-    VAR r, pcn, md: INTEGER;
-  BEGIN r := read(PBR * 10000H + PC); pcn := W16(PC + 1); PC := pcn;
-    IF IR = 00H THEN IntEntry(pcn, 1, 0FFE6H + 18H * fE)            (* BRK: $FFE6 / $FFFE *)
-    ELSIF IR = 02H THEN IntEntry(pcn, 1, 0FFE4H + 10H * fE)         (* COP: $FFE4 / $FFF4 *)
-    ELSIF (IR = 44H) OR (IR = 54H) THEN DBR := r; state := sOp2     (* MVP/MVN: destination bank *)
-    ELSIF (IR = 62H) OR (IR = 0F4H) OR (IR = 82H) THEN tlo := r; state := sOp2
-    ELSIF IR = 0D4H THEN                                             (* PEI *)
-      IF Dpw() THEN tptr := Hi(D) * 256 + r ELSE tptr := W16(Dbase() + r) END;
-      ptrBank := Dbank(); state := sPtrL
-    ELSE md := dMode;
-      CASE md OF
-        mdrel: IF Btake() THEN PC := W16(pcn + Sext8(r)) ELSE PC := pcn END; state := sFetch
-      | mdimm:
-          IF Rd16() THEN tlo := r; state := sOp2 ELSE ExecRd(r); state := sFetch END
-      | mddp:
-          IF Dpw() THEN taddr := Hi(D) * 256 + r ELSE taddr := Dbank() * 10000H + W16(Dbase() + r) END;
-          wrap16 := TRUE; state := DataState()
-      | mddpx:
-          IF Dpw() THEN taddr := Hi(D) * 256 + Lo(r + X) ELSE taddr := Dbank() * 10000H + W16(Dbase() + r + X) END;
-          wrap16 := TRUE; state := DataState()
-      | mddpy:
-          IF Dpw() THEN taddr := Hi(D) * 256 + Lo(r + Y) ELSE taddr := Dbank() * 10000H + W16(Dbase() + r + Y) END;
-          wrap16 := TRUE; state := DataState()
-      | mdsr: taddr := Dbank() * 10000H + W16(S + r); wrap16 := TRUE; state := DataState()
-      | mdidx:
-          IF Dpw() THEN tptr := Hi(D) * 256 + Lo(r + X) ELSE tptr := W16(Dbase() + r + X) END;
-          ptrBank := Dbank(); state := sPtrL
-      | mdidp, mdidy, mdidl, mdily:
-          IF Dpw() THEN tptr := Hi(D) * 256 + r ELSE tptr := W16(Dbase() + r) END;
-          ptrBank := Dbank(); state := sPtrL
-      | mdsry: tptr := W16(S + r); ptrBank := Dbank(); state := sPtrL
-      ELSE tlo := r; state := sOp2
+  (* A push, WAI or STP, a cycle after its fetch *)
+  PROCEDURE Imp;
+    VAR o: INTEGER;
+  BEGIN o := IR;
+    CASE o OF
+      08H: Push8(Pbyte(1))
+    | 0BH: Push16(D)
+    | 48H: IF M16() THEN Push16(A) ELSE Push8(A) END
+    | 4BH: Push8(PBR)
+    | 5AH: IF X16() THEN Push16(Y) ELSE Push8(Y) END
+    | 8BH: Push8(DBR)
+    | 0DAH: IF X16() THEN Push16(X) ELSE Push8(X) END
+    | 0CBH: state := sWai
+    | 0DBH: state := sStp; stopped := TRUE
+    ELSE state := sFetch
+    END
+  END Imp;
+
+  (* The operand bytes, all at once when they are queued: b1-b3, PC at b1,
+     pce past the instruction. *)
+  (* the operand bytes: an immediate's second byte hangs on m or x *)
+  PROCEDURE Olen(): INTEGER;
+    VAR r: INTEGER;
+  BEGIN r := dLen; IF (dMode = mdimm) & Rd16() THEN INC(r) END; RETURN r
+  END Olen;
+
+  PROCEDURE Ops;
+    VAR olen, b1, b2, b3, w, pcn, pce, md: INTEGER;
+  BEGIN olen := Olen();
+    IF qn >= olen THEN
+      b1 := Qb(0); b2 := Qb(1); b3 := Qb(2); w := b2 * 256 + b1;
+      pcn := W16(PC + 1); pce := W16(PC + olen); PC := pce; take := olen;
+      IF IR = 00H THEN IntEntry(pce, 1, 0FFE6H + 18H * fE)                 (* BRK: $FFE6 / $FFFE *)
+      ELSIF IR = 02H THEN IntEntry(pce, 1, 0FFE4H + 10H * fE)              (* COP: $FFE4 / $FFF4 *)
+      ELSIF (IR = 44H) OR (IR = 54H) THEN DBR := b1; tmid := b2; state := sMvR   (* MVP/MVN: dest, src bank *)
+      ELSIF IR = 62H THEN Push16(pce + w)                                  (* PER *)
+      ELSIF IR = 0F4H THEN Push16(w)                                       (* PEA *)
+      ELSIF IR = 82H THEN Jump(pce + w); state := sFetch                   (* BRL *)
+      ELSIF IR = 0D4H THEN                                                  (* PEI *)
+        IF Dpw() THEN tptr := Hi(D) * 256 + b1 ELSE tptr := W16(Dbase() + b1) END;
+        ptrBank := Dbank(); state := sPtrL
+      ELSIF IR = 20H THEN                                                   (* JSR a *)
+        pushQ[0] := Hi(pcn); pushQ[1] := Lo(pcn); pushN := 2; stk16 := FALSE; postPush := ppFetch;
+        Jump(w); state := sPush
+      ELSIF IR = 0FCH THEN                                                  (* JSR (a,X) *)
+        pushQ[0] := Hi(pcn); pushQ[1] := Lo(pcn); pushN := 2; stk16 := FALSE; postPush := ppPtr;
+        tptr := W16(w + X); ptrBank := PBR; state := sPush
+      ELSIF IR = 4CH THEN Jump(w); state := sFetch                          (* JMP a *)
+      ELSIF (IR = 6CH) OR (IR = 0DCH) THEN tptr := w; ptrBank := 0; state := sPtrL   (* JMP (a), JML [a] *)
+      ELSIF IR = 7CH THEN tptr := W16(w + X); ptrBank := PBR; state := sPtrL         (* JMP (a,X) *)
+      ELSIF IR = 5CH THEN JumpL(b3, w); state := sFetch                     (* JML *)
+      ELSIF IR = 22H THEN                                                   (* JSL *)
+        pushQ[0] := PBR; pushQ[1] := Hi(pce - 1); pushQ[2] := Lo(pce - 1); pushN := 3; stk16 := TRUE;
+        postPush := ppFetch; JumpL(b3, w); state := sPush
+      ELSE md := dMode;
+        CASE md OF
+          mdrel: IF Btake() THEN Jump(pce + Sext8(b1)) END; state := sFetch
+        | mdimm: IF Rd16() THEN xm := w ELSE xm := b1 END; xp := TRUE; state := sFetch
+        | mddp:
+            IF Dpw() THEN taddr := Hi(D) * 256 + b1 ELSE taddr := Dbank() * 10000H + W16(Dbase() + b1) END;
+            wrap16 := TRUE; state := DataState()
+        | mddpx:
+            IF Dpw() THEN taddr := Hi(D) * 256 + Lo(b1 + X) ELSE taddr := Dbank() * 10000H + W16(Dbase() + b1 + X) END;
+            wrap16 := TRUE; state := DataState()
+        | mddpy:
+            IF Dpw() THEN taddr := Hi(D) * 256 + Lo(b1 + Y) ELSE taddr := Dbank() * 10000H + W16(Dbase() + b1 + Y) END;
+            wrap16 := TRUE; state := DataState()
+        | mdsr: taddr := Dbank() * 10000H + W16(S + b1); wrap16 := TRUE; state := DataState()
+        | mdidx:
+            IF Dpw() THEN tptr := Hi(D) * 256 + Lo(b1 + X) ELSE tptr := W16(Dbase() + b1 + X) END;
+            ptrBank := Dbank(); state := sPtrL
+        | mdidp, mdidy, mdidl, mdily:
+            IF Dpw() THEN tptr := Hi(D) * 256 + b1 ELSE tptr := W16(Dbase() + b1) END;
+            ptrBank := Dbank(); state := sPtrL
+        | mdsry: tptr := W16(S + b1); ptrBank := Dbank(); state := sPtrL
+        | mdabs: taddr := DBR * 10000H + w; wrap16 := FALSE; state := DataState()
+        | mdabx: taddr := A24(DBR * 10000H + w + X); wrap16 := FALSE; state := DataState()
+        | mdaby: taddr := A24(DBR * 10000H + w + Y); wrap16 := FALSE; state := DataState()
+        ELSE (* abl, alx *)
+          taddr := b3 * 10000H + w;
+          IF md = mdalx THEN taddr := A24(taddr + X) END;
+          wrap16 := FALSE; state := DataState()
+        END
       END
     END
-  END Op1;
+  END Ops;
 
-  (* the return address goes first, then on to the pointer or the fetch *)
-  PROCEDURE PushPC(after: INTEGER);
-  BEGIN pushQ[0] := Hi(PC); pushQ[1] := Lo(PC); pushN := 2; stk16 := FALSE; postPush := after; state := sPush
-  END PushPC;
-
-  PROCEDURE Op2;
-    VAR r, pcn, md, w: INTEGER;
-  BEGIN r := read(PBR * 10000H + PC); pcn := W16(PC + 1); w := r * 256 + tlo;
-    IF (IR = 44H) OR (IR = 54H) THEN PC := pcn; tmid := r; state := sMvR
-    ELSIF IR = 62H THEN PC := pcn; Push16(pcn + w)                       (* PER *)
-    ELSIF IR = 0F4H THEN PC := pcn; Push16(w)                            (* PEA *)
-    ELSIF IR = 82H THEN PC := W16(pcn + w); state := sFetch              (* BRL *)
-    ELSIF IR = 20H THEN PushPC(ppFetch); PC := w                         (* JSR a: pushes the old PC *)
-    ELSIF IR = 0FCH THEN PushPC(ppPtr); PC := pcn; tptr := W16(w + X); ptrBank := PBR   (* JSR (a,X) *)
-    ELSIF IR = 4CH THEN PC := w; state := sFetch                         (* JMP a *)
-    ELSIF (IR = 6CH) OR (IR = 0DCH) THEN PC := pcn; tptr := w; ptrBank := 0; state := sPtrL
-    ELSIF IR = 7CH THEN PC := pcn; tptr := W16(w + X); ptrBank := PBR; state := sPtrL
-    ELSE PC := pcn; md := dMode;
-      CASE md OF
-        mdimm: ExecRd(w); state := sFetch
-      | mdabs: taddr := DBR * 10000H + w; wrap16 := FALSE; state := DataState()
-      | mdabx: taddr := A24(DBR * 10000H + w + X); wrap16 := FALSE; state := DataState()
-      | mdaby: taddr := A24(DBR * 10000H + w + Y); wrap16 := FALSE; state := DataState()
-      ELSE tmid := r; state := sOp3
-      END
+  PROCEDURE Wai;
+  BEGIN
+    IF irq2 THEN
+      IF fI = 0 THEN IntEntry(PC, 0, 0FFEEH + 10H * fE) ELSE state := sFetch END
     END
-  END Op2;
+  END Wai;
 
-  PROCEDURE Op3;
-    VAR r, oldPC: INTEGER;
-  BEGIN r := read(PBR * 10000H + PC); oldPC := PC; PC := W16(PC + 1);
-    IF IR = 5CH THEN PBR := r; PC := tmid * 256 + tlo; state := sFetch                 (* JML *)
-    ELSIF IR = 22H THEN                                                              (* JSL *)
-      pushQ[0] := PBR; pushQ[1] := Hi(oldPC); pushQ[2] := Lo(oldPC); pushN := 3; stk16 := TRUE;
-      postPush := ppFetch; PBR := r; PC := tmid * 256 + tlo; state := sPush
-    ELSE
-      taddr := r * 10000H + tmid * 256 + tlo;
-      IF dMode = mdalx THEN taddr := A24(taddr + X) END;
-      wrap16 := FALSE; state := DataState()
-    END
-  END Op3;
+  (* --- the states with a bus cycle --- *)
 
   PROCEDURE PtrH;
     VAR r, md: INTEGER;
   BEGIN r := read(ptrBank * 10000H + W16(tptr + 1));
-    IF (IR = 6CH) OR (IR = 7CH) OR (IR = 0FCH) THEN PC := r * 256 + tlo; state := sFetch
+    IF (IR = 6CH) OR (IR = 7CH) OR (IR = 0FCH) THEN Jump(r * 256 + tlo); state := sFetch
     ELSIF IR = 0D4H THEN Push16(r * 256 + tlo)
     ELSIF IR = 0DCH THEN tmid := r; state := sPtrB
     ELSE md := dMode;
@@ -609,7 +724,7 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
   PROCEDURE PtrB;
     VAR r: INTEGER;
   BEGIN r := read(ptrBank * 10000H + W16(tptr + 2));
-    IF IR = 0DCH THEN PC := tmid * 256 + tlo; PBR := r; state := sFetch
+    IF IR = 0DCH THEN Jump(tmid * 256 + tlo); PBR := r; state := sFetch
     ELSE
       taddr := r * 10000H + tmid * 256 + tlo;
       IF dMode = mdily THEN taddr := A24(taddr + Y) END;
@@ -617,26 +732,26 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
     END
   END PtrB;
 
+  (* The data is latched, not used: a read's execute runs in the next
+     opcode's cycle, a read-modify-write's in its write. *)
   PROCEDURE RdL;
     VAR r: INTEGER;
   BEGIN r := read(taddr);
     IF Rd16() THEN tlo := r; state := sRdH
-    ELSIF dCls = clmw THEN RmwCore(dOp, r, FALSE); state := sWbL
-    ELSE ExecRd(r); state := sFetch
+    ELSIF dCls = clmw THEN xm := r; state := sWbL
+    ELSE xm := r; xp := TRUE; state := sFetch
     END
   END RdL;
 
   PROCEDURE RdH;
     VAR r: INTEGER;
-  BEGIN r := read(Taddr1());
-    IF dCls = clmw THEN RmwCore(dOp, r * 256 + tlo, FALSE); state := sWbL
-    ELSE ExecRd(r * 256 + tlo); state := sFetch
-    END
+  BEGIN r := read(Taddr1()); xm := r * 256 + tlo;
+    IF dCls = clmw THEN state := sWbL ELSE xp := TRUE; state := sFetch END
   END RdH;
 
   PROCEDURE PushState;
     VAR i: INTEGER;
-  BEGIN write(SpPush(), pushQ[0]);
+  BEGIN Store(SpPush(), pushQ[0]);
     SDec;
     FOR i := 0 TO 2 DO pushQ[i] := pushQ[i + 1] END;
     DEC(pushN);
@@ -669,23 +784,23 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
         state := sFetch
       END
     ELSIF o = 60H THEN
-      IF idx = 0 THEN tlo := r ELSE PC := W16(r * 256 + tlo + 1); state := sFetch END
+      IF idx = 0 THEN tlo := r ELSE Jump(r * 256 + tlo + 1); state := sFetch END
     ELSIF o = 6BH THEN
       IF idx = 0 THEN tlo := r
-      ELSIF idx = 1 THEN PC := W16(r * 256 + tlo + 1)
+      ELSIF idx = 1 THEN Jump(r * 256 + tlo + 1)
       ELSE PBR := r; IF fE # 0 THEN S := 100H + Lo(S) END; state := sFetch
       END
     ELSE (* RTI *)
       IF idx = 0 THEN SetP(r)
       ELSIF idx = 1 THEN tlo := r
-      ELSIF idx = 2 THEN PC := r * 256 + tlo; IF fE # 0 THEN state := sFetch END
+      ELSIF idx = 2 THEN Jump(r * 256 + tlo); IF fE # 0 THEN state := sFetch END
       ELSE PBR := r; state := sFetch
       END
     END
   END PullState;
 
   PROCEDURE MvW;
-  BEGIN write(DBR * 10000H + Y, Lo(tdata));
+  BEGIN Store(DBR * 10000H + Y, Lo(tdata));
     IF X16() THEN
       IF IR = 54H THEN X := W16(X + 1); Y := W16(Y + 1) ELSE X := W16(X - 1); Y := W16(Y - 1) END
     ELSE
@@ -693,43 +808,113 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
     END;
     IF A = 0 THEN A := 0FFFFH; state := sFetch
     ELSE A := A - 1;
-      IF Intr() THEN PC := W16(PC - 3); state := sFetch ELSE state := sMvR END
+      IF Intr() THEN Jump(PC - 3); state := sFetch ELSE state := sMvR END
     END
   END MvW;
 
-  (* One state: its bus cycle, then the transition. The IRQ input reaches
-     the core through two flip-flops. *)
-  PROCEDURE Step*(cycles: LONGINT);
-    VAR s: INTEGER;
-  BEGIN s := state;
-    CASE s OF
-      sFetch: Fetch(cycles)
-    | sOp1: Op1
-    | sOp2: Op2
-    | sOp3: Op3
-    | sPtrL: tlo := read(ptrBank * 10000H + tptr); state := sPtrH
-    | sPtrH: PtrH
-    | sPtrB: PtrB
-    | sRdL: RdL
-    | sRdH: RdH
-    | sWrL: write(taddr, Lo(StVal())); IF St16() THEN state := sWrH ELSE state := sFetch END
-    | sWrH: write(Taddr1(), Hi(StVal())); state := sFetch
-    | sWbL: write(taddr, Lo(tdata)); IF Rd16() THEN state := sWbH ELSE state := sFetch END
-    | sWbH: write(Taddr1(), Hi(tdata)); state := sFetch
-    | sPush: PushState
-    | sPull: PullState
-    | sVecL: PC := ORA(AND(PC, 0FF00H), read(vec)); state := sVecH
-    | sVecH: PC := ORA(Lo(PC), read(W16(vec + 1)) * 256); state := sFetch
-    | sMvR: tdata := read(tmid * 10000H + X); state := sMvW
-    | sMvW: MvW
-    | sWai: idle;
-        IF irq2 THEN
-          IF fI = 0 THEN IntEntry(PC, 0, 0FFEEH + 10H * fE) ELSE state := sFetch END
-        END
-    | sStp: idle
+  (* --- the queue --- *)
+
+  (* The fill in flight lands its bytes *)
+  PROCEDURE Land;
+    VAR i: INTEGER;
+  BEGIN
+    FOR i := 0 TO fn - 1 DO q[AND(qh + qn + i, 7)] := fw[i] END;
+    qn := qn + fn; fa := W16(fa + fn)
+  END Land;
+
+  (* The edge at the end of a cycle without a bus cycle of the core's own:
+     the bytes taken, the fill landing (rdy: its ready is in this cycle),
+     a jump, and the next fill. s the state the cycle ran, intr whether
+     an interrupt was pending in it, pbr PBR in it. *)
+  PROCEDURE Queue(s: INTEGER; rdy, intr: BOOLEAN; pbr: INTEGER);
+    VAR qc, fa0, nf: INTEGER; stn, stf, start, busy, drop: BOOLEAN;
+  BEGIN
+    qh := AND(qh + take, 7); qn := qn - take; qc := qn; fa0 := fa; busy := fbusy; drop := fdrop;
+    IF busy THEN nf := fn ELSE nf := 0 END;
+    IF jmp THEN qn := 0; fa := jpc
+    ELSIF busy & rdy & ~drop THEN Land
     END;
-    irq2 := irq1; irq1 := irqLine()
+    IF busy & rdy THEN fbusy := FALSE; fdrop := FALSE ELSIF busy & jmp THEN fdrop := TRUE END;
+    stn := (s # sFetch) OR ~intr;
+    stf := stn & (jmp OR (qc + nf <= 4)); stn := stn & (jmp OR (qc <= 4));
+    IF busy THEN start := rdy & ((drop OR jmp) & stn OR ~(drop OR jmp) & stf) ELSE start := stn END;
+    IF start THEN
+      IF jmp THEN faddr := jbank * 10000H + jpc; fa := jpc
+      ELSIF busy & ~drop THEN faddr := pbr * 10000H + W16(fa0 + nf)
+      ELSE faddr := pbr * 10000H + fa0
+      END;
+      fbusy := TRUE; fdrop := FALSE;
+      fEnd := clock() + fetch(faddr, clock(), fw, fn)
+    END
+  END Queue;
+
+  (* A state that uses the bus waits for a fill in flight. *)
+  PROCEDURE WaitFill;
+    VAR n: INTEGER;
+  BEGIN n := fEnd - clock();
+    IF n > 0 THEN wait(n) END;
+    IF ~fdrop THEN Land END;
+    fbusy := FALSE; fdrop := FALSE;
+    IF n >= 2 THEN irq1 := irqLine(); irq2 := irq1 ELSE irq2 := irq1; irq1 := irqLine() END
+  END WaitFill;
+
+  (* One clock of a state without a bus cycle, or a state with its bus
+     cycle (after any fill in flight). The IRQ input reaches the core
+     through two flip-flops, the second clocked as a bus cycle ends or
+     in a cycle without one. *)
+  PROCEDURE Step*(cycles: LONGINT);
+    VAR s, pbr: INTEGER; rdy, intr, busy: BOOLEAN; t: LONGINT;
+  BEGIN s := state; take := 0; jmp := FALSE;
+    IF (s >= sPtrL) & (s <= sMvW) THEN
+      IF fbusy THEN WaitFill END;
+      t := clock();
+      CASE s OF
+        sPtrL: tlo := read(ptrBank * 10000H + tptr); state := sPtrH
+      | sPtrH: PtrH
+      | sPtrB: PtrB
+      | sRdL: RdL
+      | sRdH: RdH
+      | sWrL: Store(taddr, Lo(StVal())); IF St16() THEN state := sWrH ELSE state := sFetch END
+      | sWrH: Store(Taddr1(), Hi(StVal())); state := sFetch
+      | sWbL: RmwCore(dOp, xm, FALSE); Store(taddr, Lo(tdata)); IF Rd16() THEN state := sWbH ELSE state := sFetch END
+      | sWbH: Store(Taddr1(), Hi(tdata)); state := sFetch
+      | sPush: PushState
+      | sPull: PullState
+      | sVecL: tlo := read(vec); state := sVecH
+      | sVecH: Jump(read(W16(vec + 1)) * 256 + tlo); state := sFetch
+      | sMvR: tdata := read(tmid * 10000H + X); state := sMvW
+      | sMvW: MvW
+      END;
+      IF jmp THEN qn := 0; fa := jpc END;
+      IF clock() - t >= 2 THEN irq1 := irqLine(); irq2 := irq1 ELSE irq2 := irq1; irq1 := irqLine() END
+    ELSIF fbusy & (clock() + 1 < fEnd) & ((s = sFetch) & (qn = 0) & ~xp & ~lp & ~Intr() OR (s = sOps) & (qn < Olen())) THEN
+      (* waiting for the fill in flight, which is not ready yet: the cycles
+         before its ready change nothing but irq1 *)
+      wait(fEnd - 1 - clock()); irq1 := irqLine()
+    ELSE
+      busy := fbusy; rdy := fbusy & (clock() + 1 >= fEnd); intr := Intr(); pbr := PBR;
+      CASE s OF
+        sFetch: Fetch(intr, clock())
+      | sOps: Ops
+      | sImp: Imp
+      | sWai: Wai
+      | sStp:
+      END;
+      wait(1);
+      Queue(s, rdy, intr, pbr);
+      IF ~busy OR rdy THEN irq2 := irq1 END; irq1 := irqLine()
+    END
   END Step;
+
+  (* An instruction's deferred execute, before its registers are read, as
+     tb_harte does. *)
+  PROCEDURE Settle*;
+  BEGIN IF state = sFetch THEN Pending END
+  END Settle;
+
+  PROCEDURE Empty;
+  BEGIN qh := 0; qn := 0; fa := PC; fbusy := FALSE; fdrop := FALSE; xp := FALSE; lp := FALSE
+  END Empty;
 
   (* As the core comes out of reset: emulation mode, the reset vector. *)
   PROCEDURE Reset*;
@@ -737,9 +922,9 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
     state := sVecL; vec := 0FFFCH;
     fE := 1; fM := 1; fX := 1; fI := 1; fD := 0; fC := 0; fZ := 0; fV := 0; fN := 0;
     A := 0; X := 0; Y := 0; S := 1FFH; D := 0; DBR := 0; PBR := 0; PC := 0; xb := FALSE;
-    Decode(0); tlo := 0; tmid := 0; tptr := 0; ptrBank := 0; taddr := 0; wrap16 := FALSE;
-    tdata := 0; pushN := 0; stk16 := FALSE; postPush := ppFetch; pullIdx := 0;
-    irq1 := FALSE; irq2 := FALSE; stopped := FALSE
+    Decode(0); dLen := 1; tlo := 0; tmid := 0; tptr := 0; ptrBank := 0; taddr := 0; wrap16 := FALSE;
+    tdata := 0; pushN := 0; stk16 := FALSE; postPush := ppFetch; pullIdx := 0; xm := 0;
+    irq1 := FALSE; irq2 := FALSE; stopped := FALSE; Empty; smcHits := 0; opAt := 0
   END Reset;
 
   (* At an instruction boundary? For the test against the vectors. *)
@@ -747,18 +932,48 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
   BEGIN RETURN state = sFetch
   END AtFetch;
 
-  (* Set the registers, at the start of an instruction. *)
+  (* Set the registers, at the start of an instruction, the queue empty. *)
   PROCEDURE SetState*(pc, s, p, a, x, y, dbr, d, pbr, e: INTEGER);
   BEGIN
     PC := pc; S := s; A := a; X := x; Y := y; DBR := dbr; D := d; PBR := pbr; fE := e;
     fN := Bit(p, 7); fV := Bit(p, 6); fM := Bit(p, 5); fX := Bit(p, 4);
     fD := Bit(p, 3); fI := Bit(p, 2); fZ := Bit(p, 1); fC := Bit(p, 0);
-    state := sFetch; stopped := FALSE; irq1 := FALSE; irq2 := FALSE; xb := FALSE
+    state := sFetch; stopped := FALSE; irq1 := FALSE; irq2 := FALSE; xb := FALSE; Empty
   END SetState;
 
   PROCEDURE GetP*(): INTEGER;
   BEGIN RETURN fN * 128 + fV * 64 + fM * 32 + fX * 16 + fD * 8 + fI * 4 + fZ * 2 + fC
   END GetP;
+
+  (* The bytes an opcode takes from the queue in sOps (an immediate's
+     second byte, which hangs on m or x, aside), and what it does in sFetch:
+     an implied opcode, a push, WAI or STP, a pull or return, or else on
+     to sOps. *)
+  PROCEDURE InitKinds;
+    VAR i, md: INTEGER;
+  BEGIN
+    FOR i := 0 TO 255 DO kind[i] := kOps; md := mode[i];
+      IF (i = 44H) OR (i = 54H) OR (i = 0F4H) THEN len[i] := 2
+      ELSIF (i = 00H) OR (i = 02H) OR (i = 0D4H) THEN len[i] := 1
+      ELSIF (md = mdabs) OR (md = mdabx) OR (md = mdaby) OR (md = mdrll) OR (md = mdiab) OR (md = mdiax) OR (md = mdial) THEN len[i] := 2
+      ELSIF (md = mdabl) OR (md = mdalx) THEN len[i] := 3
+      ELSE len[i] := 1
+      END
+    END;
+    kind[18H] := kLocal; kind[38H] := kLocal; kind[58H] := kLocal; kind[78H] := kLocal;
+    kind[0B8H] := kLocal; kind[0D8H] := kLocal; kind[0F8H] := kLocal; kind[0EAH] := kLocal;
+    kind[0AH] := kLocal; kind[2AH] := kLocal; kind[4AH] := kLocal; kind[6AH] := kLocal;
+    kind[1AH] := kLocal; kind[3AH] := kLocal;
+    kind[0AAH] := kLocal; kind[0A8H] := kLocal; kind[8AH] := kLocal; kind[98H] := kLocal;
+    kind[0BAH] := kLocal; kind[9AH] := kLocal; kind[9BH] := kLocal; kind[0BBH] := kLocal;
+    kind[1BH] := kLocal; kind[3BH] := kLocal; kind[5BH] := kLocal; kind[7BH] := kLocal;
+    kind[0E8H] := kLocal; kind[0CAH] := kLocal; kind[0C8H] := kLocal; kind[88H] := kLocal;
+    kind[0EBH] := kLocal; kind[0FBH] := kLocal;
+    kind[08H] := kSetup; kind[0BH] := kSetup; kind[48H] := kSetup; kind[4BH] := kSetup;
+    kind[5AH] := kSetup; kind[8BH] := kSetup; kind[0DAH] := kSetup; kind[0CBH] := kSetup; kind[0DBH] := kSetup;
+    kind[28H] := kPull; kind[2BH] := kPull; kind[68H] := kPull; kind[7AH] := kPull;
+    kind[0ABH] := kPull; kind[0FAH] := kPull; kind[40H] := kPull; kind[60H] := kPull; kind[6BH] := kPull
+  END InitKinds;
 
   PROCEDURE Init;
     VAR i: INTEGER;
@@ -968,5 +1183,6 @@ MODULE EmCore; (* The 65C816 of the Tang Nano 20K SoC: cpu_65c816.v of
     mnem := "BRKORACOPORATSBORAASLORAPHPORAASLPHDTSBORAASLORABPLORAORAORATRBORAASLORACLCORAINCTCSTRBORAASLORAJSRANDJSLANDBITANDROLANDPLPANDROLPLDBITANDROLANDBMIANDANDANDBITANDROLANDSECANDDECTSCBITANDROLANDRTIEORWDMEORMVPEORLSREORPHAEORLSRPHKJMPEORLSREORBVCEOREOREORMVNEORLSREORCLIEORPHYTCDJMLEORLSREORRTSADCPERADCSTZADCRORADCPLAADCRORRTLJMPADCRORADCBVSADCADCADCSTZADCRORADCSEIADCPLYTDCJMPADCRORADCBRASTABRLSTASTYSTASTXSTADEYBITTXAPHBSTYSTASTXSTABCCSTASTASTASTYSTASTXSTATYASTATXSTXYSTZSTASTZSTALDYLDALDXLDALDYLDALDXLDATAYLDATAXPLBLDYLDALDXLDABCSLDALDALDALDYLDALDXLDACLVLDATSXTYXLDYLDALDXLDACPYCMPREPCMPCPYCMPDECCMPINYCMPDEXWAICPYCMPDECCMPBNECMPCMPCMPPEICMPDECCMPCLDCMPPHXSTPJMLCMPDECCMPCPXSBCSEPSBCCPXSBCINCSBCINXSBCNOPXBACPXSBCINCSBCBEQSBCSBCSBCPEASBCINCSBCSEDSBCPLXXCEJSRSBCINCSBC";
   END Init;
 
-BEGIN Init; read := NIL; write := NIL; idle := NIL; irqLine := NIL; trace := FALSE; traceAt := -1; Reset
+BEGIN Init; InitKinds; read := NIL; write := NIL; fetch := NIL; wait := NIL; clock := NIL; irqLine := NIL;
+  trace := FALSE; smc := FALSE; traceAt := -1; Reset
 END EmCore.

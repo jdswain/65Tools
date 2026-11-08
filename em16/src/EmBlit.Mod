@@ -37,7 +37,9 @@ MODULE EmBlit; (* The SoC's blitter, rtl/blitter.v: copies or fills a
    bench's 409 timed blits (median error 6%) from the bursts and words
    each line reads and writes; expanding blits fitted to 563 more (median
    4%), counting the words actually written, since a transparent glyph
-   skips the empty ones. The pixels change when it finishes. *)
+   skips the empty ones; from when the CPU's write buffer is empty
+   (EmSDRAM.BufferEmpty), as wr_busy holds it until then. The pixels
+   change when it finishes. *)
 
   IMPORT EmSDRAM;
 
@@ -194,7 +196,10 @@ MODULE EmBlit; (* The SoC's blitter, rtl/blitter.v: copies or fills a
       | 12H:
           fill := ODD(v DIV 2); trans := ODD(v DIV 4); patt := ODD(v DIV 8);
           expand := ODD(v DIV 16);
-          IF ODD(v) & (width # 0) & (height # 0) THEN busy := TRUE; endTime := now + Cost() END
+          IF ODD(v) & (width # 0) & (height # 0) THEN busy := TRUE;
+            IF EmSDRAM.BufferEmpty() > now THEN endTime := EmSDRAM.BufferEmpty() ELSE endTime := now END;   (* once wr_busy falls *)
+            endTime := endTime + Cost()
+          END
       ELSE
       END
     END
