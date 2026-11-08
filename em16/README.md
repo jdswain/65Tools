@@ -67,7 +67,12 @@ This port is a derivative of it and under the same licence.
     Em82077   the carrier's 82077AA floppy controller, two drives
     EmSCSI    the carrier's 53C80 SCSI controller and a disk at ID 0
 
-What Oberon cannot reach is in C: `EmHost_rt.c` (terminal modes,
+    and on the SoC's carrier:
+
+    EmEth     the ENC424J600 Ethernet controller, on -net's network
+
+What Oberon cannot reach is in C: `EmNet_rt.c` (the network: vmnet
+and UDP), `EmHost_rt.c` (terminal modes,
 non-blocking standard input, signals, the clock, the disk image files),
 `EmFont.c` (the LCD's character ROM, as data) and `EmCocoa.m` (the two
 display windows). The procedures of `EmHost` without a body are weak
@@ -120,7 +125,8 @@ have 1 MB, its symbol table 200000 symbols.
 
     em16 -fpga [-bootrom rom.bin] [-font font.hex] [-video] [-fbdump ppm] [-prof file cycles]
                [-disk0 img] [-disk1 img] [-wd1793] [-scsi img] [-sd img]
-               [-adbkey code] [-adbmouse dx dy] [file ...]
+               [-net vmnet|vmnet-host|vmnet-bridged:IF|udp:LPORT:RPORT[:HOST]]
+               [-mac aa:bb:cc:dd:ee:ff] [-adbkey code] [-adbmouse dx dy] [file ...]
 
 `-fpga` emulates the SoC of `../../Verilog65C816/fpga` as its RTL
 describes it (`rtl/soc.v` and the modules below it, and `fpga/README.md`)
@@ -248,6 +254,42 @@ engine). The comments at the top of `Em82077.Mod`, `EmSCSI.Mod` and
   (the image's size), CMD10, CMD12, CMD13, CMD16, CMD17, CMD18, CMD24,
   CMD25, CMD55 and ACMD41, CMD58. Without `-sd` the slot reads `$FF`.
 
+### Ethernet
+
+The carrier's ENC424J600 (Microchip DS39935C) is on the external bus's
+select 5, at `$0850`, in its 8-bit parallel mode 5 as the carrier wires it
+(the Verilog repository's `docs/Hardware.md`, Ethernet): `+0` and `+2`
+written set the address latch to 7E00h or 7F00h plus the byte, `+1` and
+`+3` read and write at it. Its `/INT` is one of the cards' IRQ#, bit 3 of
+`$0440`. The comment at the top of `EmEth.Mod` lists what it does and
+leaves out; in short, a driver written for the chip runs on it: the SFRs
+with their Bit Set and Clear aliases, the SRAM windows and their wraps,
+transmission with padding and the CRC, the receive ring with its status
+vectors and the filters (unicast, not-me, multicast, broadcast, hash,
+magic packet), the DMA's copy and checksum, the interrupts, the resets and
+the PHY through MII, a 100 Mb/s full duplex link. The factory address is
+00:04:A3:16:E5:00, or `-mac`'s.
+
+`-net` is the cable. Without it the link stays down; with it the link
+comes up 5 ms after a reset. macOS has no TAP device, so the frames go to
+one of these:
+
+- `-net vmnet`: Apple's vmnet.framework in shared mode, as QEMU's
+  `vmnet-shared`. The guest is on a private network, 192.168.64.0/24, the
+  Mac its gateway, with DHCP, DNS and NAT to the Mac's own network. It
+  needs root: `sudo em16 -fpga ... -net vmnet` (or the com.apple.vm.networking
+  entitlement, which Apple gives only to virtualisation products).
+  `-net vmnet-host` is host-only (the Mac and other guests, no NAT), and
+  `-net vmnet-bridged:en0` puts the guest on en0's own network as a machine
+  of its own.
+- `-net udp:LPORT:RPORT[:HOST]`: each frame a UDP datagram, received on
+  LPORT and sent to HOST (127.0.0.1) port RPORT, as QEMU's `-netdev dgram`.
+  It needs no privileges: two em16s are joined by giving each the other's
+  ports, and a program can be the other end, as `test/eth.sh`'s is.
+
+The frames go out and come in without their CRC; the chip adds it on the
+way in, where the guest sees it.
+
 `tools/mkdisk.sh` makes FAT images with the Mac's `hdiutil`, and opens
 them in the Finder to copy files in and out, as the floppy images were:
 
@@ -300,7 +342,12 @@ too matches the RTL. `test/sd.sh` drives the SD card (`test/sd.s`): the
 card's start-up, the CSD, block reads with NEXT, a block written and read
 back, CMD18 with CMD12 and CMD25; a model in the script checks what it
 prints and the image file afterwards, and the RTL's SoC simulation with
-its card model prints the same. The oc816 golden suite (`../oc`, make
+its card model prints the same. `test/eth.sh` drives the ENC424J600
+(`test/eth.s`) with a peer in Python at the other end of `-net udp`: the
+interface check and ETHRST, the MAC address, the link and the PHY through
+MII, a frame sent (the peer checks its padding), three received of which
+the filters let two in (their next pointers, status vectors and text, the
+IRQ), the hash table, and the DMA's checksum and copy. The oc816 golden suite (`../oc`, make
 test_self), `as/test816`, OS16's tests and Business BASIC's run on em16
 -fpga.
 

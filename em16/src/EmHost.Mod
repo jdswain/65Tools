@@ -96,6 +96,21 @@ MODULE EmHost; (* The host side of em16: standard output and error, the
   BEGIN RETURN 0
   END DiskSize;
 
+  (* The network under the ENC424J600 (EmNet_rt.c): Open the spec of -net
+     (vmnet, vmnet-host, vmnet-bridged:IF, udp:LPORT:RPORT[:HOST]), 1 if
+     it opened; Recv a frame waiting into buf, its length (0: none); Send
+     the first n bytes of buf as a frame. Frames are without their CRC. *)
+  PROCEDURE NetOpen*(spec: ARRAY OF CHAR): INTEGER;
+  BEGIN RETURN 0
+  END NetOpen;
+
+  PROCEDURE NetRecv*(VAR buf: ARRAY OF BYTE): INTEGER;
+  BEGIN RETURN 0
+  END NetRecv;
+
+  PROCEDURE NetSend*(VAR buf: ARRAY OF BYTE; n: INTEGER);
+  END NetSend;
+
   (* Run the CPU (Em16.CpuThread) on a second thread and the window of
      the video display or the LCD on this one, until it is closed. *)
   PROCEDURE RunVideo*;
