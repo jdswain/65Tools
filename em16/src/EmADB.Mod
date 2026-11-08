@@ -16,10 +16,11 @@ MODULE EmADB; (* The SoC's Apple Desktop Bus host, rtl/adb_host.v, with a
    device other than the one addressed that has something to say pulls
    the command's stop bit low: SRQ. *)
 
+  IMPORT EmHost;
+
   CONST
     usAttn = 800; usSync = 70; usBit = 100; usTlt = 200; usTltMax = 300;
     usRxEnd = 150; usLow0 = 65; usReset = 3000;
-    perUs = 252;                    (* cycles per 10 us at 25.2 MHz *)
     kbdSize = 32;
 
   VAR
@@ -42,7 +43,7 @@ MODULE EmADB; (* The SoC's Apple Desktop Bus host, rtl/adb_host.v, with a
 
   PROCEDURE Cycles(us: INTEGER): LONGINT;
     VAR c: LONGINT;
-  BEGIN c := us; RETURN c * perUs DIV 10
+  BEGIN c := us; RETURN c * (EmHost.hz DIV 1000000 * 10) DIV 10   (* whole cycles a us, as adb_host.v's PER_US *)
   END Cycles;
 
   PROCEDURE KbdHasData(): BOOLEAN;

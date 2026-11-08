@@ -1,6 +1,6 @@
 MODULE EmSCC; (* The SoC's emulated Z85C30 SCC, rtl/scc_85c30.v, with
    channel A on standard input and output, with its timing: 2340 cycles
-   a character at 25.2 MHz (115200 baud).
+   a character at 115200 baud, 10 of top_tang20k.v's DIVISOR.
 
    Registers at $0820-$082F, mirrored every 4 bytes: 0 B control, 1 B data,
    2 A control, 3 A data. Each channel's control port has the SCC's
@@ -32,10 +32,11 @@ MODULE EmSCC; (* The SoC's emulated Z85C30 SCC, rtl/scc_85c30.v, with
 
   IMPORT EmHost;
 
-  CONST charTime = 2340; A = 1; B = 0;
+  CONST A = 1; B = 0;
 
   VAR
-    ptr, wr1, wr3, wr5, wr12, wr13, wr14, wr15: ARRAY 2 OF INTEGER;
+    charTime: INTEGER;              (* 10 bits at 115200 baud: top_tang20k.v's DIVISOR * 10 *)
+   ptr, wr1, wr3, wr5, wr12, wr13, wr14, wr15: ARRAY 2 OF INTEGER;
     txIP, extIP: ARRAY 2 OF BOOLEAN;
     zero: ARRAY 2 OF LONGINT;   (* the next zero count *)
     wr2, wr9: INTEGER;
@@ -53,7 +54,8 @@ MODULE EmSCC; (* The SoC's emulated Z85C30 SCC, rtl/scc_85c30.v, with
 
   PROCEDURE Reset*;
     VAR c: INTEGER;
-  BEGIN
+  BEGIN charTime := 10 * ((EmHost.hz + 57600) DIV 115200);
+
     FOR c := 0 TO 1 DO
       ptr[c] := 0; wr1[c] := 0; wr3[c] := 0; wr5[c] := 0; wr12[c] := 0; wr13[c] := 0;
       wr14[c] := 30H; wr15[c] := 0F8H; txIP[c] := FALSE; extIP[c] := FALSE; zero[c] := 0

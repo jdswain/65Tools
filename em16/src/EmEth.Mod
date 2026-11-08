@@ -38,8 +38,6 @@ MODULE EmEth; (* The carrier's ENC424J600 Ethernet controller (Microchip
   CONST
     Size = 6000H;               (* the SRAM *)
     Max = 1600;                 (* a frame's bytes, at most *)
-    LinkTime = 126000;          (* 5 ms from a reset to the link up *)
-    PollTime = 6300;            (* the network looked at each 250 us *)
     (* the SFRs, as offsets from 7E00h *)
     ETXST = 0; ETXLEN = 2; ERXST = 4; ERXTAIL = 6; ERXHEAD = 8; EDMAST = 0AH;
     EDMALEN = 0CH; EDMADST = 0EH; EDMACS = 10H; ETXSTAT = 12H; ETXWIRE = 14H;
@@ -55,6 +53,7 @@ MODULE EmEth; (* The carrier's ENC424J600 Ethernet controller (Microchip
     LINKIF = 800H; AESIF = 1000H; MODEXIF = 4000H;
 
   VAR
+    LinkTime, PollTime: LONGINT;    (* 5 ms from a reset to the link up; the network looked at each 250 us *)
     sram: ARRAY Size OF BYTE;
     reg: ARRAY 0A0H OF INTEGER;     (* the SFRs' bytes *)
     low: ARRAY 0A0H OF INTEGER;     (* a MAC register's low byte, until its high byte is written *)
@@ -310,7 +309,7 @@ MODULE EmEth; (* The carrier's ENC424J600 Ethernet controller (Microchip
       END;
       INC(sent)
     END;
-    txBusy := TRUE; txAt := now + 2 * (W(ETXWIRE) + 20)               (* 80 ns a byte at 100 Mb/s *)
+    txBusy := TRUE; txAt := now + (W(ETXWIRE) + 20) * EmHost.hz DIV 12500000   (* 80 ns a byte at 100 Mb/s *)
   END StartTx;
 
   PROCEDURE EndTx(bits: INTEGER);
@@ -520,7 +519,8 @@ MODULE EmEth; (* The carrier's ENC424J600 Ethernet controller (Microchip
 
   (* power on: em16's start *)
   PROCEDURE Reset*;
-  BEGIN link := FALSE; latch := 0; nextPoll := 0; SysReset(0)
+  BEGIN LinkTime := EmHost.hz DIV 200; PollTime := EmHost.hz DIV 4000;
+    link := FALSE; latch := 0; nextPoll := 0; SysReset(0)
   END Reset;
 
   PROCEDURE InitCRC;

@@ -51,6 +51,7 @@ eth: pkts 5500 00
 eth: rx 40D8 0040 C0010200: four
 eth: pkts 5500
 eth: dma A953 copy 89ABCD
+eth: dma2 40 0102030405060708
 eth: done
 END
 cat "$work/peer" "$work/out" | cmp -s - "$work/want" || { echo "eth: FAIL"; diff "$work/want" - <<X

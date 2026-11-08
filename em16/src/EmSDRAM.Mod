@@ -15,24 +15,28 @@ MODULE EmSDRAM; (* The SoC's 8 MB of SDRAM and the cache in front of it.
 
    The SDRAM controller (rtl/sdram_burst.v) serves the display first. It
    reads each of the 768 lines shown, at the start of the line before
-   (1344 pixels at 64.8 MHz, 523 of these cycles), in bursts that hold
-   the port for about 137 cycles (69 in text mode, which reads half as
+   (1344 pixels at 64.8 MHz, 523 of these cycles at 25.2 MHz, 840 at
+   40.5), in bursts that hold
+   the port for about 137 cycles at 25.2 MHz (69 in text mode, which reads half as
    much): the share of a line that 640 x 480's took, 210 of 800, as the
    SoC leaves the CPU a slot between its bursts and is little slower at
-   1024 x 768 (in simulation, by some 2%); and it refreshes every 190
-   cycles, for 6. A fill or a store waits for these; a store is still
+   1024 x 768 (in simulation, by some 2%), the same share of the line at
+   any clock; and it refreshes every 190 cycles at 25.2 MHz (305 at
+   40.5), for 6. The display's and refresh's phases were measured at
+   25.2 MHz. The RTL now fetches in short bursts that let the CPU in
+   between, and the cache is the new one (2-cycle hits, a write buffer):
+   both are still to be modelled. A fill or a store waits for these; a store is still
    acknowledged at once, but the next waits for it to finish. Which rows
    are open, which would add a cycle or two, is not modelled.
 
    Writes by the blitter drop the lines they touch, as there. *)
 
-  IMPORT EmVideo;
+  IMPORT EmHost, EmVideo;
 
   CONST
     size* = 800000H;
     hitHeld = 1; hit = 3; fill = 15; portBusy = 10;
-    lineTime = 523; lines = 806; shown = 768; fetchGraphics = 137; fetchText = 69;
-    refreshTime = 190; refreshBusy = 6;
+    lines = 806; shown = 768; refreshBusy = 6;
     (* On the board the core starts once the SDRAM is initialised, 5088
        cycles after reset, by when the display and refresh have been
        running: the frame began 5073 cycles before the core's time 0,
@@ -40,6 +44,11 @@ MODULE EmSDRAM; (* The SoC's 8 MB of SDRAM and the cache in front of it.
     framePhase = 5073; refreshPhase = 54;
 
   VAR
+    (* from the clock (Reset): a line, 1344 pixels at 64.8 MHz (523 at
+       25.2 MHz, 840 at 40.5); the display's fetch, 137 and 69 cycles at
+       25.2 MHz, the same share of the line at any clock; the refresh
+       interval, FREQ / 133 kHz + 1 of rtl/sdram_burst.v *)
+    lineTime, fetchGraphics, fetchText, refreshTime: INTEGER;
     ram: ARRAY size OF BYTE;
     tags: ARRAY 256 OF INTEGER;     (* line DIV 256 + 1 of each line, 0: empty *)
     held: INTEGER;                  (* word (address DIV 4) of the held word, -1: none *)
@@ -115,7 +124,10 @@ MODULE EmSDRAM; (* The SoC's 8 MB of SDRAM and the cache in front of it.
 
   PROCEDURE Reset*;
     VAR i: INTEGER;
-  BEGIN FOR i := 0 TO 255 DO tags[i] := 0 END; held := -1; portFree := 0
+  BEGIN FOR i := 0 TO 255 DO tags[i] := 0 END; held := -1; portFree := 0;
+    lineTime := (1344 * EmHost.hz + 32400000) DIV 64800000;
+    fetchGraphics := (137 * EmHost.hz + 12600000) DIV 25200000; fetchText := (69 * EmHost.hz + 12600000) DIV 25200000;
+    refreshTime := EmHost.hz DIV 133000 + 1
   END Reset;
 
 BEGIN Reset

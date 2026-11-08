@@ -31,6 +31,7 @@ void EmVIA__AdbMouseMove(int dx, int dy);
 void EmVIA__AdbMouseButton(int pressed);
 void EmL28__InjectChar(int ch);
 void EmADB__KeyDown(int kc);
+void EmPower__Key(int down);
 void EmADB__KeyUp(int kc);
 void EmADB__MouseMove(int dx, int dy);
 void EmADB__MouseButton(int pressed);
@@ -57,8 +58,10 @@ static int adb_code(int kc) {
 
 /* keys and the mouse go to the VIA's ADB, or with -fpga to the SoC's,
    in ADB's key codes */
-static void key_down(int kc) { kc = adb_code(kc); if (EmHost__adb) EmADB__KeyDown(kc); else EmVIA__AdbKeyDown(kc); }
-static void key_up(int kc) { kc = adb_code(kc); if (EmHost__adb) EmADB__KeyUp(kc); else EmVIA__AdbKeyUp(kc); }
+/* F12 is the power key: the SoC's power block's line (EmPower), and ADB's
+   power key code, $7F, as the keyboard reports it */
+static void key_down(int kc) { if (kc == 0x6F && EmHost__adb) { EmPower__Key(1); EmADB__KeyDown(0x7F); return; } kc = adb_code(kc); if (EmHost__adb) EmADB__KeyDown(kc); else EmVIA__AdbKeyDown(kc); }
+static void key_up(int kc) { if (kc == 0x6F && EmHost__adb) { EmPower__Key(0); EmADB__KeyUp(0x7F); return; } kc = adb_code(kc); if (EmHost__adb) EmADB__KeyUp(kc); else EmVIA__AdbKeyUp(kc); }
 static void mouse_move(int dx, int dy) { if (EmHost__adb) EmADB__MouseMove(dx, dy); else EmVIA__AdbMouseMove(dx, dy); }
 static void mouse_button(int p) { if (EmHost__adb) EmADB__MouseButton(p); else EmVIA__AdbMouseButton(p); }
 

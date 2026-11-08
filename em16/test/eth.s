@@ -11,6 +11,8 @@
 ;   5. the hash table's bit for 01:00:00:00:01:2C set and HTEN: of the
 ;      peer's two multicasts only that one comes in
 ;   6. the DMA: the checksum of 89 AB CD (A953), and a copy read back
+;   7. the SoC's DMA channel 2 ($0420): 8 bytes into EGPDATA and back out,
+;      ISTAT bit 6 at DONE
 ; It prints "eth: " lines, which test/eth.sh compares.
 
                 cpu = "65C816"
@@ -22,6 +24,10 @@ scc_data        = $0823
 eth_al          = $0850         ; the address latch, 7E00h + byte
 eth_ah          = $0852         ; the address latch, 7F00h + byte (Set, Clear)
 eth_d           = $0851         ; the data at the latched address
+dma2_addr       = $0420         ; the SoC's DMA channel 2
+dma2_cnt        = $0424
+dma2_ctrl       = $0428
+dma2_stat       = $0429
 
 tmpw            = $10           ; a word read or written
 next            = $12           ; the next packet's address in the ring
@@ -271,9 +277,69 @@ t3:             lda #$04                ; ERXST: the ring from 4000h
                 lda eth_d
                 jsr hex
                 jsr crlf
+; --- 7. the SoC's DMA channel 2: memory to EGPDATA and back ----------------
+
+                ldx #0
+.fill:          txa
+                inc a
+                sta $2000,x             ; 01 02 ... 08
+                inx
+                cpx #8
+                bne .fill
+                lda #$88                ; EGPWRPT
+                ldx #$0400
+                jsr wreg
+                lda #$80                ; the window latched: EGPDATA
+                sta eth_al
+                ldx #$2000
+                lda #$0B                ; IE, memory to device, EN
+                jsr dma2
+                ldx #s_dma2
+                jsr puts
+                lda istat               ; DONE with IE: bit 6
+                and #$40
+                jsr hex
+                lda #1
+                sta dma2_stat
+                lda #$86                ; EGPRDPT
+                ldx #$0400
+                jsr wreg
+                lda #$80
+                sta eth_al
+                ldx #$2100
+                lda #$09                ; IE, device to memory, EN
+                jsr dma2
+                lda #1
+                sta dma2_stat
+                lda #' '
+                jsr putc
+                ldx #0
+.show:          lda $2100,x
+                phx
+                jsr hex
+                plx
+                inx
+                cpx #8
+                bne .show
+                jsr crlf
                 ldx #s_done
                 jsr puts
                 stp
+
+; channel 2: 8 bytes from or to X (bank 0), CTRL A; until DONE
+dma2:           pha
+                stx dma2_addr
+                stz dma2_addr+2
+                lda #8
+                sta dma2_cnt
+                stz dma2_cnt+1
+                stz dma2_cnt+2
+                pla
+                sta dma2_ctrl
+.wait:          lda dma2_stat
+                and #1
+                beq .wait
+                rts
 
 ; A holds the number of the check that failed
 fail:           pha
@@ -511,6 +577,7 @@ s_cnt:          text.0 "eth: pkts "
 s_rx:           text.0 "eth: rx "
 s_cs:           text.0 "eth: dma "
 s_copy:         text.0 " copy "
+s_dma2:         text.0 "eth: dma2 "
 s_done:         text.0 "eth: done", 13, 10
 s_fail:         text.0 "eth: fail "
 

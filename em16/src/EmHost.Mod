@@ -22,6 +22,8 @@ MODULE EmHost; (* The host side of em16: standard output and error, the
     coutHex*: BOOLEAN;      (* cout << hex has been written: integers go out in hex *)
     adb*: INTEGER;          (* where the window's keys and mouse go: 0 the VIA, 1 the SoC *)
     pace*: INTEGER;         (* 1: the SoC kept to real time once at rest (set by the window) *)
+    hz*: LONGINT;           (* the SoC's system clock: 25.2 MHz, 40.5 MHz under -fpga (-sysclk);
+                               the devices take their times from it at their Reset *)
 
   (* --- the C side --- *)
 
@@ -220,5 +222,9 @@ MODULE EmHost; (* The host side of em16: standard output and error, the
   BEGIN Drain(out); Drain(err)
   END DrainAll;
 
-BEGIN s[out].n := 0; s[err].n := 0; coutHex := FALSE; adb := 0; pace := 0
+  PROCEDURE SetClock*(h: LONGINT);
+  BEGIN hz := h
+  END SetClock;
+
+BEGIN s[out].n := 0; s[err].n := 0; coutHex := FALSE; adb := 0; pace := 0; hz := 25200000
 END EmHost.

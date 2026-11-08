@@ -38,7 +38,7 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
    and DackWrite, and the CPU's accesses to slot 1 ($0810, pseudo-DMA) are
    the same cycles without TC. In DMA execution MSR shows only the busy
    bit and INT comes only with the result. A read's bytes arrive at the
-   data rate, one every 806, 672, 403 or 201 cycles (250K, 300K, 500K, 1M)
+   data rate, one every 32, 26.7, 16 or 8 us (250K, 300K, 500K, 1M)
    from the moment the sector is found; one not taken before the 16-byte
    FIFO is full ends the command with an overrun (ST0 $40, ST1 $10). A
    write's bytes leave at the same rate, and DRQ asks while the FIFO has
@@ -70,7 +70,6 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
   IMPORT EmHost;
 
   CONST
-    ms = 25200;                     (* cycles of the SoC's clock in a millisecond *)
     sectorSize = 512; tracks = 80; sides = 2;
     rqm = 80H; dio = 40H; ndma = 20H; cb = 10H;
     (* phases *)
@@ -79,6 +78,8 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
     opRead = 1; opWrite = 2; opVerify = 3; opFormat = 4; opReadID = 5;
 
   VAR
+    ms: INTEGER;                    (* cycles of the SoC's clock in a millisecond *)
+    byteT: ARRAY 4 OF INTEGER;      (* a byte's cycles at each data rate *)
     dor, tdr, rate, srt, hut, hlt: INTEGER;
     nonDma: BOOLEAN;
     eis, efifo, poll, fifothr, pretrk, lock, perp: INTEGER;
@@ -166,7 +167,10 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
 
   PROCEDURE Reset*;
     VAR d: INTEGER;
-  BEGIN dor := 0; tdr := 0; rate := 2; srt := 8; hut := 15; hlt := 1; nonDma := FALSE;
+  BEGIN ms := EmHost.hz DIV 1000;           (* 16, 26.7, 32 and 8 us a byte at 500K, 300K, 250K, 1M *)
+    byteT[0] := EmHost.hz DIV 62500; byteT[1] := EmHost.hz * 2 DIV 75000;
+    byteT[2] := EmHost.hz DIV 31250; byteT[3] := EmHost.hz DIV 125000;
+    dor := 0; tdr := 0; rate := 2; srt := 8; hut := 15; hlt := 1; nonDma := FALSE;
     lock := 0; perp := 0; Clear;
     FOR d := 0 TO 3 DO pcn[d] := 0; changed[d] := TRUE END
   END Reset;
@@ -194,7 +198,7 @@ MODULE Em82077; (* The Intel 82077AA floppy disk controller of the carrier
   PROCEDURE ByteTime(): INTEGER;
     VAR t: INTEGER;
   BEGIN
-    IF rate = 0 THEN t := 403 ELSIF rate = 1 THEN t := 672 ELSIF rate = 2 THEN t := 806 ELSE t := 201 END;
+    IF rate = 0 THEN t := byteT[0] ELSIF rate = 1 THEN t := byteT[1] ELSIF rate = 2 THEN t := byteT[2] ELSE t := byteT[3] END;
     RETURN t
   END ByteTime;
 

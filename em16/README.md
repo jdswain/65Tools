@@ -123,7 +123,7 @@ have 1 MB, its symbol table 200000 symbols.
 
 ## The SoC (-fpga)
 
-    em16 -fpga [-bootrom rom.bin] [-font font.hex] [-video] [-fbdump ppm] [-prof file cycles]
+    em16 -fpga [-sysclk hz] [-bootrom rom.bin] [-font font.hex] [-video] [-fbdump ppm] [-prof file cycles]
                [-disk0 img] [-disk1 img] [-wd1793] [-scsi img] [-sd img]
                [-net vmnet|vmnet-host|vmnet-bridged:IF|udp:LPORT:RPORT[:HOST]]
                [-mac aa:bb:cc:dd:ee:ff] [-adbkey code] [-adbmouse dx dy] [file ...]
@@ -182,31 +182,50 @@ rather than em16's default machine:
   their interrupts on the card `IRQ#` that bit 0 of $0340 reads (and the
   CPU's IRQ), and bit 0 of $0340 resetting them; below;
 - the DMA engine (`rtl/dma.v`, `EmDMA.Mod`; docs/DMA.md in the Verilog
-  repository), two channels at $0400 and $0410 between the memory and
-  the 53C80 and the 82077AA; the chips' /DACK slots, 4 and 1 ($0840,
-  $0810), reach them by pseudo-DMA;
+  repository), three channels at $0400, $0410 and $0420 between the
+  memory and the 53C80, the 82077AA and the ENC424J600; the first two
+  chips' /DACK slots, 4 and 1 ($0840, $0810), reach them by pseudo-DMA;
+  channel 2 runs unpaced on the Ethernet chip's data port ($0851), at the
+  window software latched, with DONE on ISTAT bit 6;
 - the tick timer (`rtl/timer.v`, `EmTimer.Mod`) at $0450, a period of
-  RELOAD cycles and a 32-bit count of ticks, and the interrupt status
+  RELOAD counts of 25.2 MHz at any system clock (a phase accumulator, as
+  the RTL's) and a 32-bit count of ticks, and the interrupt status
   and mask at $0440 and $0441, through which the timer, the two DMA
-  channels, the cards' `IRQ#` and the SCC reach the CPU's IRQ;
+  channels, the cards' `IRQ#`, the SCC and the power key reach the CPU's
+  IRQ;
+- soft power and the power LED (`rtl/power.v`, `EmPower.Mod`) at $0480:
+  STATUS (the key, PRESSED, the off burst), CONTROL (the LED, BLINK, IE,
+  which puts PRESSED on ISTAT bit 5) and OFF ($A5 turns the supply off:
+  em16 ends 50 ms later with "the supply turned off"). F12 in the window
+  is the power key, which the keyboard also sends over ADB ($7F); held 4
+  seconds it turns the supply off;
 - with `-wd1793`, the WD1793 card that OS16's old boot loader was
   written for at $0800 instead of the 82077AA, as before;
 - a program ends with STP or a fetch from 00:0000.
 
-Time is counted in the SoC's 25.2 MHz cycles, and each bus cycle of the
-core takes what the board would take:
+Time is counted in the SoC's system clock, the board's 40.5 MHz
+(`top_tang20k.v`), or `-sysclk hz`'s (25.2 MHz is the RTL simulation's,
+`tb_soc`'s default). The devices take their times from it as the RTL
+does from `SYS_HZ`: the external bus, the DMA byte, the SCC's character,
+ADB's microsecond, the SD divider's reset value, the SDRAM's refresh, the
+display's line, the tick timer's counts. Each bus cycle of the core takes
+what the board would take:
 
-- boot ROM and I/O block 2 cycles, the external bus 14 (its Intel
-  cycle on the 8.4 MHz timing, as the CPU sees it);
-- a DMA byte 17 cycles; the engine's SDRAM traffic and its hold on the
+- boot ROM and I/O block 2 cycles, the external bus 3T + H + 4, T and H
+  the bridge's bus clock and edge gap in system clocks (21 at 40.5 MHz,
+  14 at 25.2: its Intel cycle on the 8.4 MHz timing, as the CPU sees
+  it); while bit 0 of $0340 holds the cards in reset, 2, reading $FF;
+- a DMA byte 3T + H + 5 + DRQ_HOLD cycles (25 at 40.5 MHz, 17 at 25.2);
+  the engine's SDRAM traffic and its hold on the
   external bus are not counted against the CPU;
 - SDRAM as the cache's state machine: a byte of the held word 1 cycle,
   another hit 3, a miss 18; a store is posted in 3 and holds the port
   for 10, so a store or a miss after it may wait;
-- the display's line fetches (about 210 cycles of each 800 cycle line in
-  graphics, 105 in text) and refresh (6 of every 190) take the port
-  first, phased as on the board after the SDRAM's initialisation;
-- the SCC 2340 cycles a character (115200 baud), each way;
+- the display's line fetches (137 cycles of each 523 cycle line at 25.2
+  MHz in graphics, 69 in text, the same share at any clock) and refresh
+  (6 of every 190 at 25.2 MHz, 305 at 40.5) take the port first, phased
+  as on the board after the SDRAM's initialisation at 25.2 MHz;
+- the SCC ten bit times a character (115200 baud), each way;
   an SCC access 3 cycles;
 - the blitter busy for a time fitted to the test bench's 409 timed blits
   (median error 6%); the pixels change when it finishes.
@@ -218,6 +237,18 @@ which SDRAM rows are open (a cycle or two on some misses), the
 display's fetch arbitration beyond its fixed windows, and a typed
 character arriving while one waits: on the board it overruns, here it
 is held back, as if by flow control.
+
+**Not yet the board's core.** The core and cache are those of the RTL
+before 2026-10-30. Since then the RTL has (Verilog65C816 0fab85c,
+f0dd5e8, afc158f, 7725fee):
+- an 8-byte instruction queue that takes all of an instruction's operand
+  bytes in one cycle;
+- reads and implied operations executed during the next opcode fetch;
+- cache hits in 2 cycles, and a write buffer of 4 merged entries;
+- the display fetched in short bursts that let the CPU in between.
+
+So em16's cycle counts are those of the older core, at the new clock.
+They are still to be brought over, and checked against `tb_soc`.
 
 ### Disks
 
@@ -261,8 +292,9 @@ select 5, at `$0850`, in its 8-bit parallel mode 5 as the carrier wires it
 (the Verilog repository's `docs/Hardware.md`, Ethernet): `+0` and `+2`
 written set the address latch to 7E00h or 7F00h plus the byte, `+1` and
 `+3` read and write at it. Its `/INT` is one of the cards' IRQ#, bit 3 of
-`$0440`. The comment at the top of `EmEth.Mod` lists what it does and
-leaves out; in short, a driver written for the chip runs on it: the SFRs
+`$0440`. The SoC's DMA channel 2 moves a frame between it and memory
+without the CPU (latch the window, then start the channel). The comment at
+the top of `EmEth.Mod` lists what it does and leaves out; in short, a driver written for the chip runs on it: the SFRs
 with their Bit Set and Clear aliases, the SRAM windows and their wraps,
 transmission with padding and the CRC, the receive ring with its status
 vectors and the filters (unicast, not-me, multicast, broadcast, hash,
@@ -347,7 +379,8 @@ its card model prints the same. `test/eth.sh` drives the ENC424J600
 interface check and ETHRST, the MAC address, the link and the PHY through
 MII, a frame sent (the peer checks its padding), three received of which
 the filters let two in (their next pointers, status vectors and text, the
-IRQ), the hash table, and the DMA's checksum and copy. The oc816 golden suite (`../oc`, make
+IRQ), the hash table, the chip's DMA checksum and copy, and the SoC's
+DMA channel 2 into the chip's buffer and back. The oc816 golden suite (`../oc`, make
 test_self), `as/test816`, OS16's tests and Business BASIC's run on em16
 -fpga.
 

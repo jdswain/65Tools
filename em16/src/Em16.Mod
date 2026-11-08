@@ -2,7 +2,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
    testing programs of the assembler and the Oberon compiler: the
    command line and the running.
 
-   em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-bootrom rom.bin]
+   em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-sysclk hz] [-bootrom rom.bin]
         [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-prof file cycles] [-test-pattern]
         [-console] [-disk0 file] [-disk1 file] [-wd1793]
         [-scsi file] [-sd file] [-net vmnet|vmnet-host|vmnet-bridged:IF|udp:LPORT:RPORT[:HOST]] [-mac aa:bb:cc:dd:ee:ff] [-adbkey code] [-adbmouse dx dy] file ...
@@ -28,6 +28,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
 
   VAR
     trace, videoEnabled, testPattern, consoleMode, wantFpga, wantL28, bad: BOOLEAN;
+    sysclk: INTEGER;          (* -sysclk: the SoC's clock, 0 its default *)
     customDp, customSp, entry: INTEGER;
     adbKeys: ARRAY 8 OF INTEGER; nAdbKeys: INTEGER;   (* -adbkey: held down at reset *)
     adbDx, adbDy: INTEGER;                            (* -adbmouse: moved at reset *)
@@ -100,6 +101,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
         INC(index, 3)
       ELSIF Equal(arg, "-fbdump") & (index + 1 < n) THEN Env.Arg(index + 1, fbdump); INC(index, 2)
       ELSIF Equal(arg, "-fpga") THEN INC(index)
+      ELSIF Equal(arg, "-sysclk") & (index + 1 < n) THEN INC(index, 2)
       ELSIF Equal(arg, "-bootrom") & (index + 1 < n) THEN Env.Arg(index + 1, bootrom); INC(index, 2)
       ELSIF Equal(arg, "-font") & (index + 1 < n) THEN Env.Arg(index + 1, font); INC(index, 2)
       ELSIF (Equal(arg, "-disk0") OR Equal(arg, "-disk1")) & (index + 1 < n) THEN Env.Arg(index + 1, val);
@@ -220,14 +222,17 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
     n := Env.ArgCount();
     (* -fpga first, so that the memory has its size before files are loaded *)
     (* and -wd1793 and -cpu l28, so that floppies go to the right controller *)
-    wantFpga := FALSE; wantL28 := FALSE;
+    wantFpga := FALSE; wantL28 := FALSE; sysclk := 0;
     FOR i := 1 TO n - 1 DO Env.Arg(i, arg);
       IF Equal(arg, "-fpga") THEN wantFpga := TRUE ELSIF Equal(arg, "-wd1793") THEN EmSoC.UseWD1793
+      ELSIF Equal(arg, "-sysclk") & (i + 1 < n) THEN Env.Arg(i + 1, arg); sysclk := Number(arg)
       ELSIF Equal(arg, "-cpu") & (i + 1 < n) THEN Env.Arg(i + 1, arg);
         wantL28 := Equal(arg, "l28") OR Equal(arg, "L28") OR Equal(arg, "c19") OR Equal(arg, "C19")
       END
     END;
     EmMem.SetClock(Cycles);
+    IF wantFpga THEN EmHost.SetClock(40500000) END;              (* the board's clock (top_tang20k.v) *)
+    IF sysclk > 0 THEN EmHost.SetClock(sysclk) END;
     IF wantFpga THEN EmMem.EnableFPGA; EmMem.SetMemory(7FFFFFH, 800000H)
     ELSE EmMem.SetMemory(0FFFFFH, 100000H)
     END;

@@ -204,7 +204,7 @@ MODULE EmSD; (* The SoC's microSD slot in SPI mode, rtl/sd_spi.v, with an
   END Write;
 
   PROCEDURE Reset*;
-  BEGIN rx := 0FFH; div := 31; sel := 0; busyUntil := 0; Deselect;
+  BEGIN rx := 0FFH; div := (EmHost.hz + 799999) DIV 800000 - 1; sel := 0; busyUntil := 0; Deselect;   (* 400 kHz or less *)
     idle := TRUE; app := FALSE; acmd41s := 0; wrState := 0; wrMulti := FALSE
   END Reset;
 
