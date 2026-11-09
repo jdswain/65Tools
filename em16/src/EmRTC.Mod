@@ -40,8 +40,10 @@ MODULE EmRTC; (* The 65-16 rev B's real-time clock, a DS12C887 (the PC AT's
    not there yet a new module: the oscillator off (A 00H), B 00H, the time
    and the RAM 0. The file, the 128 bytes and the host's time at the
    save, 8 bytes, is written after each write to a register. With
-   -nortc (Absent) there is no chip, as on a rev A board: select 7 reads
-   $FF and takes no writes (a test's machine, whose files have no date). *)
+   -nortc (Absent) there is no chip, as on a rev A board or a rev B with
+   the socket empty: EmSoC gives a read of select 7 what the bus last
+   held, as the board's data lines, without pull-ups, do (a test's
+   machine, whose files have no date). *)
 
   IMPORT Files, EmHost;
 

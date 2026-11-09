@@ -222,8 +222,10 @@ rather than em16's default machine:
   `-rtc file` keeps the chip in file, written after each register
   write, its time carried on by the host's while em16 was not running;
   a file not there yet is a new module, its oscillator off; `-nortc`
-  leaves the chip out, as on a rev A board (OS16's tests boot so, for
-  files without dates); the last of the three wins;
+  leaves the chip out, as on a rev A board or an empty socket: a read
+  there gets the last byte the card bus held, as the data lines have no
+  pull-ups (OS16's tests boot so, for files without dates); the last of
+  the three wins;
 - with `-wd1793`, the WD1793 card that OS16's old boot loader was
   written for at $0800 instead of the 82077AA, as before;
 - a program ends with STP or a fetch from 00:0000.
