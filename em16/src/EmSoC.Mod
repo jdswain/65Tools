@@ -24,7 +24,8 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
                    -wd1793 the WD1793 card (EmFDC); slot 1 the 82077AA's
                    /DACK; slot 3 the SCSI half of its Z85C80 (EmSCSI);
                    slot 4 the 53C80's /DACK; slot 5 the ENC424J600
-                   Ethernet controller (EmEth); 6-7 empty: $FF. A CPU access
+                   Ethernet controller (EmEth); 6 empty: $FF; 7 the
+                   rev B's DS12C887 real-time clock (EmRTC). A CPU access
                    to a /DACK slot is pseudo-DMA, a byte without TC.
          $0820-$082F the emulated Z85C30 SCC (EmSCC), the serial port,
                    which answers in place of slot 2 in 2 cycles (3
@@ -48,12 +49,12 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
    and a byte of anything else. The devices are
    given the time as it passes. The IRQ line is the sources of $0440
    that $0441 lets through: the timer, the DMA engine's channels, the
-   cards' IRQ# (the 82077AA's INT, the 53C80's IRQ and the ENC424J600's
-   /INT), which bit 0 of
+   cards' IRQ# (the 82077AA's INT, the 53C80's IRQ, the ENC424J600's
+   /INT and the DS12C887's /IRQ), which bit 0 of
    $0340 also reads, and the SCC; setting bit 0 of $0340 resets the
    cards' chips (RES#). *)
 
-  IMPORT Files, EmHost, EmCore, EmSDRAM, EmSCC, EmADB, EmBlit, EmSD, EmFDC, Em82077, EmSCSI, EmEth, EmPower, EmDMA, EmTimer, EmVideo;
+  IMPORT Files, EmHost, EmCore, EmSDRAM, EmSCC, EmADB, EmBlit, EmSD, EmFDC, Em82077, EmSCSI, EmEth, EmPower, EmRTC, EmDMA, EmTimer, EmVideo;
 
   CONST
     Polls = 200;              (* ADB transactions in a second: the guest reads its input (OS16 400, the boot ROM 100) *)
@@ -98,7 +99,7 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
   PROCEDURE Pass(c: INTEGER);
   BEGIN now := now + c;
     IF now >= nextTick THEN
-      EmSCC.Tick(now); EmADB.Tick(now); EmBlit.Tick(now); EmDMA.Tick(now); EmTimer.Tick(now); Em82077.Tick(now); EmEth.Tick(now); EmPower.Tick(now);
+      EmSCC.Tick(now); EmADB.Tick(now); EmBlit.Tick(now); EmDMA.Tick(now); EmTimer.Tick(now); Em82077.Tick(now); EmEth.Tick(now); EmPower.Tick(now); EmRTC.Tick(now);
       nextTick := now + 64; irqDue := TRUE
     END
   END Pass;
@@ -109,7 +110,7 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
 
   (* the cards' IRQ# *)
   PROCEDURE CardIrq(): BOOLEAN;
-  BEGIN RETURN ~wd1793 & Em82077.Irq() OR EmSCSI.Irq() OR EmEth.Irq()
+  BEGIN RETURN ~wd1793 & Em82077.Irq() OR EmSCSI.Irq() OR EmEth.Irq() OR EmRTC.Irq()
   END CardIrq;
 
   PROCEDURE ResetCards;
@@ -125,6 +126,7 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
     ELSIF (slot = 3) & (AND(a, 8) = 0) THEN r := EmSCSI.Read(a)
     ELSIF slot = 4 THEN r := EmSCSI.DackRead(FALSE)
     ELSIF slot = 5 THEN r := EmEth.Read(a, now)
+    ELSIF slot = 7 THEN r := EmRTC.Read(a, now)
     END;
     RETURN r
   END CardRead;
@@ -138,6 +140,7 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
     ELSIF (slot = 3) & (AND(a, 8) = 0) THEN EmSCSI.Write(a, v)
     ELSIF slot = 4 THEN EmSCSI.DackWrite(v, FALSE)
     ELSIF slot = 5 THEN EmEth.Write(a, v, now)
+    ELSIF slot = 7 THEN EmRTC.Write(a, v, now)
     END
   END CardWrite;
 
@@ -307,7 +310,7 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
   BEGIN now := 0; nextTick := 0; sccEnd := -1; irq := FALSE; irqDue := TRUE; romEn := TRUE; cardReset := FALSE; Hz := EmHost.hz;
     extCost := 3 * ((Hz + 8399999) DIV 8400000) + (Hz + 25199999) DIV 25200000 + 4;
     EmSDRAM.Reset; EmBlit.Reset; EmSD.Reset; EmADB.Reset; EmSCC.Reset; EmVideo.SetText(FALSE);
-    ResetCards; EmSCSI.Reset; EmEth.Reset; EmPower.SetClock(Hz); EmPower.Reset; EmDMA.Reset; EmTimer.Reset; imask := 0FFH;
+    ResetCards; EmSCSI.Reset; EmEth.Reset; EmPower.SetClock(Hz); EmPower.Reset; EmRTC.Reset; EmDMA.Reset; EmTimer.Reset; imask := 0FFH;
     EmCore.SetBus(Read, Write, Fetch, Wait, Clock, Irq);
     EmCore.Reset
   END Reset;

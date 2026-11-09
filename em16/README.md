@@ -72,6 +72,7 @@ This port is a derivative of it and under the same licence.
     and on the SoC's carrier:
 
     EmEth     the ENC424J600 Ethernet controller, on -net's network
+    EmRTC     the rev B's DS12C887 real-time clock (-rtc, -rtctime)
 
 What Oberon cannot reach is in C: `EmNet_rt.c` (the network: vmnet
 and UDP), `EmHost_rt.c` (terminal modes,
@@ -128,7 +129,8 @@ have 1 MB, its symbol table 200000 symbols.
     em16 -fpga [-sysclk hz] [-smc] [-nodisplay] [-bootrom rom.bin] [-font font.hex] [-video] [-fbdump ppm] [-prof file cycles]
                [-disk0 img] [-disk1 img] [-wd1793] [-scsi img] [-sd img]
                [-net vmnet|vmnet-host|vmnet-bridged:IF|udp:LPORT:RPORT[:HOST]]
-               [-mac aa:bb:cc:dd:ee:ff] [-adbkey code] [-adbmouse dx dy] [file ...]
+               [-mac aa:bb:cc:dd:ee:ff] [-rtc file] [-rtctime YYYYMMDDhhmmss] [-nortc]
+               [-adbkey code] [-adbmouse dx dy] [file ...]
 
 `-fpga` emulates the SoC of `../../Verilog65C816/fpga` as its RTL
 describes it (`rtl/soc.v` and the modules below it, and `fpga/README.md`)
@@ -207,6 +209,21 @@ rather than em16's default machine:
   em16 ends 50 ms later with "the supply turned off"). F12 in the window
   is the power key, which the keyboard also sends over ADB ($7F); held 4
   seconds it turns the supply off;
+- the 65-16 rev B's real-time clock, a DS12C887 (`EmRTC.Mod`), on the
+  external bus's select 7: `$0870` written sets the register's index,
+  `$0871` reads and writes the register, as the PC AT's ports 70h and
+  71h; its /IRQ is one of the cards' IRQ#. The time, the alarms, UIP,
+  SET, BCD or binary, 12 or 24 hours, the century byte at 32h, the
+  periodic, alarm and update interrupts and the NV RAM, as the datasheet
+  has them; a reset clears the enables and the flags. Its seconds are the
+  SoC's (so they agree with the tick timer, paced or not), from the
+  host's time in UTC at start-up, binary and 24-hour, as OS16 keeps it;
+  `-rtctime YYYYMMDDhhmmss` starts it at that time instead (a test's);
+  `-rtc file` keeps the chip in file, written after each register
+  write, its time carried on by the host's while em16 was not running;
+  a file not there yet is a new module, its oscillator off; `-nortc`
+  leaves the chip out, as on a rev A board (OS16's tests boot so, for
+  files without dates); the last of the three wins;
 - with `-wd1793`, the WD1793 card that OS16's old boot loader was
   written for at $0800 instead of the 82077AA, as before;
 - a program ends with STP or a fetch from 00:0000.
@@ -413,7 +430,13 @@ interface check and ETHRST, the MAC address, the link and the PHY through
 MII, a frame sent (the peer checks its padding), three received of which
 the filters let two in (their next pointers, status vectors and text, the
 IRQ), the hash table, the chip's DMA checksum and copy, and the SoC's
-DMA channel 2 into the chip's buffer and back. The oc816 golden suite (`../oc`, make
+DMA channel 2 into the chip's buffer and back. `test/rtc.sh` drives the
+real-time clock (`test/rtc.s`) at `-rtctime` 2026-11-09 23:59:58: the
+registers, the index port, the RAM through a mirror, two updates over
+midnight with UIP seen, the update interrupt and register C, BCD with
+SET to 2100-01-01 (the century carried), 12-hour mode, the periodic
+flag; then `-rtc` with no file (a new module, started) and again (kept).
+The oc816 golden suite (`../oc`, make
 test_self), `as/test816`, OS16's tests and Business BASIC's run on em16
 -fpga.
 

@@ -116,6 +116,10 @@ int EmHost__FileExists(const char *name, int len) {
 
 static struct timespec start;
 
+int64_t EmHost__UnixTime(void) {
+    return (int64_t)time(NULL);
+}
+
 void EmHost__ClockStart(void) {
     clock_gettime(CLOCK_MONOTONIC, &start);
 }

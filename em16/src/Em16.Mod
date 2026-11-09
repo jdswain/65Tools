@@ -5,12 +5,17 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
    em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-sysclk hz] [-smc] [-nodisplay] [-bootrom rom.bin]
         [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-prof file cycles] [-test-pattern]
         [-console] [-disk0 file] [-disk1 file] [-wd1793]
-        [-scsi file] [-sd file] [-net vmnet|vmnet-host|vmnet-bridged:IF|udp:LPORT:RPORT[:HOST]] [-mac aa:bb:cc:dd:ee:ff] [-adbkey code] [-adbmouse dx dy] file ...
+        [-scsi file] [-sd file] [-net vmnet|vmnet-host|vmnet-bridged:IF|udp:LPORT:RPORT[:HOST]] [-mac aa:bb:cc:dd:ee:ff]
+        [-rtc file] [-rtctime YYYYMMDDhhmmss] [-nortc] [-adbkey code] [-adbmouse dx dy] file ...
 
    On the default machine and under -fpga the floppy disks are the
    82077AA's, or the WD1793's with -wd1793, and -scsi puts a disk at ID 0
    on the SCSI bus; -sd puts a card in the microSD slot, an SDHC card of
-   the file's raw blocks. The L28's are its WD1793's. Under -fpga, -adbkey
+   the file's raw blocks. The L28's are its WD1793's. Under -fpga the
+   rev B's real-time clock (EmRTC) runs from the host's time in UTC, or
+   from -rtctime's; -rtc keeps it in a file (a new module, its oscillator
+   off, if the file is not there yet); -nortc leaves it out, as on a rev
+   A board (the last of the three wins). Under -fpga, -adbkey
    holds an ADB key code down from power on (the keyboard reports it at
    the first Talk), as a key held while the board starts, and -adbmouse
    moves the mouse dx right and dy down from power on, reported at the
@@ -24,7 +29,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
      EmLoad   ELF loading, traps     EmHost  the host (C side: EmHost_rt.c)
      EmUART EmVIA EmFDC EmL28 EmVideo EmLCD  the devices *)
 
-  IMPORT Env, Files, EmHost, EmMem, EmCPU, EmLoad, EmFDC, Em82077, EmSCSI, EmSD, EmEth, EmADB, EmL28, EmVideo, EmLCD, EmCore, EmSDRAM, EmSoC, EmHarte;
+  IMPORT Env, Files, EmHost, EmMem, EmCPU, EmLoad, EmFDC, Em82077, EmSCSI, EmSD, EmEth, EmRTC, EmADB, EmL28, EmVideo, EmLCD, EmCore, EmSDRAM, EmSoC, EmHarte;
 
   VAR
     trace, videoEnabled, testPattern, consoleMode, wantFpga, wantL28, bad: BOOLEAN;
@@ -121,6 +126,11 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
         IF ~EmEth.Open(val) THEN bad := TRUE END; INC(index, 2)
       ELSIF Equal(arg, "-mac") & (index + 1 < n) THEN Env.Arg(index + 1, val);
         IF ~EmEth.SetMac(val) THEN ErrStr("-mac: aa:bb:cc:dd:ee:ff, not "); ErrStr(val); EmHost.Ln(EmHost.err); bad := TRUE END;
+        INC(index, 2)
+      ELSIF Equal(arg, "-nortc") THEN EmRTC.Absent; INC(index)
+      ELSIF Equal(arg, "-rtc") & (index + 1 < n) THEN Env.Arg(index + 1, val); EmRTC.Load(val); INC(index, 2)
+      ELSIF Equal(arg, "-rtctime") & (index + 1 < n) THEN Env.Arg(index + 1, val);
+        IF ~EmRTC.SetTime(val) THEN ErrStr("-rtctime: YYYYMMDDhhmmss, not "); ErrStr(val); EmHost.Ln(EmHost.err); bad := TRUE END;
         INC(index, 2)
       ELSIF Equal(arg, "-console") THEN consoleMode := TRUE; INC(index)
       ELSIF Equal(arg, "-adbkey") & (index + 1 < n) THEN Env.Arg(index + 1, val);

@@ -59,6 +59,11 @@ MODULE EmHost; (* The host side of em16: standard output and error, the
   PROCEDURE ClockStart*;
   END ClockStart;
 
+  (* The host's time of day: seconds since 1970-01-01 00:00 UTC *)
+  PROCEDURE UnixTime*(): LONGINT;
+  BEGIN RETURN 0
+  END UnixTime;
+
   (* Kept to real time: a sleep while cycles at hz a second are ahead of
      the clock since the first call. *)
   PROCEDURE Pace*(cycles, hz: LONGINT);
