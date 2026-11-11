@@ -54,7 +54,16 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
    cards' IRQ# (the 82077AA's INT, the 53C80's IRQ, the ENC424J600's
    /INT and the DS12C887's /IRQ), which bit 0 of
    $0340 also reads, and the SCC; setting bit 0 of $0340 resets the
-   cards' chips (RES#). *)
+   cards' chips (RES#).
+
+   With -cpuclk (SetCpuClock) the core runs on a clock of its own, slower
+   than the system clock, as if a clock enable at that rate drove it: a
+   state without a bus cycle takes a clock of the core's, and a bus cycle
+   ends at the first edge of the core's clock once the memory or device
+   is ready, at least one after it began. The memory, the devices and the
+   display keep the system clock. The core then counts its own clocks
+   (Clock), and a fill's ready is in them. Not the board's: its core runs
+   on the system clock. *)
 
   IMPORT Files, EmHost, EmCore, EmSDRAM, EmSCC, EmADB, EmBlit, EmSD, EmFDC, Em82077, EmSCSI, EmEth, EmPower, EmRTC, EmDMA, EmTimer, EmVideo;
 
@@ -75,7 +84,13 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
     wd1793*: BOOLEAN;         (* card 0 is the WD1793 card, not the 82077AA *)
     nextTick: LONGINT;
     nextPace: LONGINT;
+    turbo: BOOLEAN;           (* -turbo: never kept to real time *)
     rested: BOOLEAN;          (* the guest reads its input: real time *)
+    cpuHz: LONGINT;           (* -cpuclk: the core's clock, 0 the system clock *)
+    slow: BOOLEAN;            (* the core on a clock of its own, slower than Hz *)
+    cn: LONGINT;              (* with slow, the core's clocks since reset *)
+    edge: LONGINT;            (* the system clock's cycle of the core's clock cn *)
+    frac, stepQ, stepR: LONGINT;   (* edge's fraction of a cycle, in 1/cpuHz; Hz DIV and MOD cpuHz *)
     ms: INTEGER;              (* milliseconds of this second *)
     talks0: LONGINT;          (* EmADB.talks at its start *)
     sccEnd: LONGINT;          (* the cycle after the SCC's last access *)
@@ -84,6 +99,16 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
   PROCEDURE UseWD1793*;
   BEGIN wd1793 := TRUE; EmDMA.NoFloppy
   END UseWD1793;
+
+  (* -turbo: flat out always, even with a window and the guest at rest *)
+  PROCEDURE Turbo*;
+  BEGIN turbo := TRUE
+  END Turbo;
+
+  (* -cpuclk: the core's clock, at most the system clock's (Reset sets it up) *)
+  PROCEDURE SetCpuClock*(hz: LONGINT);
+  BEGIN cpuHz := hz
+  END SetCpuClock;
 
   (* The boot ROM is sized to its image, as the Verilog repository's
      tools/romimage.py sizes it: the smallest of 8, 16 or 32K that holds the
@@ -106,6 +131,34 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
       nextTick := now + 64; irqDue := TRUE
     END
   END Pass;
+
+  (* --- the core's clock, with slow --- *)
+
+  (* The next edge of the core's clock: Hz / cpuHz cycles on, the fraction
+     carried. *)
+  PROCEDURE NextEdge;
+  BEGIN INC(cn); edge := edge + stepQ; frac := frac + stepR;
+    IF frac >= cpuHz THEN frac := frac - cpuHz; INC(edge) END
+  END NextEdge;
+
+  (* The end of a bus cycle that began at the core's clock edge: the first
+     edge at or after now, the memory's ready, and at least the next. *)
+  PROCEDURE Align;
+  BEGIN
+    REPEAT NextEdge UNTIL edge >= now;
+    IF edge > now THEN Pass(edge - now) END
+  END Align;
+
+  (* The core's clocks from edge until the system clock's cycle t:
+     the clocks a fill whose memory is ready at t takes, at least 1. *)
+  PROCEDURE ClocksTo(t: LONGINT): INTEGER;
+    VAR e, f: LONGINT; k: INTEGER;
+  BEGIN e := edge; f := frac; k := 0;
+    REPEAT INC(k); e := e + stepQ; f := f + stepR;
+      IF f >= cpuHz THEN f := f - cpuHz; INC(e) END
+    UNTIL e >= t;
+    RETURN k
+  END ClocksTo;
 
   PROCEDURE IO(a: INTEGER): BOOLEAN;
   BEGIN RETURN (a >= 200H) & (a <= 0FFFH)
@@ -246,6 +299,7 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
     ELSIF romEn & (a >= romBase) & (a <= 0FFFFH) THEN Pass(2); r := rom[a - romBase]
     ELSE Pass(EmSDRAM.ReadCost(a, now)); r := EmSDRAM.Peek(a)
     END;
+    IF slow THEN Align END;
     RETURN r
   END Read;
 
@@ -254,16 +308,19 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
     IF a >= EmSDRAM.size THEN Pass(2)
     ELSIF IO(a) THEN IOWrite(a, v); irqDue := TRUE
     ELSE Pass(EmSDRAM.WriteCost(a, now)); EmSDRAM.Poke(a, v)
-    END
+    END;
+    IF slow THEN Align END
   END Write;
 
   (* A fill of the core's instruction queue, its bus cycle from cycle at:
      the word of the SDRAM or the boot ROM (from a to its end), a byte of
      anything else ($FF: a fill of the I/O block, which no code runs from,
-     reads nothing), and the cycles to its ready. *)
+     reads nothing), and the cycles to its ready. With slow, at and the
+     cycles are the core's clocks; the fill starts now, at edge. *)
   PROCEDURE Fetch*(a: INTEGER; at: LONGINT; VAR w: ARRAY OF INTEGER; VAR n: INTEGER): INTEGER;
     VAR c, i: INTEGER;
   BEGIN
+    IF slow THEN at := now END;
     IF (a >= EmSDRAM.size) OR IO(a) THEN n := 1; w[0] := 0FFH;
       c := 2; IF IO(a) & SCC(a) & (at = sccEnd) THEN c := 3 ELSIF IO(a) & (a >= 800H) & ~cardReset THEN c := extCost END
     ELSE n := 4 - a MOD 4;
@@ -273,16 +330,25 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
         FOR i := 0 TO n - 1 DO w[i] := EmSDRAM.Peek(a + i) END
       END
     END;
+    IF slow THEN c := ClocksTo(at + c) END;
     RETURN c
   END Fetch;
 
-  (* cycles of the core without a bus cycle of its own *)
+  (* cycles of the core without a bus cycle of its own: its clocks *)
   PROCEDURE Wait*(c: INTEGER);
-  BEGIN Pass(c)
+  BEGIN
+    IF slow THEN
+      WHILE c > 0 DO NextEdge; DEC(c) END;
+      Pass(edge - now)
+    ELSE Pass(c)
+    END
   END Wait;
 
+  (* the core's time: the system clock's cycles, or with slow its own clocks *)
   PROCEDURE Clock*(): LONGINT;
-  BEGIN RETURN now
+    VAR t: LONGINT;
+  BEGIN IF slow THEN t := cn ELSE t := now END;
+    RETURN t
   END Clock;
 
   (* The IRQ line: the sources change as the devices are given the time
@@ -313,6 +379,8 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
 
   PROCEDURE Reset*;
   BEGIN now := 0; nextTick := 0; sccEnd := -1; bus := 0FFH; irq := FALSE; irqDue := TRUE; romEn := TRUE; cardReset := FALSE; Hz := EmHost.hz;
+    slow := (cpuHz > 0) & (cpuHz < Hz); cn := 0; edge := 0; frac := 0;
+    IF slow THEN stepQ := Hz DIV cpuHz; stepR := Hz MOD cpuHz END;
     extCost := 3 * ((Hz + 8399999) DIV 8400000) + (Hz + 25199999) DIV 25200000 + 4;
     EmSDRAM.Reset; EmBlit.Reset; EmSD.Reset; EmADB.Reset; EmSCC.Reset; EmVideo.SetText(FALSE);
     ResetCards; EmSCSI.Reset; EmEth.Reset; EmPower.SetClock(Hz); EmPower.Reset; EmRTC.Reset; EmDMA.Reset; EmTimer.Reset; imask := 0FFH;
@@ -325,7 +393,8 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
      mouse (Polls ADB transactions in a second, as OS16's InputManager
      makes and a boot does not), at the board's speed from then on, each millisecond of the
      clock in step with the host's, so that its times (a key's repeat, a
-     double click) are the person's, busy or not. *)
+     double click) are the person's, busy or not. With -turbo (Turbo),
+     flat out all the time. *)
   PROCEDURE Word(v: INTEGER);
   BEGIN Files.WriteByte(prof, v MOD 100H); Files.WriteByte(prof, v DIV 100H MOD 100H);
     Files.WriteByte(prof, v DIV 10000H MOD 100H); Files.WriteByte(prof, v DIV 1000000H MOD 100H)
@@ -346,7 +415,7 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
       IF (profEvery > 0) & (now >= nextProf) THEN
         Word(EmCore.PBR * 10000H + EmCore.PC); Word(now DIV 1000); nextProf := now + profEvery
       END;
-      IF (EmHost.pace # 0) & (now >= nextPace) THEN
+      IF (EmHost.pace # 0) & ~turbo & (now >= nextPace) THEN
         IF rested THEN EmHost.Pace(now, Hz)
         ELSE
           INC(ms);
@@ -359,5 +428,5 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
     EmHost.DrainAll
   END Run;
 
-BEGIN profEvery := 0; romEn := TRUE; romBase := 0E000H; now := 0; wd1793 := FALSE
+BEGIN profEvery := 0; romEn := TRUE; romBase := 0E000H; now := 0; wd1793 := FALSE; turbo := FALSE; cpuHz := 0; slow := FALSE
 END EmSoC.

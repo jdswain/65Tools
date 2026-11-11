@@ -126,7 +126,7 @@ have 1 MB, its symbol table 200000 symbols.
 
 ## The SoC (-fpga)
 
-    em16 -fpga [-sysclk hz] [-smc] [-nodisplay] [-bootrom rom.bin] [-font font.hex] [-video] [-fbdump ppm] [-prof file cycles]
+    em16 -fpga [-sysclk hz] [-cpuclk hz] [-turbo] [-smc] [-nodisplay] [-bootrom rom.bin] [-font font.hex] [-video] [-fbdump ppm] [-prof file cycles]
                [-disk0 img] [-disk1 img] [-wd1793] [-scsi img] [-sd img]
                [-net vmnet|vmnet-host|vmnet-bridged:IF|udp:LPORT:RPORT[:HOST]]
                [-mac aa:bb:cc:dd:ee:ff] [-rtc file] [-rtctime YYYYMMDDhhmmss] [-nortc]
@@ -181,8 +181,9 @@ rather than em16's default machine:
   cycles a second), flat out through a boot; when the guest makes 200 ADB transactions in a second (OS16's
   InputManager makes 400, the boot ROM 100), each millisecond of the
   clock is kept in step with the host's from then on, so a key's repeat
-  and a double click take the person's time. Without `-video` it is all
-  flat out; `-adbkey code` (e.g. `0x2e`, M) holds a key down from
+  and a double click take the person's time. Without `-video`, or with
+  `-turbo`, it is all flat out (with `-turbo` the guest's times run fast
+  too: a key repeats as fast as em16 runs); `-adbkey code` (e.g. `0x2e`, M) holds a key down from
   power on, for a boot ROM that looks for one, and `-adbmouse dx dy`
   moves the mouse from power on (OS16's UITest checks its pointer with
   it);
@@ -232,7 +233,7 @@ rather than em16's default machine:
 
 Time is counted in the SoC's system clock, the board's 40.5 MHz
 (`top_tang20k.v`), or `-sysclk hz`'s (25.2 MHz is the RTL simulation's,
-`tb_soc`'s default). The devices take their times from it as the RTL
+`tb_soc`'s default; `25200000`, `25.2M` or `25.2MHz`). The devices take their times from it as the RTL
 does from `SYS_HZ`: the external bus, the DMA byte, the SCC's character,
 ADB's microsecond, the SD divider's reset value, the SDRAM's
 initialisation and refresh, the display's line, the tick timer's counts.
@@ -293,6 +294,32 @@ blit waits longer on the board); the CPU waiting for the external bus
 while a DMA cycle has it; a queue fill of I/O, which reads nothing here;
 and a typed character arriving while one waits: on the board it
 overruns, here it is held back, as if by flow control.
+
+`-cpuclk hz` (`8M`, `16M`, `14.318M`; at most the system clock) runs the
+core on a clock of its own, slower than the SoC's, at the speeds of real
+65C816 systems: as if a clock enable at that rate drove `cpu_65c816.v`.
+A state without a bus cycle takes one of its clocks, and a bus cycle ends
+at the first of its clock edges once the memory or device is ready, at
+least one after it began. The cache, the SDRAM, the display, the external
+bus and the devices keep the system clock, so the memory's wait states
+shrink in the core's clocks (a cache hit, 2 system clocks, is one of the
+core's at 20.25 MHz and below). The board has no such clock enable; this
+shows how the system feels at a real chip's clock, though the core still
+does more in a clock than the WDC chip (its queue overlaps fetching with
+executing, and it has no dummy cycles). `bench.s` at the board's 40.5 MHz
+system clock without the display, in the tick timer's 25.2 MHz counts:
+
+| -cpuclk | sieve | sum | copy | walk |
+|---|---|---|---|---|
+| none (40.5 MHz) | 56,395 | 18,432 | 4,031 | 30,493 |
+| 20.25M | 91,975 | 26,233 | 5,989 | 42,542 |
+| 16M | 115,871 | 32,226 | 7,442 | 52,931 |
+| 14M | 132,122 | 36,364 | 8,431 | 60,016 |
+| 8M | 229,598 | 61,586 | 14,373 | 102,728 |
+
+The tests (`make test`) pass at `-cpuclk 8M` too. With `-video` the
+window keeps to real time as above, so the slower core is seen at its
+speed; `-turbo` runs flat out.
 
 As on the board, a store does not change bytes already in the core's
 queue (at most the 8 after the storing instruction): code written by

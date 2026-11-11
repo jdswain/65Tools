@@ -2,7 +2,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
    testing programs of the assembler and the Oberon compiler: the
    command line and the running.
 
-   em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-sysclk hz] [-smc] [-nodisplay] [-bootrom rom.bin]
+   em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-sysclk hz] [-cpuclk hz] [-turbo] [-smc] [-nodisplay] [-bootrom rom.bin]
         [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-prof file cycles] [-test-pattern]
         [-console] [-disk0 file] [-disk1 file] [-wd1793]
         [-scsi file] [-sd file] [-net vmnet|vmnet-host|vmnet-bridged:IF|udp:LPORT:RPORT[:HOST]] [-mac aa:bb:cc:dd:ee:ff]
@@ -19,7 +19,10 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
    holds an ADB key code down from power on (the keyboard reports it at
    the first Talk), as a key held while the board starts, and -adbmouse
    moves the mouse dx right and dy down from power on, reported at the
-   mouse's Talks (a test of a program's own pointer).
+   mouse's Talks (a test of a program's own pointer). -cpuclk runs the
+   core on a clock of its own below the system clock (8M or 16M, a real
+   65C816's), the memory and devices keeping theirs; -turbo runs flat out
+   even with a window, never in step with the host's time.
 
    A file is an ELF executable. Oberon modules are not loaded by em16:
    OS16 boots on -fpga, from a floppy, as on the board, and loads them.
@@ -71,6 +74,27 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
     RETURN v
   END Number;
 
+  (* A frequency: hz (40500000), or MHz or kHz with M or k (8M, 14.318M,
+     500k), Hz after them allowed; 0 if s is not one. *)
+  PROCEDURE Hertz(s: ARRAY OF CHAR): INTEGER;
+    VAR i, v, scale, div: INTEGER; point: BOOLEAN;
+  BEGIN i := 0; v := 0; div := 1; scale := 1; point := FALSE;
+    WHILE (i < LEN(s)) & ((s[i] >= "0") & (s[i] <= "9") OR (s[i] = ".") & ~point) DO
+      IF s[i] = "." THEN point := TRUE
+      ELSE v := v * 10 + ORD(s[i]) - ORD("0"); IF point THEN div := div * 10 END
+      END;
+      INC(i)
+    END;
+    IF i < LEN(s) THEN
+      IF (s[i] = "M") OR (s[i] = "m") THEN scale := 1000000; INC(i)
+      ELSIF (s[i] = "k") OR (s[i] = "K") THEN scale := 1000; INC(i)
+      END
+    END;
+    IF (i + 1 < LEN(s)) & ((s[i] = "H") OR (s[i] = "h")) & (s[i + 1] = "z") THEN INC(i, 2) END;
+    IF (i < LEN(s)) & (s[i] # 0X) OR (div > scale) THEN v := 0 ELSE v := v * (scale DIV div) END;
+    RETURN v
+  END Hertz;
+
 
   PROCEDURE Cycles(): LONGINT;
   BEGIN RETURN EmCPU.cycles
@@ -109,6 +133,13 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       ELSIF Equal(arg, "-smc") THEN EmCore.SetSMC(TRUE); INC(index)
       ELSIF Equal(arg, "-nodisplay") THEN EmSDRAM.NoDisplay; INC(index)
       ELSIF Equal(arg, "-sysclk") & (index + 1 < n) THEN INC(index, 2)
+      ELSIF Equal(arg, "-turbo") THEN EmSoC.Turbo; INC(index)
+      ELSIF Equal(arg, "-cpuclk") & (index + 1 < n) THEN Env.Arg(index + 1, val); k := Hertz(val);
+        IF (k <= 0) OR (k > EmHost.hz) THEN
+          ErrStr("-cpuclk: hz, at most the system clock's (8M, 16M), not "); ErrStr(val); EmHost.Ln(EmHost.err); bad := TRUE
+        ELSE EmSoC.SetCpuClock(k)
+        END;
+        INC(index, 2)
       ELSIF Equal(arg, "-bootrom") & (index + 1 < n) THEN Env.Arg(index + 1, bootrom); INC(index, 2)
       ELSIF Equal(arg, "-font") & (index + 1 < n) THEN Env.Arg(index + 1, font); INC(index, 2)
       ELSIF (Equal(arg, "-disk0") OR Equal(arg, "-disk1")) & (index + 1 < n) THEN Env.Arg(index + 1, val);
@@ -138,7 +169,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       ELSIF Equal(arg, "-adbmouse") & (index + 2 < n) THEN
         Env.Arg(index + 1, val); adbDx := Number(val); Env.Arg(index + 2, val); adbDy := Number(val); INC(index, 3)
       ELSIF Equal(arg, "-?") THEN
-        ErrStr("Usage: em16 [-t] [-tfrom addr skip count] [-cpu l28|rockwell|wdc|816] [-fpga] [-sysclk hz] [-smc] [-nodisplay] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-prof file cycles] [-test-pattern] [-console] [-disk0 file] [-disk1 file] [-wd1793] [-scsi file] [-sd file] [-adbkey code] [-adbmouse dx dy] file ...");
+        ErrStr("Usage: em16 [-t] [-tfrom addr skip count] [-cpu l28|rockwell|wdc|816] [-fpga] [-sysclk hz] [-cpuclk hz] [-turbo] [-smc] [-nodisplay] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-prof file cycles] [-test-pattern] [-console] [-disk0 file] [-disk1 file] [-wd1793] [-scsi file] [-sd file] [-adbkey code] [-adbmouse dx dy] file ...");
         EmHost.Ln(EmHost.err); bad := TRUE
       ELSE ErrStr("Invalid: option '"); ErrStr(arg); ErrStr("'"); EmHost.Ln(EmHost.err); bad := TRUE
       END
@@ -237,7 +268,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
     wantFpga := FALSE; wantL28 := FALSE; sysclk := 0;
     FOR i := 1 TO n - 1 DO Env.Arg(i, arg);
       IF Equal(arg, "-fpga") THEN wantFpga := TRUE ELSIF Equal(arg, "-wd1793") THEN EmSoC.UseWD1793
-      ELSIF Equal(arg, "-sysclk") & (i + 1 < n) THEN Env.Arg(i + 1, arg); sysclk := Number(arg)
+      ELSIF Equal(arg, "-sysclk") & (i + 1 < n) THEN Env.Arg(i + 1, arg); sysclk := Hertz(arg)
       ELSIF Equal(arg, "-cpu") & (i + 1 < n) THEN Env.Arg(i + 1, arg);
         wantL28 := Equal(arg, "l28") OR Equal(arg, "L28") OR Equal(arg, "c19") OR Equal(arg, "C19")
       END
