@@ -40,9 +40,11 @@ MODULE Out; (* Output on the serial port: channel A of the board's Z85C30
     END
   END Char;
 
+  (* a new line: CR LF, so that a terminal (em16's, the board's serial
+     one) goes back to the line's start too *)
   PROCEDURE Ln*;
   BEGIN
-    Char(0AX)
+    Char(0DX); Char(0AX)
   END Ln;
 
   PROCEDURE String*(s: ARRAY OF CHAR);
