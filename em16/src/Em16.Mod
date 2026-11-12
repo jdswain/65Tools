@@ -5,12 +5,13 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
    em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-sysclk hz] [-cpuclk hz] [-turbo] [-smc] [-nodisplay] [-bootrom rom.bin]
         [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-prof file cycles] [-test-pattern]
         [-console] [-disk0 file] [-disk1 file] [-wd1793]
-        [-scsi file] [-sd file] [-net vmnet|vmnet-host|vmnet-bridged:IF|udp:LPORT:RPORT[:HOST]] [-mac aa:bb:cc:dd:ee:ff]
+        [-scsi file] [-scsitiming] [-sd file] [-net vmnet|vmnet-host|vmnet-bridged:IF|udp:LPORT:RPORT[:HOST]] [-mac aa:bb:cc:dd:ee:ff]
         [-rtc file] [-rtctime YYYYMMDDhhmmss] [-nortc] [-adbkey code] [-adbmouse dx dy] file ...
 
    On the default machine and under -fpga the floppy disks are the
    82077AA's, or the WD1793's with -wd1793, and -scsi puts a disk at ID 0
-   on the SCSI bus; -sd puts a card in the microSD slot, an SDHC card of
+   on the SCSI bus (-scsitiming, under -fpga, gives it the time a drive
+   of about 1990 takes: EmSCSI); -sd puts a card in the microSD slot, an SDHC card of
    the file's raw blocks. The L28's are its WD1793's. Under -fpga the
    rev B's real-time clock (EmRTC) runs from the host's time in UTC, or
    from -rtctime's; -rtc keeps it in a file (a new module, its oscillator
@@ -151,6 +152,9 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       ELSIF Equal(arg, "-wd1793") THEN INC(index)
       ELSIF Equal(arg, "-scsi") & (index + 1 < n) THEN Env.Arg(index + 1, val);
         IF EmSCSI.Mount(val) THEN END; INC(index, 2)
+      ELSIF Equal(arg, "-scsitiming") THEN
+        IF wantFpga THEN EmSCSI.SetTiming ELSE ErrStr("-scsitiming: only with -fpga"); EmHost.Ln(EmHost.err); bad := TRUE END;
+        INC(index)
       ELSIF Equal(arg, "-sd") & (index + 1 < n) THEN Env.Arg(index + 1, val);
         IF EmSD.Mount(val) THEN END; INC(index, 2)
       ELSIF Equal(arg, "-net") & (index + 1 < n) THEN Env.Arg(index + 1, val);
@@ -169,7 +173,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       ELSIF Equal(arg, "-adbmouse") & (index + 2 < n) THEN
         Env.Arg(index + 1, val); adbDx := Number(val); Env.Arg(index + 2, val); adbDy := Number(val); INC(index, 3)
       ELSIF Equal(arg, "-?") THEN
-        ErrStr("Usage: em16 [-t] [-tfrom addr skip count] [-cpu l28|rockwell|wdc|816] [-fpga] [-sysclk hz] [-cpuclk hz] [-turbo] [-smc] [-nodisplay] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-prof file cycles] [-test-pattern] [-console] [-disk0 file] [-disk1 file] [-wd1793] [-scsi file] [-sd file] [-adbkey code] [-adbmouse dx dy] file ...");
+        ErrStr("Usage: em16 [-t] [-tfrom addr skip count] [-cpu l28|rockwell|wdc|816] [-fpga] [-sysclk hz] [-cpuclk hz] [-turbo] [-smc] [-nodisplay] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-prof file cycles] [-test-pattern] [-console] [-disk0 file] [-disk1 file] [-wd1793] [-scsi file] [-scsitiming] [-sd file] [-adbkey code] [-adbmouse dx dy] file ...");
         EmHost.Ln(EmHost.err); bad := TRUE
       ELSE ErrStr("Invalid: option '"); ErrStr(arg); ErrStr("'"); EmHost.Ln(EmHost.err); bad := TRUE
       END

@@ -127,7 +127,7 @@ have 1 MB, its symbol table 200000 symbols.
 ## The SoC (-fpga)
 
     em16 -fpga [-sysclk hz] [-cpuclk hz] [-turbo] [-smc] [-nodisplay] [-bootrom rom.bin] [-font font.hex] [-video] [-fbdump ppm] [-prof file cycles]
-               [-disk0 img] [-disk1 img] [-wd1793] [-scsi img] [-sd img]
+               [-disk0 img] [-disk1 img] [-wd1793] [-scsi img] [-scsitiming] [-sd img]
                [-net vmnet|vmnet-host|vmnet-bridged:IF|udp:LPORT:RPORT[:HOST]]
                [-mac aa:bb:cc:dd:ee:ff] [-rtc file] [-rtctime YYYYMMDDhhmmss] [-nortc]
                [-adbkey code] [-adbmouse dx dy] [file ...]
@@ -355,7 +355,23 @@ engine). The comments at the top of `Em82077.Mod`, `EmSCSI.Mod` and
   UNIT ATTENTION after power on and a bus reset. DMA mode (mode bit 1,
   then a write to register 5, send, or 7, initiator receive) asks for
   each byte with DRQ while the phase matches; EOP sets End of DMA, and
-  the target changing phase first interrupts.
+  the target changing phase first interrupts. The disk takes no time:
+  it answers at once, REQ following ACK.
+- **SCSI in a drive's time**, `-scsitiming` (with `-scsi`): the disk
+  takes the time a 3.5 inch drive of about 1990 takes, round figures of
+  the Quantum ProDrive LPS's era (the comment at the top of `EmSCSI.Mod`
+  has them all): 32 sectors a track, 4 heads, 3600 rpm (a sector every
+  0.52 ms, about 1 MB/s off the platters); a seek of d cylinders
+  3 ms + 27 ms * sqrt(d / cylinders), 30 ms all the way across; 0.5 ms
+  of the controller's a command; a 64K read-ahead buffer, so reads that
+  follow on come at the bus's speed; writes on the platters before their
+  status. After power on it answers no selection for 1 s, and is NOT
+  READY (sense 2, 04h, 01h) until it has spun up, at 5 s. REQ comes when
+  the drive would assert it; the 53C80 and DMA wait for it as on the
+  board. OS16's DiskTest (`make test-disk`) passes on it, and does on a
+  20 MB disk; OS16's `make test-boot-scsi` boots from a disk with it, the
+  boot ROM waiting for the drive to answer and to spin up (it gave up
+  after 20 TEST UNIT READYs, 34 ms, until it timed its waits).
 - **SD card**, `-sd`: an SDHC card in the microSD slot (`rtl/sd_spi.v`,
   `$02C0`), its blocks the image's from block 0. The controller is the
   RTL's, an access to DATA or NEXT waiting for the exchange running, which
@@ -465,6 +481,15 @@ registers, the index port, the RAM through a mirror, two updates over
 midnight with UIP seen, the update interrupt and register C, BCD with
 SET to 2100-01-01 (the century carried), 12-hour mode, the periodic
 flag; then `-rtc` with no file (a new module, started) and again (kept).
+`test/hd.sh` runs a 20 MB disk with `-scsitiming` (`test/hd.s`, polled):
+from power on, the selection answered at 1 s and UNIT ATTENTION, NOT
+READY (02 04 01) until the spin-up at 5 s; then reads and a write timed
+by the tick timer and checked against the drive's figures: a block under
+the heads (6.9 ms), one in the read-ahead buffer (3.8 ms, the polled
+transfer most of it), one the read-ahead has not reached yet, a seek of
+156 cylinders (28 ms), 64 blocks in one command (205 ms: polled, about
+160 KB/s), a write (35 ms), the block just written read again a
+revolution later (16.6 ms), and two seeks across the disk (46 ms).
 The oc816 golden suite (`../oc`, make
 test_self), `as/test816`, OS16's tests and Business BASIC's run on em16
 -fpga.

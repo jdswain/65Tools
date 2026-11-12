@@ -55,7 +55,7 @@ MODULE EmDMA; (* The SoC's DMA engine (rtl/dma.v of the Verilog repository;
   PROCEDURE Drq(c: INTEGER; at: LONGINT): BOOLEAN;
     VAR r: BOOLEAN;
   BEGIN
-    IF c = 0 THEN r := EmSCSI.Drq() ELSIF c = 1 THEN r := floppy & Em82077.Drq(at) ELSE r := TRUE END;
+    IF c = 0 THEN EmSCSI.Tick(at); r := EmSCSI.Drq() ELSIF c = 1 THEN r := floppy & Em82077.Drq(at) ELSE r := TRUE END;
     RETURN r
   END Drq;
 

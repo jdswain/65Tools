@@ -52,7 +52,31 @@ MODULE EmSCSI; (* The SCSI half of the carrier board's Z85C80, a 53C80
    SYNCHRONIZE CACHE. Any other gets CHECK CONDITION, ILLEGAL REQUEST.
    As a real disk does, it reports UNIT ATTENTION (power on or reset) to
    the first command after power on or a bus reset other than INQUIRY
-   and REQUEST SENSE. *)
+   and REQUEST SENSE.
+
+   With -scsitiming (SetTiming, under -fpga) the disk takes the time a
+   3.5 inch drive of about 1990 takes (round figures of the Quantum
+   ProDrive LPS's time, not one drive's datasheet): REQ comes when the
+   drive would assert it, not at once. Its geometry is 32 sectors a track and 4 heads (128 blocks a
+   cylinder; 320 cylinders for 20 MB), turning at 3600 rpm: a sector every
+   0.52 ms, about 1 MB/s off the platters. A seek of d cylinders takes
+   3 ms + 27 ms * sqrt(d / cylinders): 4.5 ms to the next, 19 ms a third
+   of the way over, 30 ms all the way. Each command takes 0.5 ms of the
+   controller's before its first REQ of data or status. A read waits for
+   the seek and for its first block to come round, and each block is
+   sent once it has been read into the buffer; the drive reads on into
+   the buffer behind the blocks asked for, up to 128 blocks (64K) more, so
+   a read that follows on is served from the buffer, at the bus's speed.
+   Crossing to the next cylinder takes a track to track seek (the
+   cylinders skewed for it); the next head nothing. A write takes its
+   blocks into the buffer as fast as they come, then writes them, the
+   seek overlapping the transfer, and sends STATUS only once they are on
+   the platters (no write cache); it empties the read buffer. After power
+   on the drive answers no selection for 1 s and is NOT READY (2, 04h,
+   01h: becoming ready) to TEST UNIT READY, READ CAPACITY and the media
+   commands until it has spun up, 5 s after power on; START UNIT without
+   Immed waits for it. A bus reset does not spin it down. The time comes
+   from the system (Tick), as monotonic system clock cycles. *)
 
   IMPORT EmHost;
 
@@ -65,6 +89,9 @@ MODULE EmSCSI; (* The SCSI half of the carrier board's Z85C80, a 53C80
     (* what the data phase moves *)
     xNone = 0; xBuffer = 1; xRead = 2; xWrite = 3; xDiscard = 4;
     good = 0; checkCondition = 2;
+    (* -scsitiming: the drive's geometry and read-ahead *)
+    spt = 32; heads = 4; bpc = 128;   (* bpc: spt * heads *)
+    raMax = 128;
 
   VAR
     odr, icr, mode, tcr, ser: INTEGER;
@@ -77,7 +104,25 @@ MODULE EmSCSI; (* The SCSI half of the carrier board's Z85C80, a 53C80
     cdb: ARRAY 12 OF INTEGER; nCdb, cdbLen: INTEGER;
     data: ARRAY blockSize OF BYTE; dataLen, dataPos: INTEGER;
     xfer, lba, count, status: INTEGER;
-    senseKey, asc: INTEGER;
+    senseKey, asc, ascq: INTEGER;
+    (* -scsitiming *)
+    timed: BOOLEAN;
+    t: LONGINT;                     (* the time, the system clock's cycles, as last told *)
+    pend: BOOLEAN; reqAt: LONGINT;  (* REQ to be asserted at reqAt *)
+    due: LONGINT;                   (* no REQ before it *)
+    cmdT: LONGINT;                  (* the command's last byte *)
+    rev, secT, ovh, settle, stroke, t2t, selAt, readyAt: LONGINT;
+    cyls, cyl: INTEGER;             (* the cylinders; the one the heads are on *)
+    (* the read buffer: blocks lo..hb, hb read at ht, the drive reading on to
+       lim; resume: it had stopped, and reads on from resumeAt *)
+    valid, resume: BOOLEAN;
+    lo, hb, lim: INTEGER; ht, resumeAt: LONGINT;
+    wLba, wCount: INTEGER;          (* the write's blocks *)
+
+  (* -scsitiming: the disk takes a real drive's time *)
+  PROCEDURE SetTiming*;
+  BEGIN timed := TRUE
+  END SetTiming;
 
   PROCEDURE Mount*(name: ARRAY OF CHAR): BOOLEAN;
     VAR k, size: INTEGER;
@@ -98,23 +143,118 @@ MODULE EmSCSI; (* The SCSI half of the carrier board's Z85C80, a 53C80
   (* --- the disk --- *)
 
   PROCEDURE Sense(key, code: INTEGER);
-  BEGIN senseKey := key; asc := code
+  BEGIN senseKey := key; asc := code; ascq := 0
   END Sense;
 
   PROCEDURE BusFree;
   BEGIN
     IF (state # free) & ODD(mode DIV 4) & ~ODD(icr DIV 8) THEN busyErr := TRUE; irq := TRUE END;
-    state := free; req := FALSE; phase := 0; acked := FALSE
+    state := free; req := FALSE; pend := FALSE; phase := 0; acked := FALSE
   END BusFree;
 
   PROCEDURE DiskReset;
-  BEGIN state := free; req := FALSE; phase := 0; acked := FALSE;
+  BEGIN state := free; req := FALSE; pend := FALSE; phase := 0; acked := FALSE;
     unitAttention := TRUE; Sense(0, 0)
   END DiskReset;
 
+  (* The target asks for a byte in phase ph: REQ at once, or with
+     -scsitiming no sooner than due. *)
   PROCEDURE Request(ph, byte: INTEGER);
-  BEGIN phase := ph; out := byte; req := TRUE
+  BEGIN phase := ph; out := byte;
+    IF timed & (due > t) THEN req := FALSE; pend := TRUE; reqAt := due ELSE req := TRUE; pend := FALSE END
   END Request;
+
+  (* --- the drive's time, with -scsitiming --- *)
+
+  PROCEDURE ISqrt(n: LONGINT): LONGINT;
+    VAR x, y: LONGINT;
+  BEGIN
+    IF n < 2 THEN x := n
+    ELSE x := n; y := (x + 1) DIV 2;
+      WHILE y < x DO x := y; y := (x + n DIV x) DIV 2 END
+    END;
+    RETURN x
+  END ISqrt;
+
+  (* the heads from cylinder a to b *)
+  PROCEDURE Seek(a, b: INTEGER): LONGINT;
+    VAR d, c, r: LONGINT;
+  BEGIN d := ABS(a - b); c := cyls;
+    IF d = 0 THEN r := 0 ELSE r := settle + (stroke - settle) * ISqrt(d * 1000000) DIV ISqrt(c * 1000000) END;
+    RETURN r
+  END Seek;
+
+  (* when sector s next starts under the heads, at x or after *)
+  PROCEDURE RotStart(x: LONGINT; s: INTEGER): LONGINT;
+    VAR b: LONGINT;
+  BEGIN b := x - x MOD rev + s * secT; IF b < x THEN b := b + rev END;
+    RETURN b
+  END RotStart;
+
+  (* The drive reads the next block, hb + 1, into the buffer: a sector on
+     from the last, a track to track seek more onto the next cylinder; or
+     after a stop (resume), from resumeAt once the heads are on its
+     cylinder and it has come round. *)
+  PROCEDURE Step;
+    VAR b: INTEGER; x: LONGINT;
+  BEGIN b := hb + 1;
+    IF resume THEN x := resumeAt; IF ht > x THEN x := ht END;
+      IF b DIV bpc # cyl THEN x := x + Seek(cyl, b DIV bpc); cyl := b DIV bpc END;
+      ht := RotStart(x, b MOD spt) + secT; resume := FALSE
+    ELSIF b MOD bpc = 0 THEN ht := ht + t2t + secT; cyl := b DIV bpc
+    ELSE ht := ht + secT
+    END;
+    hb := b;
+    IF hb - lo > 2 * raMax THEN lo := hb - 2 * raMax END
+  END Step;
+
+  (* The read-ahead, on its own until x: the blocks read by then. *)
+  PROCEDURE Advance(x: LONGINT);
+    VAR n: LONGINT; go: BOOLEAN;
+  BEGIN go := TRUE;
+    WHILE go & valid & ~resume & (hb < lim) DO
+      n := ht + secT; IF (hb + 1) MOD bpc = 0 THEN n := n + t2t END;
+      IF n <= x THEN Step ELSE go := FALSE END
+    END
+  END Advance;
+
+  (* A read of n blocks from l at t: from the buffer, from the read-ahead
+     on its way to them, or from a seek and the wait for l to come round. *)
+  PROCEDURE StartRead(l, n: INTEGER);
+  BEGIN Advance(t);
+    IF valid & (l >= lo) & ((l <= hb + 1) OR (hb < lim) & (l <= lim)) THEN
+      IF hb >= lim THEN resume := TRUE; resumeAt := t + ovh END      (* the buffer had filled: it reads on *)
+    ELSE valid := TRUE; lo := l; hb := l - 1; resume := TRUE; resumeAt := t + ovh
+    END;
+    lim := l + n - 1 + raMax; IF lim >= blocks THEN lim := blocks - 1 END
+  END StartRead;
+
+  (* Block k in the buffer: no REQ for it sooner. The blocks before hb were
+     read by a time already passed. *)
+  PROCEDURE Ready(k: INTEGER);
+  BEGIN
+    WHILE hb < k DO Step END;
+    IF (k = hb) & (ht > due) THEN due := ht END
+  END Ready;
+
+  (* The write's blocks are all in the buffer (now, t): when they are on
+     the platters, the seek having started with the command. *)
+  PROCEDURE WriteDone(): LONGINT;
+    VAR x: LONGINT; b, c: INTEGER;
+  BEGIN c := wLba DIV bpc; x := cmdT + ovh + Seek(cyl, c); cyl := c;
+    IF t > x THEN x := t END;
+    x := RotStart(x, wLba MOD spt); b := wLba;
+    REPEAT x := x + secT; INC(b);
+      IF (b MOD bpc = 0) & (b < wLba + wCount) THEN x := x + t2t; cyl := b DIV bpc END
+    UNTIL b = wLba + wCount;
+    RETURN x
+  END WriteDone;
+
+  (* the commands a drive still spinning up answers NOT READY *)
+  PROCEDURE Media(op: INTEGER): BOOLEAN;
+  BEGIN RETURN (op = 0) OR (op = 4) OR (op = 8) OR (op = 0AH) OR (op = 25H) OR (op = 28H) OR (op = 2AH)
+      OR (op = 2FH) OR (op = 35H)
+  END Media;
 
   PROCEDURE Load;
     VAR k, i: INTEGER;
@@ -135,7 +275,7 @@ MODULE EmSCSI; (* The SCSI half of the carrier board's Z85C80, a 53C80
   (* Start the data phase, or go to STATUS if there is nothing to move. *)
   PROCEDURE StartData;
   BEGIN dataPos := 0;
-    IF (xfer = xRead) & (count > 0) THEN Load; Request(phDataIn, data[0])
+    IF (xfer = xRead) & (count > 0) THEN IF timed THEN Ready(lba) END; Load; Request(phDataIn, data[0])
     ELSIF (xfer = xWrite) & (count > 0) THEN dataLen := blockSize; Request(phDataOut, 0)
     ELSIF (xfer = xBuffer) & (dataLen > 0) THEN Request(phDataIn, data[0])
     ELSIF (xfer = xDiscard) & (dataLen > 0) THEN Request(phDataOut, 0)
@@ -166,13 +306,19 @@ MODULE EmSCSI; (* The SCSI half of the carrier board's Z85C80, a 53C80
   BEGIN
     IF lba + count > blocks THEN Check(5, 21H)                (* LBA out of range *)
     ELSIF write & readOnly THEN Check(7, 27H)                 (* write protected *)
-    ELSE IF write THEN xfer := xWrite ELSE xfer := xRead END; StartData
+    ELSE
+      IF write THEN xfer := xWrite;
+        IF timed THEN Advance(t); valid := FALSE; wLba := lba; wCount := count END
+      ELSE xfer := xRead;
+        IF timed & (count > 0) THEN StartRead(lba, count) END
+      END;
+      StartData
     END
   END ReadWrite;
 
   PROCEDURE Run;
     VAR op, i, alloc: INTEGER;
-  BEGIN op := cdb[0];
+  BEGIN op := cdb[0]; cmdT := t; due := t + ovh;              (* the controller's time *)
     IF ~identified THEN lun := cdb[1] DIV 32 END;
     FOR i := 0 TO blockSize - 1 DO data[i] := 0 END;
     IF op = 12H THEN                                          (* INQUIRY *)
@@ -183,12 +329,15 @@ MODULE EmSCSI; (* The SCSI half of the carrier board's Z85C80, a 53C80
     ELSIF op = 3 THEN                                         (* REQUEST SENSE *)
       IF unitAttention & (lun = 0) THEN unitAttention := FALSE; Sense(6, 29H) END;
       IF lun # 0 THEN Sense(5, 25H) END;
-      Put(0, 70H); Put(2, senseKey); Put(7, 10); Put(12, asc);
+      Put(0, 70H); Put(2, senseKey); Put(7, 10); Put(12, asc); Put(13, ascq);
       alloc := cdb[4]; IF alloc = 0 THEN alloc := 4 END;
       Sense(0, 0); Reply(18, alloc)
     ELSIF lun # 0 THEN Check(5, 25H)                          (* logical unit not supported *)
     ELSIF unitAttention THEN unitAttention := FALSE; Check(6, 29H)   (* power on or reset *)
-    ELSIF (op = 0) OR (op = 4) OR (op = 1BH) OR (op = 1EH) OR (op = 35H) THEN Finish(good)
+    ELSIF timed & (t < readyAt) & Media(op) THEN Check(2, 4); ascq := 1   (* becoming ready *)
+    ELSIF (op = 0) OR (op = 4) OR (op = 1BH) OR (op = 1EH) OR (op = 35H) THEN
+      IF timed & (op = 1BH) & ODD(cdb[4]) & ~ODD(cdb[1]) & (readyAt > due) THEN due := readyAt END;   (* START UNIT *)
+      Finish(good)
     ELSIF op = 8 THEN
       lba := AND(cdb[1], 1FH) * 10000H + cdb[2] * 100H + cdb[3]; count := cdb[4];
       IF count = 0 THEN count := 256 END;
@@ -200,8 +349,10 @@ MODULE EmSCSI; (* The SCSI half of the carrier board's Z85C80, a 53C80
     ELSIF (op = 28H) OR (op = 2AH) OR (op = 2FH) THEN
       lba := ((cdb[2] * 100H + cdb[3]) * 100H + cdb[4]) * 100H + cdb[5];
       count := cdb[7] * 100H + cdb[8];
-      IF op = 2FH THEN
-        IF lba + count > blocks THEN Check(5, 21H) ELSE Finish(good) END
+      IF op = 2FH THEN                                        (* VERIFY: the blocks read *)
+        IF lba + count > blocks THEN Check(5, 21H)
+        ELSE IF timed & (count > 0) THEN StartRead(lba, count); Ready(lba + count - 1) END; Finish(good)
+        END
       ELSE ReadWrite(op = 2AH)
       END
     ELSIF op = 25H THEN                                       (* READ CAPACITY *)
@@ -243,7 +394,7 @@ MODULE EmSCSI; (* The SCSI half of the carrier board's Z85C80, a 53C80
       INC(dataPos);
       IF dataPos < dataLen THEN Request(phDataIn, data[dataPos])
       ELSIF xfer = xRead THEN INC(lba); DEC(count);
-        IF count > 0 THEN Load; Request(phDataIn, data[0]) ELSE Finish(good) END
+        IF count > 0 THEN IF timed THEN Ready(lba) END; Load; Request(phDataIn, data[0]) ELSE Finish(good) END
       ELSE Finish(good)
       END
     ELSIF phase = phDataOut THEN
@@ -252,7 +403,9 @@ MODULE EmSCSI; (* The SCSI half of the carrier board's Z85C80, a 53C80
       IF dataPos < dataLen THEN Request(phDataOut, 0)
       ELSIF xfer = xWrite THEN
         EmHost.DiskWrite(image, lba * blockSize, data); INC(lba); DEC(count);
-        IF count > 0 THEN dataPos := 0; Request(phDataOut, 0) ELSE Finish(good) END
+        IF count > 0 THEN dataPos := 0; Request(phDataOut, 0)
+        ELSE IF timed THEN due := WriteDone() END; Finish(good)
+        END
       ELSE Finish(good)
       END
     ELSIF phase = phStatus THEN Request(phMsgIn, 0)           (* COMMAND COMPLETE *)
@@ -278,7 +431,7 @@ MODULE EmSCSI; (* The SCSI half of the carrier board's Z85C80, a 53C80
     VAR b: INTEGER; sel, bsy, ack: BOOLEAN;
   BEGIN sel := ODD(icr DIV 4); bsy := ODD(icr DIV 8); ack := ODD(icr DIV 16);
     IF state = free THEN
-      IF mounted & sel & ~bsy & ~aip & (AND(Bus(), idBit) # 0) THEN state := selected END
+      IF mounted & sel & ~bsy & ~aip & (AND(Bus(), idBit) # 0) & (~timed OR (t >= selAt)) THEN state := selected END
     ELSIF state = selected THEN
       IF ~sel THEN state := transfer; identified := FALSE; nCdb := 0;
         IF ODD(icr DIV 2) THEN Request(phMsgOut, 0) ELSE Request(phCommand, 0) END
@@ -335,6 +488,17 @@ MODULE EmSCSI; (* The SCSI half of the carrier board's Z85C80, a 53C80
   BEGIN endDma := TRUE; IF ODD(mode DIV 8) THEN irq := TRUE END
   END Eop;
 
+  (* The time, now, from the system before it touches the chip, and as it
+     passes (EmSoC.Pass, the DMA engine at its own time): with -scsitiming
+     a REQ due by now is asserted (a phase mismatch interrupting), and a
+     selection held while the drive was starting is answered. *)
+  PROCEDURE Tick*(now: LONGINT);
+  BEGIN
+    IF now > t THEN t := now END;
+    IF pend & (t >= reqAt) THEN pend := FALSE; req := TRUE; Mismatch END;
+    IF timed & (state = free) THEN Update END
+  END Tick;
+
   (* A /DACK read, the engine's with eop its terminal count, or the CPU's
      at slot 4: the input data register, and the handshake. *)
   PROCEDURE DackRead*(eop: BOOLEAN): INTEGER;
@@ -380,8 +544,16 @@ MODULE EmSCSI; (* The SCSI half of the carrier board's Z85C80, a 53C80
     dmaSend := FALSE; dmaRecv := FALSE; endDma := FALSE; lastSent := FALSE
   END ResetChip;
 
+  (* Power on: the chip, the disk, and the drive's time from 0 *)
   PROCEDURE Reset*;
-  BEGIN ResetChip; DiskReset
+    VAR hz: LONGINT;
+  BEGIN ResetChip; DiskReset;
+    hz := EmHost.hz; t := 0; due := 0; cmdT := 0;
+    rev := hz DIV 60; secT := rev DIV spt; ovh := hz DIV 2000;            (* 3600 rpm; 0.5 ms *)
+    settle := hz * 3 DIV 1000; stroke := hz * 30 DIV 1000;                (* 3 ms; 30 ms *)
+    cyls := (blocks + bpc - 1) DIV bpc; IF cyls < 1 THEN cyls := 1 END;
+    t2t := Seek(0, 1); selAt := hz; readyAt := hz * 5;                    (* 1 s; 5 s *)
+    cyl := 0; valid := FALSE; resume := FALSE; lo := 0; hb := -1; lim := -1; ht := 0; resumeAt := 0
   END Reset;
 
   PROCEDURE Irq*(): BOOLEAN;
@@ -432,5 +604,5 @@ MODULE EmSCSI; (* The SCSI half of the carrier board's Z85C80, a 53C80
     Update
   END Write;
 
-BEGIN mounted := FALSE; readOnly := FALSE; blocks := 0; Reset
+BEGIN mounted := FALSE; readOnly := FALSE; blocks := 0; timed := FALSE; Reset
 END EmSCSI.

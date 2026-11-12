@@ -127,7 +127,7 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
   PROCEDURE Pass(c: INTEGER);
   BEGIN now := now + c;
     IF now >= nextTick THEN
-      EmSCC.Tick(now); EmADB.Tick(now); EmBlit.Tick(now); EmDMA.Tick(now); EmTimer.Tick(now); Em82077.Tick(now); EmEth.Tick(now); EmPower.Tick(now); EmRTC.Tick(now);
+      EmSCC.Tick(now); EmADB.Tick(now); EmBlit.Tick(now); EmDMA.Tick(now); EmTimer.Tick(now); Em82077.Tick(now); EmEth.Tick(now); EmPower.Tick(now); EmRTC.Tick(now); EmSCSI.Tick(now);
       nextTick := now + 64; irqDue := TRUE
     END
   END Pass;
@@ -180,8 +180,8 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
     IF slot = 0 THEN
       IF wd1793 THEN r := EmFDC.GetByte(a) ELSIF AND(a, 8) = 0 THEN r := Em82077.Read(a, now) END
     ELSIF (slot = 1) & ~wd1793 THEN r := Em82077.DackRead(FALSE, now)
-    ELSIF (slot = 3) & (AND(a, 8) = 0) THEN r := EmSCSI.Read(a)
-    ELSIF slot = 4 THEN r := EmSCSI.DackRead(FALSE)
+    ELSIF (slot = 3) & (AND(a, 8) = 0) THEN EmSCSI.Tick(now); r := EmSCSI.Read(a)
+    ELSIF slot = 4 THEN EmSCSI.Tick(now); r := EmSCSI.DackRead(FALSE)
     ELSIF slot = 5 THEN r := EmEth.Read(a, now)
     ELSIF (slot = 7) & EmRTC.present THEN r := EmRTC.Read(a, now)
     END;
@@ -195,8 +195,8 @@ MODULE EmSoC; (* The Tang Nano 20K SoC of ../../Verilog65C816/fpga: its
     IF slot = 0 THEN
       IF wd1793 THEN EmFDC.SetByte(a, v) ELSIF AND(a, 8) = 0 THEN Em82077.Write(a, v, now) END
     ELSIF (slot = 1) & ~wd1793 THEN Em82077.DackWrite(v, FALSE, now)
-    ELSIF (slot = 3) & (AND(a, 8) = 0) THEN EmSCSI.Write(a, v)
-    ELSIF slot = 4 THEN EmSCSI.DackWrite(v, FALSE)
+    ELSIF (slot = 3) & (AND(a, 8) = 0) THEN EmSCSI.Tick(now); EmSCSI.Write(a, v)
+    ELSIF slot = 4 THEN EmSCSI.Tick(now); EmSCSI.DackWrite(v, FALSE)
     ELSIF slot = 5 THEN EmEth.Write(a, v, now)
     ELSIF slot = 7 THEN EmRTC.Write(a, v, now)
     END
