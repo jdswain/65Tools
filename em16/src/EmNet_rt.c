@@ -11,6 +11,11 @@
    -net vmnet-bridged:en0
                        bridged onto the host interface en0: the guest on the
                        host's own network, as a machine of its own.
+   -net nat            em16's own NAT (EmNat.c): the guest on 10.0.2.0/24
+                       behind a router of em16's, with DHCP and names, its
+                       UDP, TCP and ping through the host's sockets; no
+                       privileges, on the Mac and Android alike.
+                       -net nat:verbose says what it does.
    -net udp:LPORT:RPORT[:HOST]
                        frames as UDP datagrams, one frame a datagram,
                        received on port LPORT and sent to HOST (127.0.0.1)
@@ -32,13 +37,11 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <dispatch/dispatch.h>
-#include <vmnet/vmnet.h>
 
 #define MAXFRAME 1536
 #define RING 64
 
-enum { NONE, VMNET, UDP };
+enum { NONE, VMNET, UDP, NAT };
 static int kind = NONE;
 
 /* the frames received, waiting */
@@ -48,12 +51,21 @@ static int head, tail;            /* taken from head, put at tail */
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static long dropped;
 
-static void put(const uint8_t *f, int n) {
+void EmNet_put(const uint8_t *f, int n) {
     pthread_mutex_lock(&lock);
     if ((tail + 1) % RING == head || n > MAXFRAME) dropped++;
     else { memcpy(ring[tail], f, (size_t)n); ringLen[tail] = n; tail = (tail + 1) % RING; }
     pthread_mutex_unlock(&lock);
 }
+
+#define put EmNet_put
+
+/* the transports elsewhere: vmnet (mac/EmVmnet.c), the NAT (EmNat.c);
+   weak, NULL where not linked in */
+int EmNet_vmnetOpen(const char *arg) __attribute__((weak));
+int EmNat_open(const char *arg);
+void EmNat_input(const uint8_t *f, int n);
+void EmNet_vmnetSend(uint8_t *buf, int n) __attribute__((weak));
 
 /* --- UDP --- */
 
@@ -85,60 +97,6 @@ static void udpPoll(void) {
     while ((n = recv(sock, f, sizeof f, 0)) > 0) put(f, (int)n);
 }
 
-/* --- vmnet --- */
-
-static interface_ref iface;
-static dispatch_queue_t queue;
-static size_t maxPacket = MAXFRAME;
-
-static void vmnetRead(void) {
-    uint8_t buf[MAXFRAME * 8];
-    struct vmpktdesc pkts[8];
-    struct iovec iov[8];
-    int i, count;
-    for (;;) {
-        count = 8;
-        for (i = 0; i < count; i++) {
-            iov[i].iov_base = buf + i * MAXFRAME; iov[i].iov_len = MAXFRAME;
-            pkts[i].vm_pkt_size = MAXFRAME; pkts[i].vm_pkt_iov = &iov[i];
-            pkts[i].vm_pkt_iovcnt = 1; pkts[i].vm_flags = 0;
-        }
-        if (vmnet_read(iface, pkts, &count) != VMNET_SUCCESS || count == 0) return;
-        for (i = 0; i < count; i++) put(buf + i * MAXFRAME, (int)pkts[i].vm_pkt_size);
-    }
-}
-
-static int vmnetOpen(const char *arg) {
-    xpc_object_t desc = xpc_dictionary_create(NULL, NULL, 0);
-    dispatch_semaphore_t done = dispatch_semaphore_create(0);
-    __block vmnet_return_t status = VMNET_FAILURE;
-    uint64_t mode = VMNET_SHARED_MODE;
-    if (strcmp(arg, "vmnet-host") == 0) mode = VMNET_HOST_MODE;
-    else if (strncmp(arg, "vmnet-bridged:", 14) == 0) {
-        mode = VMNET_BRIDGED_MODE;
-        xpc_dictionary_set_string(desc, vmnet_shared_interface_name_key, arg + 14);
-    } else if (strcmp(arg, "vmnet") != 0) return 0;
-    xpc_dictionary_set_uint64(desc, vmnet_operation_mode_key, mode);
-    xpc_dictionary_set_bool(desc, vmnet_allocate_mac_address_key, false);
-    queue = dispatch_queue_create("em16.vmnet", DISPATCH_QUEUE_SERIAL);
-    iface = vmnet_start_interface(desc, queue, ^(vmnet_return_t s, xpc_object_t param) {
-        status = s;
-        if (s == VMNET_SUCCESS && param)
-            maxPacket = (size_t)xpc_dictionary_get_uint64(param, vmnet_max_packet_size_key);
-        dispatch_semaphore_signal(done);
-    });
-    if (!iface) { fprintf(stderr, "em16: -net %s: vmnet would not start (run em16 with sudo)\n", arg); return 0; }
-    dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
-    if (status != VMNET_SUCCESS) {
-        fprintf(stderr, "em16: -net %s: vmnet failed (%d)%s\n", arg, (int)status,
-                status == VMNET_FAILURE ? "; it needs root: run em16 with sudo" : "");
-        return 0;
-    }
-    vmnet_interface_set_event_callback(iface, VMNET_INTERFACE_PACKETS_AVAILABLE, queue,
-        ^(interface_event_t e, xpc_object_t ev) { (void)e; (void)ev; vmnetRead(); });
-    return 1;
-}
-
 /* --- EmHost's --- */
 
 /* 1 if the network spec could be opened */
@@ -147,9 +105,10 @@ int EmHost__NetOpen(const char *spec, int len) {
     int n = 0;
     while (n < len && n < (int)sizeof(s) - 1 && spec[n]) { s[n] = spec[n]; n++; }
     s[n] = 0;
-    if (strncmp(s, "udp:", 4) == 0) { if (udpOpen(s + 4)) { kind = UDP; return 1; } }
-    else if (strncmp(s, "vmnet", 5) == 0) { if (vmnetOpen(s)) { kind = VMNET; return 1; } }
-    else fprintf(stderr, "em16: -net %s: vmnet, vmnet-host, vmnet-bridged:IF or udp:LPORT:RPORT[:HOST]\n", s);
+    if (strncmp(s, "nat", 3) == 0) { if (EmNat_open(s)) { kind = NAT; return 1; } }
+    else if (strncmp(s, "udp:", 4) == 0) { if (udpOpen(s + 4)) { kind = UDP; return 1; } }
+    else if (strncmp(s, "vmnet", 5) == 0 && EmNet_vmnetOpen) { if (EmNet_vmnetOpen(s)) { kind = VMNET; return 1; } }
+    else fprintf(stderr, "em16: -net %s: vmnet, vmnet-host, vmnet-bridged:IF, nat or udp:LPORT:RPORT[:HOST]\n", s);
     return 0;
 }
 
@@ -172,10 +131,6 @@ void EmHost__NetSend(uint8_t *buf, int len, int n) {
     (void)len;
     if (n <= 0) return;
     if (kind == UDP) sendto(sock, buf, (size_t)n, 0, (struct sockaddr *)&peer, sizeof peer);
-    else if (kind == VMNET) {
-        struct iovec iov = { buf, (size_t)n };
-        struct vmpktdesc pkt = { (size_t)n, &iov, 1, 0 };
-        int count = 1;
-        if ((size_t)n <= maxPacket) vmnet_write(iface, &pkt, &count);
-    }
+    else if (kind == VMNET) EmNet_vmnetSend(buf, n);
+    else if (kind == NAT) EmNat_input(buf, n);
 }
