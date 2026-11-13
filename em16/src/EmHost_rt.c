@@ -19,7 +19,9 @@
 #include <time.h>
 #include <unistd.h>
 #include <limits.h>
+#ifdef __APPLE__
 #include <mach-o/dyld.h>
+#endif
 
 void EmHost__DrainAll(void);
 
@@ -95,9 +97,16 @@ void EmHost__Exit(int code) {
 
 void EmHost__ExePath(char *s, int len) {
     char raw[PATH_MAX], real[PATH_MAX];
-    uint32_t size = sizeof(raw);
     s[0] = 0;
-    if (_NSGetExecutablePath(raw, &size) == 0 && realpath(raw, real)) {
+#ifdef __APPLE__
+    uint32_t size = sizeof(raw);
+    if (_NSGetExecutablePath(raw, &size) != 0) return;
+#else
+    ssize_t n = readlink("/proc/self/exe", raw, sizeof(raw) - 1);
+    if (n < 0) return;
+    raw[n] = 0;
+#endif
+    if (realpath(raw, real)) {
         strncpy(s, real, (size_t)len - 1);
         s[len - 1] = 0;
     }

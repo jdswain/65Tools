@@ -2,8 +2,9 @@
 #
 # The sources in src/ are compiled by the Oberon compiler of the oc
 # repository (the LLVM compiler, bin/oc there) and linked with its POSIX
-# runtime, the C host interface (EmHost_rt.c, EmFont.c) and the Cocoa
-# windows (EmCocoa.m) into ../bin/em16. The SoC target (-fpga) is
+# runtime, the C host interface (EmHost_rt.c, EmNet_rt.c, EmNat.c, EmFont.c) and
+# the Mac's own (mac/: the Cocoa windows, EmCocoa.m, and vmnet,
+# EmVmnet.c) into ../bin/em16. The Android app is android/ (its README). The SoC target (-fpga) is
 # EmSoC and the modules after EmCore in MODS; see README.md. Override OC to use another
 # checkout:
 #
@@ -25,7 +26,7 @@ TARGET := $(BINDIR)/em16
 # In order of import
 MODS := EmHost EmSym EmUART EmVIA EmFDC Em82077 EmSCSI EmEth EmL28 EmVideo EmLCD EmCore EmSDRAM EmSCC EmADB EmBlit EmSD EmPower EmRTC EmDMA EmTimer EmSoC EmMem EmCPU EmLoad EmHarte Em16
 OBJS := $(MODS:%=$(OBJDIR)/%.o)
-CSRC := $(SRCDIR)/EmHost_rt.c $(SRCDIR)/EmNet_rt.c $(SRCDIR)/EmFont.c $(SRCDIR)/EmCocoa.m
+CSRC := $(SRCDIR)/EmHost_rt.c $(SRCDIR)/EmNet_rt.c $(SRCDIR)/EmNat.c $(SRCDIR)/EmFont.c mac/EmCocoa.m mac/EmVmnet.c
 
 RT_SMB := $(RT)/Errors.smb $(RT)/Out.smb $(RT)/Files.smb $(RT)/Env.smb
 

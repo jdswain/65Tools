@@ -74,11 +74,14 @@ This port is a derivative of it and under the same licence.
     EmEth     the ENC424J600 Ethernet controller, on -net's network
     EmRTC     the rev B's DS12C887 real-time clock (-rtc, -rtctime)
 
-What Oberon cannot reach is in C: `EmNet_rt.c` (the network: vmnet
-and UDP), `EmHost_rt.c` (terminal modes,
-non-blocking standard input, signals, the clock, the disk image files),
-`EmFont.c` (the LCD's character ROM, as data) and `EmCocoa.m` (the two
-display windows). The procedures of `EmHost` without a body are weak
+What Oberon cannot reach is in C: `EmNet_rt.c` (the network: the frames
+waiting, UDP), `EmNat.c` (the network: em16's own NAT), `EmHost_rt.c`
+(terminal modes, non-blocking standard input, signals, the clock, the
+disk image files) and `EmFont.c` (the LCD's character ROM, as data), in
+`src/` with the modules, for every host; and the Mac's own in `mac/`:
+`EmCocoa.m` (the two display windows) and `EmVmnet.c` (vmnet). The
+Android app is `android/` (its README): the same modules and `src/` C
+with a front end of its own. The procedures of `EmHost` without a body are weak
 stubs that these define, as `ASH_rt.c` does for `as`. In the other
 direction the windows read the devices' exported variables
 (`EmVideo.mem`, `EmLCD.fb`, ...) by their symbols and pass keys and
@@ -400,6 +403,15 @@ the PHY through MII, a 100 Mb/s full duplex link. The factory address is
 `-net` is the cable. Without it the link stays down; with it the link
 comes up 5 ms after a reset. macOS has no TAP device, so the frames go to
 one of these:
+
+- `-net nat`: em16's own NAT (`src/EmNat.c`), as QEMU's user networking.
+  The guest is on 10.0.2.0/24 behind a router of em16's: DHCP gives it
+  10.0.2.15, the router 10.0.2.2 (to the guest, the host itself: its
+  127.0.0.1), the name server 10.0.2.3 (names looked up with the host's
+  getaddrinfo). The guest's UDP, TCP connections and ping go out through
+  the host's sockets; nothing outside can reach the guest. It needs no
+  privileges, and is the Android em16's network. `-net nat:verbose` says
+  what it does.
 
 - `-net vmnet`: Apple's vmnet.framework in shared mode, as QEMU's
   `vmnet-shared`. The guest is on a private network, 192.168.64.0/24, the
