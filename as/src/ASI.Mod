@@ -376,6 +376,14 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
     RETURN i
   END Bool;
 
+  (* longa or longi of a register w bits wide: off, on, or 32 *)
+  PROCEDURE WidthValue(w: INTEGER): LONGINT;
+    VAR i: LONGINT;
+  BEGIN
+    IF w = 8 THEN i := 0 ELSIF w = 16 THEN i := 1 ELSE i := 32 END;
+    RETURN i
+  END WidthValue;
+
   (* Division and remainder truncate towards zero, as they do in C. *)
   PROCEDURE Quot(x, y: LONGINT): LONGINT;
     VAR q: LONGINT;
@@ -478,8 +486,8 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
     CASE s OF
       sOrg: sect := ASG.Current(); ASB.SetInt(v, sect.org)
     | sAddr: ASB.SetInt(v, ASG.Here()); v.base := ASG.Base()
-    | sLongA: ASB.SetInt(v, Bool(ASG.LongA()))
-    | sLongI: ASB.SetInt(v, Bool(ASG.LongI()))
+    | sLongA: ASB.SetInt(v, WidthValue(ASG.WidthA()))
+    | sLongI: ASB.SetInt(v, WidthValue(ASG.WidthX()))
     | sCpu: ASC.CpuName(ASC.Cpu(), name); ASB.SetStr(v, ASB.NewString(name, ASH.Length(name)))
     | sPass: ASB.SetInt(v, passNo)
     | sDBReg: ASB.SetInt(v, ASG.DBReg())
@@ -492,27 +500,52 @@ MODULE ASI; (* Interpreter of the 65xx assembler.
     Push(v)
   END PushSpecial;
 
+  (* The processor called s, 0 if there is none. *)
+  PROCEDURE ThisCpu*(s: ARRAY OF CHAR): INTEGER;
+    VAR c: INTEGER;
+  BEGIN
+    IF ASH.Same(s, "6502") THEN c := ASC.c6502
+    ELSIF ASH.Same(s, "65C02") THEN c := ASC.c65C02
+    ELSIF ASH.Same(s, "R65C02") THEN c := ASC.cR65C02
+    ELSIF ASH.Same(s, "R6501Q") THEN c := ASC.cR6501Q
+    ELSIF ASH.Same(s, "65C816") OR ASH.Same(s, "816") THEN c := ASC.c65C816
+    ELSIF ASH.Same(s, "65C832") OR ASH.Same(s, "832") THEN c := ASC.c65C832
+    ELSIF ASH.Same(s, "65C816X") OR ASH.Same(s, "816X") THEN c := ASC.c65C816X
+    ELSIF ASH.Same(s, "C19") OR ASH.Same(s, "RC19") THEN c := ASC.cC19
+    ELSE c := 0
+    END;
+    RETURN c
+  END ThisCpu;
+
   PROCEDURE SetCpu(VAR v: ASB.Value);
     VAR c: INTEGER;
-  BEGIN c := 0;
+  BEGIN
     IF v.form # ASB.Str THEN Err("cpu must be set to a string", "")
-    ELSIF ASH.Same(v.s.s, "6502") THEN c := ASC.c6502
-    ELSIF ASH.Same(v.s.s, "65C02") THEN c := ASC.c65C02
-    ELSIF ASH.Same(v.s.s, "R65C02") THEN c := ASC.cR65C02
-    ELSIF ASH.Same(v.s.s, "R6501Q") THEN c := ASC.cR6501Q
-    ELSIF ASH.Same(v.s.s, "65C816") OR ASH.Same(v.s.s, "816") THEN c := ASC.c65C816
-    ELSIF ASH.Same(v.s.s, "C19") OR ASH.Same(v.s.s, "RC19") THEN c := ASC.cC19
-    ELSE Err("unknown cpu: ", v.s.s)
-    END;
-    IF c # 0 THEN ASG.SetCpu(c) END
+    ELSE c := ThisCpu(v.s.s);
+      IF c # 0 THEN ASG.SetCpu(c) ELSE Err("unknown cpu: ", v.s.s) END
+    END
   END SetCpu;
+
+  (* The width of a register that longa or longi is set to with v: off
+     (0) or 8 is 8 bits, on (1) 16 and so is any other value but 32,
+     which is 32 bits, on the 65C832 only. *)
+  PROCEDURE Width(VAR v: ASB.Value): INTEGER;
+    VAR w: INTEGER;
+  BEGIN
+    IF ~True(v) OR (v.form = ASB.Int) & (v.i = 8) THEN w := 8
+    ELSIF (v.form = ASB.Int) & (v.i = 32) THEN w := 32;
+      IF ASC.Cpu() # ASC.c65C832 THEN Err("32-bit registers need cpu 65C832", ""); w := 16 END
+    ELSE w := 16
+    END;
+    RETURN w
+  END Width;
 
   PROCEDURE SetSpecial(s: INTEGER; VAR v: ASB.Value);
   BEGIN
     CASE s OF
       sOrg, sAddr: ASG.SetAddr(IntOf(v))
-    | sLongA: ASG.SetLongA(True(v))
-    | sLongI: ASG.SetLongI(True(v))
+    | sLongA: ASG.SetWidthA(Width(v))
+    | sLongI: ASG.SetWidthX(Width(v))
     | sCpu: SetCpu(v)
     | sDBReg: ASG.SetDBReg(IntOf(v))
     | sDPage: ASG.SetDPageReg(IntOf(v))

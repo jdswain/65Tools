@@ -164,8 +164,10 @@ rather than em16's default machine:
   `em16 -bench file [-c832]` runs one of the core's test images as its
   `tb_cpu.v` does (128 KB, the result at $F000, an IRQ line at $F002;
   no NMI or ABORT), and `test/core832.sh` runs `test832_gen.py`'s two:
-  `PASS (16003 cycles)` and, with `-c832`, `PASS (38543 cycles)`, each
-  3 cycles (tb_cpu's reset) short of the Verilog's;
+  `PASS (16003 cycles)` and, with `-c832`, `PASS (38543 cycles)`, where
+  tb_cpu counts 16006 and 38546, its 4 cycles of reset among them.
+  EmCore's bus cycles drift from the core's by one now and then (as
+  they did before the extension), so a count is tb_cpu's less 3 or 4;
 - the map: 8 MB of SDRAM through the cache, the I/O block at
   $0200-$0FFF (palette, ADB, system control, external bus, video
   control, blitter, DMA; the external bus is eight slots of 16

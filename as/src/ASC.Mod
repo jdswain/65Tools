@@ -6,6 +6,13 @@ MODULE ASC; (* CPU definitions for the 65xx assembler.
    opcode byte) replaces each case of the C switch statements. The rows
    are written as text; see D.
 
+   The 65C832 and the 65C816X are the 65C816 with the instructions the
+   core of Verilog65C816 adds behind the WDM opcode (docs/65C832.md
+   there): MUL, UML, DIV, UDV, ASL/LSR/ASR/ROL/ROR #n and BSW, and on the
+   65C832 XFE. Their rows are those of the 65C816 and rows whose opcode
+   follows a WDM prefix ($42); see P. The 65C816X is the core as the Tang
+   Nano 20K builds it, without the 65C832's modes.
+
    A leaf module. The scanner (ASS) takes the mnemonics from here; the
    code generator (ASG) looks instructions up with Find and emits them
    according to their format.
@@ -14,8 +21,10 @@ MODULE ASC; (* CPU definitions for the 65xx assembler.
    ROL, EOR and ORA, so this module does not use those procedures. *)
 
   CONST
-    (* processors; the values are the ELF e_machine numbers *)
+    (* processors; up to cR6501Q the values are the ELF e_machine numbers
+       (see Machine) *)
     c65C816* = 1; c65C02* = 2; c6502* = 3; cR65C02* = 4; cC19* = 5; cR6501Q* = 6;
+    c65C832* = 7; c65C816X* = 8;
 
     (* addressing modes, as written in the source. The parser produces the
        general form (mAbs for a plain address, mPair for "a, b", ...); ASG
@@ -66,32 +75,35 @@ MODULE ASC; (* CPU definitions for the 65xx assembler.
     fImmZ* = 17;     (* r: immediate, zero page address *)
     fJsb* = 18;      (* s: vector number in the opcode *)
 
-    maxEnt = 304;    (* rows of the largest table, the 65C816's *)
+    maxEnt = 372;    (* rows of the largest table, the 65C832's *)
 
-    (* mnemonics, in alphabetical order *)
+    (* mnemonics, in alphabetical order. DIV is a word of Oberon, so its
+       constant is Div; "div" is the scanner's operator, which the parser
+       takes for the instruction at the start of a statement. *)
     ADC = 0; ADD = 1; AND = 2; ASL = 3; ASR = 4; BAR = 5; BAS = 6;
     BBR = 7; BBS = 8; BCC = 9; BCS = 10; BEQ = 11; BGE = 12; BIT = 13;
     BMI = 14; BNE = 15; BPL = 16; BRA = 17; BRK = 18; BRL = 19;
-    BVC = 20; BVS = 21; CLC = 22; CLD = 23; CLI = 24; CLV = 25;
-    CLW = 26; CMP = 27; COP = 28; CPX = 29; CPY = 30; DEC = 31;
-    DEX = 32; DEY = 33; EOR = 34; EXC = 35; INC = 36; INI = 37;
-    INX = 38; INY = 39; JML = 40; JMP = 41; JPI = 42; JSB = 43;
-    JSL = 44; JSR = 45; LAB = 46; LAI = 47; LAN = 48; LDA = 49;
-    LDX = 50; LDY = 51; LII = 52; LSR = 53; MPA = 54; MPY = 55;
-    MVN = 56; MVP = 57; NEG = 58; NOP = 59; NXT = 60; ORA = 61;
-    PEA = 62; PEI = 63; PER = 64; PHA = 65; PHB = 66; PHD = 67;
-    PHI = 68; PHK = 69; PHP = 70; PHW = 71; PHX = 72; PHY = 73;
-    PIA = 74; PLA = 75; PLB = 76; PLD = 77; PLI = 78; PLP = 79;
-    PLW = 80; PLX = 81; PLY = 82; PSH = 83; PUL = 84; RBA = 85;
-    REP = 86; RMB = 87; RND = 88; ROL = 89; ROR = 90; RTI = 91;
-    RTL = 92; RTS = 93; SBA = 94; SBC = 95; SEC = 96; SED = 97;
-    SEI = 98; SEP = 99; SMB = 100; STA = 101; STI = 102; STP = 103;
-    STX = 104; STY = 105; STZ = 106; SWA = 107; TAD = 108; TAS = 109;
-    TAW = 110; TAX = 111; TAY = 112; TCD = 113; TCS = 114; TDA = 115;
-    TDC = 116; TIP = 117; TRB = 118; TSA = 119; TSB = 120; TSC = 121;
-    TSX = 122; TWA = 123; TXA = 124; TXS = 125; TXY = 126; TYA = 127;
-    TYX = 128; WAI = 129; WDM = 130; XBA = 131; XCE = 132;
-    nofInstr* = 133;
+    BSW = 20; BVC = 21; BVS = 22; CLC = 23; CLD = 24; CLI = 25;
+    CLV = 26; CLW = 27; CMP = 28; COP = 29; CPX = 30; CPY = 31;
+    DEC = 32; DEX = 33; DEY = 34; Div* = 35; EOR = 36; EXC = 37;
+    INC = 38; INI = 39; INX = 40; INY = 41; JML = 42; JMP = 43;
+    JPI = 44; JSB = 45; JSL = 46; JSR = 47; LAB = 48; LAI = 49;
+    LAN = 50; LDA = 51; LDX = 52; LDY = 53; LII = 54; LSR = 55;
+    MPA = 56; MPY = 57; MUL = 58; MVN = 59; MVP = 60; NEG = 61;
+    NOP = 62; NXT = 63; ORA = 64; PEA = 65; PEI = 66; PER = 67;
+    PHA = 68; PHB = 69; PHD = 70; PHI = 71; PHK = 72; PHP = 73;
+    PHW = 74; PHX = 75; PHY = 76; PIA = 77; PLA = 78; PLB = 79;
+    PLD = 80; PLI = 81; PLP = 82; PLW = 83; PLX = 84; PLY = 85;
+    PSH = 86; PUL = 87; RBA = 88; REP = 89; RMB = 90; RND = 91;
+    ROL = 92; ROR = 93; RTI = 94; RTL = 95; RTS = 96; SBA = 97;
+    SBC = 98; SEC = 99; SED = 100; SEI = 101; SEP = 102; SMB = 103;
+    STA = 104; STI = 105; STP = 106; STX = 107; STY = 108; STZ = 109;
+    SWA = 110; TAD = 111; TAS = 112; TAW = 113; TAX = 114; TAY = 115;
+    TCD = 116; TCS = 117; TDA = 118; TDC = 119; TIP = 120; TRB = 121;
+    TSA = 122; TSB = 123; TSC = 124; TSX = 125; TWA = 126; TXA = 127;
+    TXS = 128; TXY = 129; TYA = 130; TYX = 131; UDV = 132; UML = 133;
+    WAI = 134; WDM = 135; XBA = 136; XCE = 137; XFE = 138;
+    nofInstr* = 139;
 
   TYPE Mnemonic* = ARRAY 4 OF CHAR;
 
@@ -99,10 +111,11 @@ MODULE ASC; (* CPU definitions for the 65xx assembler.
     names: ARRAY nofInstr OF Mnemonic;
     (* the encoding table of the current processor, grouped by mnemonic:
        the rows of instruction op are first[op] .. first[op+1]-1 *)
-    first: ARRAY 134 OF INTEGER;   (* nofInstr + 1 *)
+    first: ARRAY 140 OF INTEGER;   (* nofInstr + 1 *)
     tabMode, tabForm, tabCode: ARRAY maxEnt OF BYTE;
+    tabPre: ARRAY maxEnt OF BOOLEAN;   (* the opcode follows a WDM *)
     nofEnt, curOp: INTEGER;
-    overflow: BOOLEAN;
+    overflow, prefix: BOOLEAN;
 
   (* --- building a table --- *)
 
@@ -118,6 +131,7 @@ MODULE ASC; (* CPU definitions for the 65xx assembler.
   BEGIN
     IF nofEnt < maxEnt THEN
       tabMode[nofEnt] := mode; tabForm[nofEnt] := form; tabCode[nofEnt] := code;
+      tabPre[nofEnt] := prefix;
       nofEnt := nofEnt + 1; first[curOp + 1] := nofEnt
     ELSE overflow := TRUE
     END
@@ -145,6 +159,11 @@ MODULE ASC; (* CPU definitions for the 65xx assembler.
       IF (i < LEN(rows)) & (rows[i] = " ") THEN i := i + 1 END
     END
   END D;
+
+  (* Rows as D's, of opcodes that follow the WDM prefix. *)
+  PROCEDURE P(op: INTEGER; rows: ARRAY OF CHAR);
+  BEGIN prefix := TRUE; D(op, rows); prefix := FALSE
+  END P;
 
   PROCEDURE Enter6502;
   BEGIN
@@ -344,11 +363,13 @@ MODULE ASC; (* CPU definitions for the 65xx assembler.
     D(TYA, "Na98")
   END EnterR65C02;
 
-  PROCEDURE Enter65C816;
+  (* The 65C816; xops: and the instructions after WDM; c832: and XFE *)
+  PROCEDURE Enter65C816(xops, c832: BOOLEAN);
   BEGIN
     D(ADC, "Te69 Ac6D Ed6F Ib65 Lb72 Mb67 Cc7D Fd7F Dc79 Jb75 Qb61 Rb71 Sb77 Ub63 Vb73");
     D(AND, "Te29 Ac2D Ed2F Ib25 Lb32 Mb27 Cc3D Fd3F Dc39 Jb35 Qb21 Rb31 Sb37 Ub23 Vb33");
     D(ASL, "Na0A Ba0A Ac0E Ib06 Cc1E Jb16");
+    IF xops THEN P(ASL, "Tb0A"); P(ASR, "Tb8A") END;
     D(BCC, "Ig90 Ag90");
     D(BCS, "IgB0 AgB0");
     D(BEQ, "IgF0 AgF0");
@@ -359,6 +380,7 @@ MODULE ASC; (* CPU definitions for the 65xx assembler.
     D(BRA, "Ii80 Ai80");
     D(BRK, "Na00 Tb00");
     D(BRL, "Ij82 Aj82");
+    IF xops THEN P(BSW, "NaEB BaEB") END;
     D(BVC, "Ig50 Ag50");
     D(BVS, "Ig70 Ag70");
     D(CLC, "Na18");
@@ -372,6 +394,9 @@ MODULE ASC; (* CPU definitions for the 65xx assembler.
     D(DEC, "Ba3A Na3A AcCE IbC6 CcDE JbD6");
     D(DEX, "NaCA");
     D(DEY, "Na88");
+    IF xops THEN  (* the modes of CMP *)
+      P(Div, "TeC9 AcCD EdCF IbC5 LbD2 MbC7 CcDD FdDF DcD9 JbD5 QbC1 RbD1 SbD7 UbC3 VbD3")
+    END;
     D(EOR, "Te49 Ac4D Ed4F Ib45 Lb52 Mb47 Cc5D Fd5F Dc59 Jb55 Qb41 Rb51 Sb57 Ub43 Vb53");
     D(INC, "Ba1A Na1A AcEE IbE6 CcFE JbF6");
     D(INX, "NaE8");
@@ -384,6 +409,9 @@ MODULE ASC; (* CPU definitions for the 65xx assembler.
     D(LDX, "TfA2 AcAE IbA6 DcBE KbB6");
     D(LDY, "TfA0 AcAC IbA4 CcBC JbB4");
     D(LSR, "Ba4A Na4A Ac4E Ib46 Cc5E Jb56");
+    IF xops THEN P(LSR, "Tb4A");  (* MUL: the modes of ADC *)
+      P(MUL, "Te69 Ac6D Ed6F Ib65 Lb72 Mb67 Cc7D Fd7F Dc79 Jb75 Qb61 Rb71 Sb77 Ub63 Vb73")
+    END;
     D(MVN, "Pm54");
     D(MVP, "Pm44");
     D(NOP, "NaEA");
@@ -406,7 +434,9 @@ MODULE ASC; (* CPU definitions for the 65xx assembler.
     D(PLY, "Na7A");
     D(REP, "TbC2");
     D(ROL, "Ba2A Na2A Ac2E Ib26 Cc3E Jb36");
+    IF xops THEN P(ROL, "Tb2A") END;
     D(ROR, "Ba6A Na6A Ac6E Ib66 Cc7E Jb76");
+    IF xops THEN P(ROR, "Tb6A") END;
     D(RTI, "Na40");
     D(RTL, "Na6B");
     D(RTS, "Na60");
@@ -439,10 +469,15 @@ MODULE ASC; (* CPU definitions for the 65xx assembler.
     D(TXY, "Na9B");
     D(TYA, "Na98");
     D(TYX, "NaBB");
+    IF xops THEN  (* UDV: the modes of EOR; UML: of AND *)
+      P(UDV, "Te49 Ac4D Ed4F Ib45 Lb52 Mb47 Cc5D Fd5F Dc59 Jb55 Qb41 Rb51 Sb57 Ub43 Vb53");
+      P(UML, "Te29 Ac2D Ed2F Ib25 Lb32 Mb27 Cc3D Fd3F Dc39 Jb35 Qb21 Rb31 Sb37 Ub23 Vb33")
+    END;
     D(WAI, "NaCB");
     D(WDM, "Tb42");
     D(XBA, "NaEB");
-    D(XCE, "NaFB")
+    D(XCE, "NaFB");
+    IF c832 THEN P(XFE, "NaFB") END
   END Enter65C816;
 
   PROCEDURE EnterC19;
@@ -548,15 +583,38 @@ MODULE ASC; (* CPU definitions for the 65xx assembler.
   (* --- queries --- *)
 
   PROCEDURE Known*(c: INTEGER): BOOLEAN;
-  BEGIN RETURN (c >= c65C816) & (c <= cR6501Q)
+  BEGIN RETURN (c >= c65C816) & (c <= c65C816X)
   END Known;
+
+  (* The ELF e_machine number of processor c. ELF has none for the
+     65C832 or the 65C816X; their programs are marked 65C816 code. *)
+  PROCEDURE Machine*(c: INTEGER): INTEGER;
+  BEGIN
+    IF (c = c65C832) OR (c = c65C816X) THEN c := c65C816 END;
+    RETURN c
+  END Machine;
+
+  (* Processor c has the instructions after WDM. *)
+  PROCEDURE Extended*(c: INTEGER): BOOLEAN;
+  BEGIN RETURN (c = c65C832) OR (c = c65C816X)
+  END Extended;
+
+  (* Instruction op is one of those after WDM that are spelled like no
+     other: the scanner takes these for mnemonics only in a source that
+     has chosen a processor with them, so that elsewhere they are names
+     (OS16's Numerics.s has a routine mul). DIV is an operator besides. *)
+  PROCEDURE Extension*(op: INTEGER): BOOLEAN;
+  BEGIN RETURN (op = BSW) OR (op = MUL) OR (op = UDV) OR (op = UML) OR (op = XFE)
+  END Extension;
 
   (* Load the encoding table of processor c. *)
   PROCEDURE Select*(c: INTEGER);
   BEGIN
     IF c # cpu THEN
       cpu := c; nofEnt := 0; curOp := 0; first[0] := 0; first[1] := 0;
-      IF c = c65C816 THEN Enter65C816
+      IF c = c65C816 THEN Enter65C816(FALSE, FALSE)
+      ELSIF c = c65C816X THEN Enter65C816(TRUE, FALSE)
+      ELSIF c = c65C832 THEN Enter65C816(TRUE, TRUE)
       ELSIF c = c65C02 THEN Enter65C02
       ELSIF c = c6502 THEN Enter6502
       ELSIF (c = cR65C02) OR (c = cR6501Q) THEN EnterR65C02
@@ -571,12 +629,15 @@ MODULE ASC; (* CPU definitions for the 65xx assembler.
   BEGIN RETURN cpu
   END Cpu;
 
-  (* Look up instruction op with addressing mode mode. *)
+  (* Look up instruction op with addressing mode mode. code is the
+     opcode byte, plus $4200 if it follows the WDM prefix. *)
   PROCEDURE Find*(op, mode: INTEGER; VAR form, code: INTEGER): BOOLEAN;
     VAR i, n: INTEGER;
   BEGIN i := first[op]; n := first[op + 1];
     WHILE (i < n) & (tabMode[i] # mode) DO i := i + 1 END;
-    IF i < n THEN form := tabForm[i]; code := tabCode[i] END;
+    IF i < n THEN form := tabForm[i]; code := tabCode[i];
+      IF tabPre[i] THEN code := code + 4200H END
+    END;
     RETURN i < n
   END Find;
 
@@ -624,6 +685,8 @@ MODULE ASC; (* CPU definitions for the 65xx assembler.
     ELSIF c = cR65C02 THEN s := "R65C02"
     ELSIF c = cC19 THEN s := "C19"
     ELSIF c = cR6501Q THEN s := "R6501Q"
+    ELSIF c = c65C832 THEN s := "65C832"
+    ELSIF c = c65C816X THEN s := "65C816X"
     ELSE s := "none"
     END
   END CpuName;
@@ -635,19 +698,19 @@ MODULE ASC; (* CPU definitions for the 65xx assembler.
     names[op][i] := 0X
   END N;
 
-BEGIN cpu := 0; nofEnt := 0; curOp := 0; overflow := FALSE;
+BEGIN cpu := 0; nofEnt := 0; curOp := 0; overflow := FALSE; prefix := FALSE;
   N(ADC, "adc"); N(ADD, "add"); N(AND, "and"); N(ASL, "asl"); N(ASR, "asr");
   N(BAR, "bar"); N(BAS, "bas"); N(BBR, "bbr"); N(BBS, "bbs"); N(BCC, "bcc");
   N(BCS, "bcs"); N(BEQ, "beq"); N(BGE, "bge"); N(BIT, "bit"); N(BMI, "bmi");
   N(BNE, "bne"); N(BPL, "bpl"); N(BRA, "bra"); N(BRK, "brk"); N(BRL, "brl");
-  N(BVC, "bvc"); N(BVS, "bvs"); N(CLC, "clc"); N(CLD, "cld"); N(CLI, "cli");
+  N(BSW, "bsw"); N(BVC, "bvc"); N(BVS, "bvs"); N(CLC, "clc"); N(CLD, "cld"); N(CLI, "cli");
   N(CLV, "clv"); N(CLW, "clw"); N(CMP, "cmp"); N(COP, "cop"); N(CPX, "cpx");
-  N(CPY, "cpy"); N(DEC, "dec"); N(DEX, "dex"); N(DEY, "dey"); N(EOR, "eor");
+  N(CPY, "cpy"); N(DEC, "dec"); N(DEX, "dex"); N(DEY, "dey"); N(Div, "div"); N(EOR, "eor");
   N(EXC, "exc"); N(INC, "inc"); N(INI, "ini"); N(INX, "inx"); N(INY, "iny");
   N(JML, "jml"); N(JMP, "jmp"); N(JPI, "jpi"); N(JSB, "jsb"); N(JSL, "jsl");
   N(JSR, "jsr"); N(LAB, "lab"); N(LAI, "lai"); N(LAN, "lan"); N(LDA, "lda");
   N(LDX, "ldx"); N(LDY, "ldy"); N(LII, "lii"); N(LSR, "lsr"); N(MPA, "mpa");
-  N(MPY, "mpy"); N(MVN, "mvn"); N(MVP, "mvp"); N(NEG, "neg"); N(NOP, "nop");
+  N(MPY, "mpy"); N(MUL, "mul"); N(MVN, "mvn"); N(MVP, "mvp"); N(NEG, "neg"); N(NOP, "nop");
   N(NXT, "nxt"); N(ORA, "ora"); N(PEA, "pea"); N(PEI, "pei"); N(PER, "per");
   N(PHA, "pha"); N(PHB, "phb"); N(PHD, "phd"); N(PHI, "phi"); N(PHK, "phk");
   N(PHP, "php"); N(PHW, "phw"); N(PHX, "phx"); N(PHY, "phy"); N(PIA, "pia");
@@ -661,6 +724,7 @@ BEGIN cpu := 0; nofEnt := 0; curOp := 0; overflow := FALSE;
   N(TAW, "taw"); N(TAX, "tax"); N(TAY, "tay"); N(TCD, "tcd"); N(TCS, "tcs");
   N(TDA, "tda"); N(TDC, "tdc"); N(TIP, "tip"); N(TRB, "trb"); N(TSA, "tsa");
   N(TSB, "tsb"); N(TSC, "tsc"); N(TSX, "tsx"); N(TWA, "twa"); N(TXA, "txa");
-  N(TXS, "txs"); N(TXY, "txy"); N(TYA, "tya"); N(TYX, "tyx"); N(WAI, "wai");
-  N(WDM, "wdm"); N(XBA, "xba"); N(XCE, "xce")
+  N(TXS, "txs"); N(TXY, "txy"); N(TYA, "tya"); N(TYX, "tyx");
+  N(UDV, "udv"); N(UML, "uml"); N(WAI, "wai");
+  N(WDM, "wdm"); N(XBA, "xba"); N(XCE, "xce"); N(XFE, "xfe")
 END ASC.

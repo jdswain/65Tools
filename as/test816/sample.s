@@ -28,3 +28,13 @@ start*: twice 4, $20
         align 4
 done:   rts
 far:    rtl
+        cpu = "65C832"
+        longa = 32
+        longi = 32
+        lda #$12345678
+        mul #-2
+        udv [$10],y
+        div 1,s
+        asl #3
+        ldy #-100000
+        xfe

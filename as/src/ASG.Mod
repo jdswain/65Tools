@@ -95,7 +95,7 @@ MODULE ASG; (* Code generator of the 65xx assembler.
     cur: Section;
     lastSect: Section;
     addr: LONGINT;               (* location counter *)
-    longa, longi: BOOLEAN;       (* 16 bit accumulator / index registers *)
+    wa, wx: INTEGER;             (* bits of the accumulator, the index registers: 8, 16, 32 *)
     dpage, dbreg, pbreg: LONGINT;
     final: BOOLEAN;              (* the last pass, in which errors are reported *)
     relocOverflow: BOOLEAN;
@@ -170,10 +170,10 @@ MODULE ASG; (* Code generator of the 65xx assembler.
     addr := a
   END SetAddr;
 
-  PROCEDURE LongA*(): BOOLEAN; BEGIN RETURN longa END LongA;
-  PROCEDURE SetLongA*(b: BOOLEAN); BEGIN longa := b END SetLongA;
-  PROCEDURE LongI*(): BOOLEAN; BEGIN RETURN longi END LongI;
-  PROCEDURE SetLongI*(b: BOOLEAN); BEGIN longi := b END SetLongI;
+  PROCEDURE WidthA*(): INTEGER; BEGIN RETURN wa END WidthA;
+  PROCEDURE SetWidthA*(w: INTEGER); BEGIN wa := w END SetWidthA;
+  PROCEDURE WidthX*(): INTEGER; BEGIN RETURN wx END WidthX;
+  PROCEDURE SetWidthX*(w: INTEGER); BEGIN wx := w END SetWidthX;
   PROCEDURE DPageReg*(): LONGINT; BEGIN RETURN dpage END DPageReg;
   PROCEDURE SetDPageReg*(x: LONGINT); BEGIN dpage := x END SetDPageReg;
   PROCEDURE DBReg*(): LONGINT; BEGIN RETURN dbreg END DBReg;
@@ -185,7 +185,7 @@ MODULE ASG; (* Code generator of the 65xx assembler.
 
   (* Assemble for processor c from here on. *)
   PROCEDURE SetCpu*(c: INTEGER);
-  BEGIN ASC.Select(c); machine := c
+  BEGIN ASC.Select(c); machine := ASC.Machine(c)
   END SetCpu;
 
   PROCEDURE BeginPass*(isFinal: BOOLEAN);
@@ -197,7 +197,7 @@ MODULE ASG; (* Code generator of the 65xx assembler.
   BEGIN cur := s;
     s.size := 0; s.extents := NIL; s.lastExt := NIL; s.last := s.first; s.lastBase := 0;
     addr := 0; SetAddr(0);
-    longa := FALSE; longi := FALSE; dpage := 0; dbreg := 0; pbreg := 0;
+    wa := 8; wx := 8; dpage := 0; dbreg := 0; pbreg := 0;
     ASC.Select(defaultCpu)
   END BeginSection;
 
@@ -414,18 +414,34 @@ MODULE ASG; (* Code generator of the 65xx assembler.
     END
   END Resolve;
 
+  (* The bits of an immediate operand of format form (fImmA, fImmX): as
+     many as the register has, or as a modifier says, .l 32 on the 65C832 *)
+  PROCEDURE ImmWidth(form, modifier: INTEGER): INTEGER;
+    VAR w: INTEGER;
+  BEGIN
+    IF form = ASC.fImmA THEN w := wa ELSE w := wx END;
+    IF modifier = MByte THEN w := 8
+    ELSIF (modifier = MWord) OR (modifier = MAbs) THEN w := 16
+    ELSIF (modifier = MLong) & (ASC.Cpu() = ASC.c65C832) THEN w := 32
+    END;
+    RETURN w
+  END ImmWidth;
+
   (* Emit instruction op. The operands a1, a2, a3 are in the order they
      were written; mode tells how many of them there are; bases is what
      each is relative to (b1 + 4 * b2 + 16 * b3). src and line locate the
      instruction for messages. *)
   PROCEDURE Instr*(op, mode, modifier: INTEGER; a1, a2, a3: LONGINT; bases: INTEGER;
       src: ASS.Source; line: INTEGER);
-    VAR form, code, b1, b2, b3: INTEGER; r: LONGINT; wide, ok: BOOLEAN;
+    VAR form, code, b1, b2, b3, written, w: INTEGER; r: LONGINT; ok: BOOLEAN;
   BEGIN b1 := bases MOD 4; b2 := bases DIV 4 MOD 4; b3 := bases DIV 16 MOD 4;
     (* an address the loader relocates is never on the direct page *)
+    written := modifier;
     IF (b1 # bAbs) & (modifier = MNone) THEN modifier := MAbs END;
     Resolve(op, modifier, mode, a1, src, line);
-    IF ~ASC.Find(op, mode, form, code) THEN
+    ok := ASC.Find(op, mode, form, code);
+    IF ok & (code >= 100H) THEN o(code DIV 100H); code := code MOD 100H END;   (* the WDM *)
+    IF ~ok THEN
       IF final THEN InstrError(src, line, op, mode) END
     ELSIF (b1 # bAbs) OR (b2 # bAbs) OR (b3 # bAbs) THEN
       (* in a .816 module: an address the loader relocates *)
@@ -437,10 +453,18 @@ MODULE ASG; (* Code generator of the 65xx assembler.
         IF form = ASC.fBitAR THEN Rel8(a3, src, line) END
       ELSIF ok & (form = ASC.fLong) THEN o(code); Operand(a1, b1, FALSE); o(0)   (* bank 0 *)
       ELSIF ok & ((form = ASC.fImmA) OR (form = ASC.fImmX)) THEN
-        IF form = ASC.fImmA THEN wide := longa ELSE wide := longi END;
-        IF (modifier = MWord) OR (modifier = MAbs) THEN wide := TRUE END;
-        IF ~wide & final THEN ASS.Error(src, line, "an 8-bit immediate cannot hold an address the loader relocates", "") END;
-        o(code); Operand(a1, b1, FALSE)
+        (* 16 bits, or 32 if the register has them and no modifier is
+           written, or .l on the 65C832 *)
+        IF form = ASC.fImmA THEN w := wa ELSE w := wx END;
+        IF (written = MLong) & (ASC.Cpu() = ASC.c65C832) THEN w := 32
+        ELSIF ((written # MNone) OR (w # 32)) & ((modifier = MWord) OR (modifier = MAbs)) THEN w := 16
+        END;
+        IF (w = 8) & final THEN ASS.Error(src, line, "an 8-bit immediate cannot hold an address the loader relocates", "") END;
+        o(code);
+        IF w # 32 THEN Operand(a1, b1, FALSE)
+        ELSIF b1 = bCode THEN Operand(a1, b1, TRUE); o(0)   (* the code's bank too *)
+        ELSE Operand(a1, b1, FALSE); o(0); o(0)
+        END
       ELSIF ok & (b1 = bCode) & ((form = ASC.fRel) OR (form = ASC.fRelL) OR (form = ASC.fBra) OR (form = ASC.fBrl)
           OR (form = ASC.fWordR) OR (form = ASC.fLongR)) THEN
         Instr(op, mode, modifier, a1, a2, a3, 0, src, line)   (* relative, or a call: as before *)
@@ -453,12 +477,10 @@ MODULE ASG; (* Code generator of the 65xx assembler.
       | ASC.fWord: o(code); o(a1); o(a1 DIV 100H)
       | ASC.fLong: o(code); o(a1); o(a1 DIV 100H); o(a1 DIV 10000H)
       | ASC.fImmA, ASC.fImmX:
-          IF form = ASC.fImmA THEN wide := longa ELSE wide := longi END;
-          IF modifier = MByte THEN wide := FALSE
-          ELSIF (modifier = MWord) OR (modifier = MAbs) THEN wide := TRUE
-          END;
+          w := ImmWidth(form, modifier);
           o(code); o(a1);
-          IF wide THEN o(a1 DIV 100H) END
+          IF w >= 16 THEN o(a1 DIV 100H) END;
+          IF w = 32 THEN o(a1 DIV 10000H); o(a1 DIV 1000000H) END
       | ASC.fRel: o(code); Rel8(a1, src, line)
       | ASC.fRelL: o(code); Rel16(a1, src, line)
       | ASC.fBra:

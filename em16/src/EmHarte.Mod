@@ -25,8 +25,9 @@ MODULE EmHarte; (* EmCore against the SingleStepTests (TomHarte) vectors,
    0 PASS and else FAIL with the check's number, $00F001 prints its
    byte, $00F002 drives the IRQ line (not 0: asserted), $00F006/7 are a
    failure's detail. The NMI and ABORT of tb_cpu ($00F003, $00F005)
-   are not there, as EmCore has neither. The cycles are tb_cpu's, less
-   those of its reset. *)
+   are not there, as EmCore has neither. tb_cpu counts the 4 cycles of
+   its reset too; EmCore's bus cycles drift from the core's by one now
+   and then, so the counts differ by 3 or 4. *)
 
   IMPORT Files, EmHost, EmCore;
 

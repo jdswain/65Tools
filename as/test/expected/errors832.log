@@ -1,0 +1,8 @@
+Assembling errors832.s
+errors832.s:3: Error: div #const is not supported by the 65C816
+errors832.s:4: Error: 32-bit registers need cpu 65C832
+errors832.s:6: Error: xfe without operand is not supported by the 65C816X
+errors832.s:7: Error: 32-bit registers need cpu 65C832
+errors832.s:8: Error: unknown cpu: 65C833
+5 errors, no output written
+exit 1

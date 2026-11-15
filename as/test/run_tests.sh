@@ -71,12 +71,41 @@ run errors -o out/errors.bin errors.s
 check errors errors.log
 if [ -f out/errors.bin ]; then fail=$((fail + 1)); echo "FAIL errors: output written"; fi
 
+# the 65C816X and the 65C832: the instructions after WDM, 32-bit
+# immediates, the mnemonics as names, relocated 32-bit immediates
+run 832 -o out/832.bin 832.s
+cp 832.lst out/832.lst
+check 832 832.bin 832.lst 832.log
+run errors832 -o out/errors832.bin errors832.s
+check errors832 errors832.log
+run Reloc832 -o out/Reloc832.816 Reloc832.s
+check Reloc832 Reloc832.816 Reloc832.smb Reloc832.log
+
+# The same instructions run on the core they are for (Verilog65C816,
+# docs/65C832.md): core832.s, as the Tang Nano 20K builds the core and as
+# the 65C832, under em16 -bench, which has the core's own memory and
+# result port. A .mem file from $0000 is the image of its memory, a byte
+# a line without the comment. Not run if em16 is not built.
+EM16=${EM16:-../../bin/em16}
+for t in 816x 832; do
+  if [ $t = 832 ]; then c=1; opt=-c832; else c=0; opt=; fi
+  run core$t -DC832=$c -o out/core$t.mem core832.s
+  check core$t core$t.mem core$t.log
+  if [ "$UPDATE" != "-update" ] && [ -x "$EM16" ]; then
+    grep -v '^//' out/core$t.mem | tr ' ' '\n' > out/core$t.hex
+    out=$(perl -e 'alarm 60; exec @ARGV' "$EM16" -bench out/core$t.hex $opt 2> /dev/null)
+    case "$out" in
+      PASS*) pass=$((pass + 1)) ;;
+      *) fail=$((fail + 1)); echo "FAIL core$t on em16: ${out:-no answer}" ;;
+    esac
+  fi
+done
+
 # Round trip through the Oberon compiler and the emulator: oc816 must
 # accept the symbol file the assembler writes, and the loader the module.
 # This is what catches the two drifting apart. Skipped if either tool is
 # not built; name them with OC816 and EM16.
 OC816=${OC816:-../../../../oc/self/s816/oc816}
-EM16=${EM16:-../../bin/em16}
 OUTMOD=../../oc/test/Out.Mod
 if [ "$UPDATE" = "-update" ]; then :
 elif [ -x "$OC816" ] && [ -x "$EM16" ] && [ -f "$OUTMOD" ]; then

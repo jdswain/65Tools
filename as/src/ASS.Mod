@@ -14,7 +14,7 @@ MODULE ASS; (* Scanner of the 65xx assembler.
 
   CONST IdLen* = 32; StrLen* = 256;
     KwLen = 12;
-    NKW = 184;        (* size of the keyword table *)
+    NKW = 192;        (* size of the keyword table *)
     maxDepth = 8;     (* nesting of include files *)
     maxPaths = 6;     (* include directories *)
     maxErrors = 50;   (* messages printed before the rest are only counted *)
@@ -90,6 +90,8 @@ MODULE ASS; (* Scanner of the 65xx assembler.
     ahead: INTEGER;          (* symbol to deliver next, or null *)
     k: INTEGER;
     keyTab: ARRAY NKW OF RECORD sym: INTEGER; id: KwName END;
+    extended: BOOLEAN;       (* the source has chosen a processor with the
+                                instructions after WDM; see SetExtended *)
     paths: ARRAY maxPaths OF ASH.Path;
     nofPaths: INTEGER;
 
@@ -215,7 +217,9 @@ MODULE ASS; (* Scanner of the 65xx assembler.
         m := (l + r) DIV 2;
         IF keyTab[m].id < low THEN l := m + 1 ELSE r := m END
       END;
-      IF (r < k) & (keyTab[r].id = low) THEN sym := keyTab[r].sym END
+      IF (r < k) & (keyTab[r].id = low) THEN sym := keyTab[r].sym;
+        IF (sym >= instr) & ~extended & ASC.Extension(sym - instr) THEN sym := ident END
+      END
     END
   END Identifier;
 
@@ -432,6 +436,14 @@ MODULE ASS; (* Scanner of the 65xx assembler.
     END
   END Get;
 
+  (* From the next symbol on, MUL, UML, UDV, BSW and XFE are mnemonics
+     (on), or names (off, as they are at the start). The parser sets it
+     where the source assigns a processor to cpu, which the interpreter
+     only does later, in its passes. *)
+  PROCEDURE SetExtended*(on: BOOLEAN);
+  BEGIN extended := on
+  END SetExtended;
+
   PROCEDURE IsInstr*(sym: INTEGER): BOOLEAN;
   BEGIN RETURN sym >= instr
   END IsInstr;
@@ -555,7 +567,7 @@ MODULE ASS; (* Scanner of the 65xx assembler.
   END Include;
 
   PROCEDURE Init*;
-  BEGIN Reset; errcnt := 0; warncnt := 0
+  BEGIN Reset; errcnt := 0; warncnt := 0; extended := FALSE
   END Init;
 
   (* --- keywords --- *)
@@ -588,8 +600,10 @@ MODULE ASS; (* Scanner of the 65xx assembler.
     Enter(pw, "pw"); Enter(section, "section"); Enter(segment, "segment");
     Enter(subheading, "subheading"); Enter(text, "text"); Enter(title, "title");
     Enter(top, "top"); Enter(word, "word");
-    FOR i := 0 TO ASC.nofInstr - 1 DO ASC.Name(i, m); Enter(instr + i, m) END
+    FOR i := 0 TO ASC.nofInstr - 1 DO
+      IF i # ASC.Div THEN ASC.Name(i, m); Enter(instr + i, m) END   (* "div" is entered above *)
+    END
   END EnterKeywords;
 
-BEGIN cur := NIL; nofPaths := 0; EnterKeywords; Init
+BEGIN cur := NIL; nofPaths := 0; extended := FALSE; EnterKeywords; Init
 END ASS.

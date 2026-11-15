@@ -1,7 +1,8 @@
 # as — 65xx assembler in Oberon
 
-An assembler for the MOS 6502, WDC 65C02 and 65C816, and the Rockwell
-R65C02, R6501Q and C19. It is a port to Oberon of the C assembler in
+An assembler for the MOS 6502, WDC 65C02 and 65C816, the Rockwell
+R65C02, R6501Q and C19, and the 65C832 and 65C816X of Verilog65C816
+(below). It is a port to Oberon of the C assembler in
 `../as-c` (with the parts of `../shared` it used), restructured after the
 Oberon compiler it is built with.
 
@@ -82,6 +83,44 @@ emitted. A code address read as data needs the code's data bank (`phk`
 `plb`) or a long operand. The relocation entries mark these in their high
 word: $4000 a data word, $2000 a code word in its bank, $1000 a 24-bit
 code address, each of the bytes at the entry's offset.
+
+## The 65C832 and the 65C816X
+
+`cpu = "65C832"` (or `"832"`) is the core of Verilog65C816 as it is built by
+default, and `cpu = "65C816X"` (`"816X"`) the same core as the Tang Nano 20K
+builds it: a 65C816 with the instructions behind WDM, without the 65C832's
+modes (that repository's `docs/65C832.md`). Both have the 65C816's
+instructions and these, each a WDM ($42) and the opcode after it:
+
+| | |
+|---|---|
+| `MUL`, `UML`, `DIV`, `UDV` | in the fifteen addressing modes of ADC, AND, CMP, EOR, whose opcodes follow the $42; an immediate as wide as A |
+| `ASL #n`, `LSR #n`, `ASR #n`, `ROL #n`, `ROR #n` | the count a byte |
+| `BSW` (or `BSW A`) | |
+| `XFE` | the 65C832 only |
+
+`WDM #n` still writes the two bytes as they are (`wdm #$B1`).
+
+On the 65C832 `longa = 32` and `longi = 32` make immediates 32 bits (`lda
+#$12345678` is 5 bytes); `off` or 8 is 8 bits, `on` or 16 is 16, and read
+back they are 0, 1 or 32. `.l` on an immediate makes it 32 bits there;
+`.b` and `.w` are 8 and 16 as before. In a module a relocated address in a
+32-bit immediate is a variable's with two bytes of 0 or a procedure's 24
+bits ($1000) and a 0. An ELF file of either processor is marked 65C816
+code.
+
+`DIV` at the start of a statement, or after a label, is the instruction
+(`div` is an operator in expressions). The other new mnemonics are names
+until a statement `cpu = "65C832"` or `"65C816X"` (a string, since the
+parser takes note of it as it reads the source) and mnemonics after it:
+elsewhere they may be labels, as `mul` is in OS16's `Numerics.s`.
+
+`test/core832.s` runs the new instructions on the core they are for:
+every addressing mode of the four at 8 and 16 bits and, on the 65C832, at
+32, with the operand only where its mode reads it. `make test` assembles
+it for each processor and runs it under `em16 -bench`; the same `.mem`
+files, a byte a line without the comment, pass `tb_cpu.v` of
+Verilog65C816 (`vvp sim816x +hex=...` and `vvp sim +hex=...`).
 
 ## Modules
 

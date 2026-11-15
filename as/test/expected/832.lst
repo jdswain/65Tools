@@ -1,0 +1,48 @@
+0000:                   ; 832.s - the 65C816X and the 65C832: the instructions after WDM, the
+0000:                   ; widths of immediates, and where the new mnemonics are names
+0000:                   	cpu = "65C816"
+0000:                   	org = $1000
+1000: 20 03 10          mul:	jsr udv			; names: the 65C816 has no such instructions
+1003: 60                udv:	rts
+1004:                   	cpu = "65C816X"		; from here on they are mnemonics
+1004:                   	longa = on
+1004:                   	longi = on
+1004: 42 69 34 12       	mul #$1234
+1008: 42 25 12          	uml $12
+100b: 42 cd 34 12       	div $1234
+100f: 42 57 12          	udv [$12],y
+1012: 42 7f 56 34 12    	mul $123456,x
+1017: 42 33 01          	uml (1,s),y
+101a: 42 0a 03          	asl #3
+101d: 42 4a 1f          	lsr #31
+1020: 42 8a 01          	asr #1
+1023: 42 2a 08          	rol #8
+1026: 42 6a 10          	ror #16
+1029: 42 eb             	bsw
+102b: 42 eb             	bsw a
+102d: 42 c9 10 00       	div #$10		; at the start of a statement an instruction,
+1031: 42 d5 10          .q:	div $10,x		; also after a label,
+1034: a9 03 00          	lda #10 div 3		; but an operator in an expression
+1037: 42 b1             	wdm #$B1
+1039:                   	cpu = "65C832"
+1039: 42 fb             	xfe
+103b:                   	longa = 32
+103b:                   	longi = 32
+103b: a9 78 56 34 12    	lda #$12345678
+1040: a2 fe ff ff ff    	ldx #-2
+1045: c0 00 00 01 00    	cpy #$10000
+104a: 89 00 00 00 80    	bit #$80000000
+104f: 42 69 a0 86 01 00 	mul #100000
+1055: 42 c9 05 00       	div.w #5		; .w: 16 bits
+1059: a9 01             	lda.b #1		; .b: 8
+105b:                   	longa = off
+105b: a9 44 33 22 11    	lda.l #$11223344	; .l: 32
+1060: a9 00             	lda #longa		; off
+1062: a2 20 00 00 00    	ldx #longi		; 32
+1067: 42 c9 07          	div #7
+106a:                   	longi = 8
+106a: c0 03             	cpy #3
+106c: a9 01             	lda #cpu == "65C832"
+
+Symbols:
+mul                  1000      udv                  1003      

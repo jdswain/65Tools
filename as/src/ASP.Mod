@@ -28,7 +28,13 @@ MODULE ASP; (* Parser of the 65xx assembler.
    A "." before a name makes it local to the label last defined, and "*"
    after a name exports it. A label may be spelled like a mnemonic, a
    directive, DIV or MOD if "*" or ":" follows it. As prefix operators "<", ">" and "^" select
-   the low, high and bank byte of a value. *)
+   the low, high and bank byte of a value.
+
+   DIV at the start of a statement is the instruction of the 65C832 and
+   the 65C816X. Their other new mnemonics (MUL, UML, UDV, BSW, XFE) are
+   names until a statement cpu = "..." chooses one of the two, and from
+   then on are mnemonics. It has to be a string: the parser takes note of
+   it, as the processor itself is chosen only when the program runs. *)
 
   IMPORT ASH, ASC, ASS, ASB, ASG, ASI;
 
@@ -550,13 +556,18 @@ MODULE ASP; (* Parser of the 65xx assembler.
   PROCEDURE Named(ref: ASI.Ref);
     VAR op: INTEGER; m: ASI.Macro;
   BEGIN DefMarks(ref);
-    IF sym = ASS.becomes THEN Get; Expression(FALSE); ASI.PutRef(ASI.popVar, ref)
+    IF sym = ASS.becomes THEN Get;
+      IF (sym = ASS.string) & ~ref.local & ASH.Same(ref.name, "cpu") THEN
+        ASS.SetExtended(ASC.Extended(ASI.ThisCpu(ASS.str)))
+      END;
+      Expression(FALSE); ASI.PutRef(ASI.popVar, ref)
     ELSIF sym = ASS.opbecomes THEN
       op := Operation(ASS.op); ASI.PutRef(ASI.pushVar, ref);
       Get; Expression(FALSE); ASI.Put(op); ASI.PutRef(ASI.popVar, ref)
     ELSIF sym = ASS.macro THEN Get; MacroDefinition(ref.name)
     ELSE ASI.PutRef(ASI.label, ref);
       IF ASS.IsInstr(sym) THEN Instruction
+      ELSIF sym = ASS.div THEN Get; Operands(ASC.Div)
       ELSIF ASS.IsDirective(sym) THEN Directive
       ELSIF sym = ASS.ident THEN m := ASI.ThisMacro(ASS.id);
         IF m # NIL THEN MacroCall(m) END
@@ -579,9 +590,10 @@ MODULE ASP; (* Parser of the 65xx assembler.
         IF (sym = ASS.times) OR (sym = ASS.colon) THEN ref := ASI.NewRef(name); Named(ref)
         ELSE DirectiveRest(mnemonic)
         END
-      ELSIF (sym = ASS.div) OR (sym = ASS.mod) THEN  (*and DIV or MOD*)
-        ASH.Copy(ASS.id, name); Get;
+      ELSIF (sym = ASS.div) OR (sym = ASS.mod) THEN  (*and DIV or MOD; DIV is an instruction too*)
+        mnemonic := sym; ASH.Copy(ASS.id, name); Get;
         IF (sym = ASS.times) OR (sym = ASS.colon) THEN ref := ASI.NewRef(name); Named(ref)
+        ELSIF mnemonic = ASS.div THEN Operands(ASC.Div)
         ELSE Unexpected
         END
       ELSIF sym = ASS.ident THEN m := ASI.ThisMacro(ASS.id);
