@@ -2,7 +2,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
    testing programs of the assembler and the Oberon compiler: the
    command line and the running.
 
-   em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-sysclk hz] [-cpuclk hz] [-turbo] [-smc] [-nodisplay] [-bootrom rom.bin]
+   em16 [-t] [-cpu l28|rockwell|wdc|816] [-fpga] [-c832] [-sysclk hz] [-cpuclk hz] [-turbo] [-smc] [-nodisplay] [-bootrom rom.bin]
         [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-prof file cycles] [-test-pattern]
         [-console] [-disk0 file] [-disk1 file] [-wd1793]
         [-scsi file] [-scsitiming] [-sd file] [-net vmnet|vmnet-host|vmnet-bridged:IF|udp:LPORT:RPORT[:HOST]] [-mac aa:bb:cc:dd:ee:ff]
@@ -132,6 +132,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       ELSIF Equal(arg, "-fbdump") & (index + 1 < n) THEN Env.Arg(index + 1, fbdump); INC(index, 2)
       ELSIF Equal(arg, "-fpga") THEN INC(index)
       ELSIF Equal(arg, "-smc") THEN EmCore.SetSMC(TRUE); INC(index)
+      ELSIF Equal(arg, "-c832") THEN EmCore.SetC832(TRUE); INC(index)
       ELSIF Equal(arg, "-nodisplay") THEN EmSDRAM.NoDisplay; INC(index)
       ELSIF Equal(arg, "-sysclk") & (index + 1 < n) THEN INC(index, 2)
       ELSIF Equal(arg, "-turbo") THEN EmSoC.Turbo; INC(index)
@@ -173,7 +174,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       ELSIF Equal(arg, "-adbmouse") & (index + 2 < n) THEN
         Env.Arg(index + 1, val); adbDx := Number(val); Env.Arg(index + 2, val); adbDy := Number(val); INC(index, 3)
       ELSIF Equal(arg, "-?") THEN
-        ErrStr("Usage: em16 [-t] [-tfrom addr skip count] [-cpu l28|rockwell|wdc|816] [-fpga] [-sysclk hz] [-cpuclk hz] [-turbo] [-smc] [-nodisplay] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-prof file cycles] [-test-pattern] [-console] [-disk0 file] [-disk1 file] [-wd1793] [-scsi file] [-scsitiming] [-sd file] [-adbkey code] [-adbmouse dx dy] file ...");
+        ErrStr("Usage: em16 [-t] [-tfrom addr skip count] [-cpu l28|rockwell|wdc|816] [-fpga] [-c832] [-sysclk hz] [-cpuclk hz] [-turbo] [-smc] [-nodisplay] [-bootrom rom.bin] [-font hex] [-dp addr] [-sp addr] [-video] [-fbdump ppm] [-prof file cycles] [-test-pattern] [-console] [-disk0 file] [-disk1 file] [-wd1793] [-scsi file] [-scsitiming] [-sd file] [-adbkey code] [-adbmouse dx dy] file ...");
         EmHost.Ln(EmHost.err); bad := TRUE
       ELSE ErrStr("Invalid: option '"); ErrStr(arg); ErrStr("'"); EmHost.Ln(EmHost.err); bad := TRUE
       END
@@ -231,6 +232,14 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
     END
   END FBDump;
 
+  (* em16 -bench file [-c832]: a test image of the Verilog repository on EmCore *)
+  PROCEDURE Bench;
+    VAR file, arg: EmLoad.Path;
+  BEGIN Env.Arg(2, file);
+    IF Env.ArgCount() > 3 THEN Env.Arg(3, arg); IF Equal(arg, "-c832") THEN EmCore.SetC832(TRUE) END END;
+    EmHarte.Bench(file); EmHost.DrainAll
+  END Bench;
+
   (* em16 -harte dir [opcode.mode ...]: EmCore against the SingleStepTests *)
   PROCEDURE Harte;
     VAR dir: EmLoad.Path; names: EmHarte.Names; i, n: INTEGER;
@@ -262,7 +271,9 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
     VAR index, n, i, v: INTEGER; arg: EmLoad.Path; cycles: LONGINT;
   BEGIN
     IF Env.ArgCount() > 2 THEN Env.Arg(1, arg);
-      IF Equal(arg, "-harte") THEN Harte; EmHost.Exit(0) END
+      IF Equal(arg, "-harte") THEN Harte; EmHost.Exit(0)
+      ELSIF Equal(arg, "-bench") THEN Bench; EmHost.Exit(0)
+      END
     END;
     trace := FALSE; videoEnabled := FALSE; testPattern := FALSE; consoleMode := FALSE; bad := FALSE;
     customDp := -1; customSp := -1; entry := 0; nAdbKeys := 0; adbDx := 0; adbDy := 0; fbdump[0] := 0X; bootrom[0] := 0X; font[0] := 0X;

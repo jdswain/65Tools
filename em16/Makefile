@@ -93,6 +93,7 @@ test: $(TARGET)
 	@sh test/rtc.sh
 	@sh test/romsize.sh
 	@sh test/banked.sh
+	@sh test/core832.sh
 	@sh test/hd.sh
 
 clean:

@@ -10,9 +10,23 @@ MODULE EmHarte; (* EmCore against the SingleStepTests (TomHarte) vectors,
    always ready (fills bring a word), until it has begun (left the fetch
    state, or moved PC) and is back at the next fetch (or in WAI or STP);
    its deferred execute is run (EmCore.Settle), and the registers and the
-   memory the vector lists are compared, as tb_harte does. As for the Verilog core, MVN and
-   MVP (44, 54) are expected to fail: the vectors stop a block move part
-   of the way through. *)
+   memory the vector lists are compared, as tb_harte does. As it does,
+   the bytes the vector set or listed and those written are cleared
+   after each test: the vectors do not list the byte after a WDM, which
+   must read 0. As for the Verilog core, MVN and MVP (44, 54) are
+   expected to fail: the vectors stop a block move part of the way
+   through.
+
+     em16 -bench file [-c832]
+
+   runs a test image of the Verilog repository as its tb_cpu.v does
+   (test832_gen.py's, with --irq-only): 128K of memory, banks 0 and 1,
+   always ready and read a word at a time; a write to $00F000 ends it,
+   0 PASS and else FAIL with the check's number, $00F001 prints its
+   byte, $00F002 drives the IRQ line (not 0: asserted), $00F006/7 are a
+   failure's detail. The NMI and ABORT of tb_cpu ($00F003, $00F005)
+   are not there, as EmCore has neither. The cycles are tb_cpu's, less
+   those of its reset. *)
 
   IMPORT Files, EmHost, EmCore;
 
@@ -25,13 +39,18 @@ MODULE EmHarte; (* EmCore against the SingleStepTests (TomHarte) vectors,
     r: Files.Rider; f: Files.File;
     shown: INTEGER;
     time: LONGINT;
+    (* the bytes written by a test, to clear after it *)
+    wlog: ARRAY 256 OF INTEGER; wn: INTEGER;
+    (* the bench: the result written (-1: none yet), when, the detail, the IRQ line *)
+    result, detail: INTEGER; resultAt: LONGINT; irq: BOOLEAN;
 
   PROCEDURE Read(a: INTEGER): INTEGER;
   BEGIN RETURN mem[AND(a, 0FFFFFFH)]
   END Read;
 
   PROCEDURE Write(a, d: INTEGER);
-  BEGIN mem[AND(a, 0FFFFFFH)] := d
+  BEGIN mem[AND(a, 0FFFFFFH)] := d;
+    IF wn < 256 THEN wlog[wn] := AND(a, 0FFFFFFH) END; INC(wn)
   END Write;
 
   PROCEDURE Fetch(a: INTEGER; at: LONGINT; VAR w: ARRAY OF INTEGER; VAR n: INTEGER): INTEGER;
@@ -50,6 +69,30 @@ MODULE EmHarte; (* EmCore against the SingleStepTests (TomHarte) vectors,
   PROCEDURE NoIrq(): BOOLEAN;
   BEGIN RETURN FALSE
   END NoIrq;
+
+  (* the bench's memory: a bus cycle each *)
+  PROCEDURE BRead(a: INTEGER): INTEGER;
+  BEGIN time := time + 1; RETURN mem[AND(a, 1FFFFH)]
+  END BRead;
+
+  PROCEDURE BWrite(a, d: INTEGER);
+  BEGIN time := time + 1; mem[AND(a, 1FFFFH)] := d;
+    IF a = 0F000H THEN IF result < 0 THEN result := d; resultAt := time END
+    ELSIF a = 0F001H THEN EmHost.Ch(EmHost.out, CHR(d))
+    ELSIF a = 0F002H THEN irq := d # 0
+    ELSIF a = 0F006H THEN detail := AND(detail, 0FF00H) + d
+    ELSIF a = 0F007H THEN detail := AND(detail, 0FFH) + d * 256
+    END
+  END BWrite;
+
+  PROCEDURE BFetch(a: INTEGER; at: LONGINT; VAR w: ARRAY OF INTEGER; VAR n: INTEGER): INTEGER;
+    VAR i: INTEGER;
+  BEGIN n := 4 - a MOD 4; FOR i := 0 TO n - 1 DO w[i] := mem[AND(a + i, 1FFFFH)] END; RETURN 1
+  END BFetch;
+
+  PROCEDURE BIrq(): BOOLEAN;
+  BEGIN RETURN irq
+  END BIrq;
 
   (* the next byte of the file: two hex digits and a line end *)
   PROCEDURE Byte(): INTEGER;
@@ -97,7 +140,7 @@ MODULE EmHarte; (* EmCore against the SingleStepTests (TomHarte) vectors,
   (* One file of vectors; the number of failures. *)
   PROCEDURE RunFile(name: ARRAY OF CHAR; VAR pass, fail: INTEGER);
     VAR n, t, i, ni, nf, a, v, cyc, s, x, y: INTEGER; ini, fin: Regs; ok, started: BOOLEAN;
-      fa, fv: ARRAY 64 OF INTEGER;
+      fa, fv: ARRAY 64 OF INTEGER; ia: ARRAY 256 OF INTEGER;
   BEGIN pass := 0; fail := 0;
     f := Files.Old(name);
     IF f = NIL THEN Out("cannot open "); Out(name); EmHost.Ln(EmHost.out)
@@ -107,7 +150,7 @@ MODULE EmHarte; (* EmCore against the SingleStepTests (TomHarte) vectors,
       FOR t := 0 TO n - 1 DO
         GetRegs(ini); GetRegs(fin);
         ni := B16(); nf := B16();
-        FOR i := 0 TO ni - 1 DO a := B24(); v := Byte(); mem[a] := v END;
+        FOR i := 0 TO ni - 1 DO a := B24(); v := Byte(); mem[a] := v; IF i < 256 THEN ia[i] := a END END;
         FOR i := 0 TO nf - 1 DO a := B24(); v := Byte(); IF i < 64 THEN fa[i] := a; fv[i] := v END END;
         (* the chip's view of the state: S in page 1 and 8 bit index
            registers in emulation mode, 8 bit index registers when x = 1 *)
@@ -118,7 +161,7 @@ MODULE EmHarte; (* EmCore against the SingleStepTests (TomHarte) vectors,
         EmCore.SetState(ini.pc, s, ini.p, ini.a, x, y, ini.dbr, ini.d, ini.pbr, ini.e);
         (* begun once the state leaves the fetch or PC moves (an implied
            opcode stays there): the queue starts empty *)
-        cyc := 0; started := FALSE;
+        cyc := 0; started := FALSE; wn := 0;
         REPEAT EmCore.Step(0); INC(cyc);
           IF ~EmCore.AtFetch() OR (EmCore.PC # ini.pc) THEN started := TRUE END
         UNTIL started & (EmCore.AtFetch() OR (EmCore.state = 19) OR (EmCore.state = 20)) OR (cyc >= 200);
@@ -143,10 +186,35 @@ MODULE EmHarte; (* EmCore against the SingleStepTests (TomHarte) vectors,
               END
             END
           END
-        END
+        END;
+        FOR i := 0 TO ni - 1 DO IF i < 256 THEN mem[ia[i]] := 0 END END;
+        FOR i := 0 TO nf - 1 DO IF i < 64 THEN mem[fa[i]] := 0 END END;
+        FOR i := 0 TO wn - 1 DO IF i < 256 THEN mem[wlog[i]] := 0 END END
       END
     END
   END RunFile;
+
+  (* em16 -bench: the image, a byte a line in hex, run to its result *)
+  PROCEDURE Bench*(name: ARRAY OF CHAR);
+    VAR i: INTEGER;
+  BEGIN
+    f := Files.Old(name);
+    IF f = NIL THEN Out("cannot open "); Out(name); EmHost.Ln(EmHost.out)
+    ELSE
+      Files.Set(r, f, 0);
+      FOR i := 0 TO 1FFFFH DO mem[i] := Byte() END;
+      EmCore.SetBus(BRead, BWrite, BFetch, Wait, Clock, BIrq); EmCore.Reset;
+      time := 0; result := -1; detail := 0; irq := FALSE;
+      REPEAT EmCore.Step(time) UNTIL (result >= 0) OR EmCore.stopped OR (time > 4000000);
+      IF result = 0 THEN Out("PASS  ("); EmHost.Int(EmHost.out, resultAt); Out(" cycles)")
+      ELSIF result > 0 THEN Out("FAIL: test "); EmHost.Int(EmHost.out, result);
+        Out("  detail "); EmHost.Int(EmHost.out, detail);
+        Out("  ("); EmHost.Int(EmHost.out, resultAt); Out(" cycles)")
+      ELSE Out("TIMEOUT: no result written (PC "); Hex(EmCore.PBR * 10000H + EmCore.PC, 6); Out(")")
+      END;
+      EmHost.Ln(EmHost.out)
+    END
+  END Bench;
 
   PROCEDURE Append(s: ARRAY OF CHAR; VAR d: ARRAY OF CHAR);
     VAR i, j: INTEGER;

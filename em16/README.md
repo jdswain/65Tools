@@ -7,7 +7,8 @@ R65C19 that the 65Tools test their programs on, ported from C++
 suites, `as/test816` and Business BASIC use.
 
     make            ../bin/em16
-    make test       the disk controllers, DMA and the banked direct page
+    make test       the disk controllers, DMA, the banked direct page, the
+                    core's WDM extension and 65C832 mode
 
 `-t` traces every instruction to standard error: where, the opcode, the
 registers and the cycles so far (under `-fpga`, the opcode the core's
@@ -62,7 +63,8 @@ This port is a derivative of it and under the same licence.
     EmSCC     the emulated Z85C30 SCC of rtl/scc_85c30.v
     EmADB     the ADB host, with a keyboard and a mouse
     EmBlit    the blitter
-    EmHarte   -harte: the Harte single-step tests on EmCore
+    EmHarte   -harte: the Harte single-step tests on EmCore; -bench: the
+              core's own test images
 
     and on both the default machine and the SoC:
 
@@ -129,7 +131,7 @@ have 1 MB, its symbol table 200000 symbols.
 
 ## The SoC (-fpga)
 
-    em16 -fpga [-sysclk hz] [-cpuclk hz] [-turbo] [-smc] [-nodisplay] [-bootrom rom.bin] [-font font.hex] [-video] [-fbdump ppm] [-prof file cycles]
+    em16 -fpga [-c832] [-sysclk hz] [-cpuclk hz] [-turbo] [-smc] [-nodisplay] [-bootrom rom.bin] [-font font.hex] [-video] [-fbdump ppm] [-prof file cycles]
                [-disk0 img] [-disk1 img] [-wd1793] [-scsi img] [-scsitiming] [-sd img]
                [-net vmnet|vmnet-host|vmnet-bridged:IF|udp:LPORT:RPORT[:HOST]]
                [-mac aa:bb:cc:dd:ee:ff] [-rtc file] [-rtctime YYYYMMDDhhmmss] [-nortc]
@@ -152,7 +154,18 @@ rather than em16's default machine:
   mode). It has the
   core's banked direct page and stack too (`WDM #$B1` on, `WDM #$B0`
   off; docs/BankedDP.md in the Verilog repository), which
-  `test/banked.sh` checks with the core's own test, banked.s;
+  `test/banked.sh` checks with the core's own test, banked.s, and its
+  extension behind the WDM prefix (docs/65C832.md there): `MUL`, `UML`,
+  `DIV`, `UDV` in their fifteen addressing modes, taking the core's
+  cycles, a bit a cycle; `ASL`, `LSR`, `ASR`, `ROL`, `ROR #n`; `BSW`.
+  With `-c832` it is the core built with its 65C832 mode (`C832=1`):
+  `XFE`, E16, a 32-bit accumulator and 32-bit index registers, the
+  65C832 vectors. Without, as the Tang Nano builds it, XFE does nothing.
+  `em16 -bench file [-c832]` runs one of the core's test images as its
+  `tb_cpu.v` does (128 KB, the result at $F000, an IRQ line at $F002;
+  no NMI or ABORT), and `test/core832.sh` runs `test832_gen.py`'s two:
+  `PASS (16003 cycles)` and, with `-c832`, `PASS (38543 cycles)`, each
+  3 cycles (tb_cpu's reset) short of the Verilog's;
 - the map: 8 MB of SDRAM through the cache, the I/O block at
   $0200-$0FFF (palette, ADB, system control, external bus, video
   control, blitter, DMA; the external bus is eight slots of 16
@@ -469,7 +482,8 @@ before, as above.
 `make test` runs `test/disks.sh`, a boot ROM (`test/disks.s`) that drives
 both disk controllers by polling and compares what it prints with
 `test/disks.expected`, `test/dma.sh`, the same by DMA, and `test/banked.sh`, the banked direct page and
-stack of the board's 65C816. `test/pattern.sh` draws with the blitter's
+stack of the board's 65C816. `test/core832.sh` runs the core's checks of
+its WDM extension and 65C832 mode (`test832_gen.py`) under `-bench`. `test/pattern.sh` draws with the blitter's
 patterns (`test/pattern.s`): odd left and right edges, copy, OR, XOR and
 BIC, fill set as well, a transparent colour, and a PATTERN write while
 busy; a model in the script, from the definition, checks every pixel. The
