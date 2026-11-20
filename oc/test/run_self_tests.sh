@@ -11,6 +11,7 @@
 #     OC     compiler binary (default: the built self/s816/oc816 in the oc repo)
 #     OCFLAGS  more options for it: -x, code for the core's extension after
 #            WDM (MUL, DIV, the shifts by n), which em16 -fpga runs
+#     AS     assembler for the *.s helpers (default: 65Tools' bin/as)
 #     args   optional list of level prefixes to run (e.g. L1 L5); default all
 #
 # Each test runs on OS16, booted as on the board: em16 -fpga with OS16's
@@ -19,6 +20,10 @@
 # imports. OS16 must be built first (cd ../../OS16 && make): the tests link
 # to the kernel's modules (Out, HeapManager, ...) by its symbol files, and
 # their output is what follows Out's "OK" as the kernel starts.
+#
+# A helper module (no .expected) is compiled with OCFLAGS, but one whose
+# name ends in 816 (L19_Stock816) with -816, code for a stock 65C816; a
+# *.s helper (L19_StockRun) is assembled to its .816 and .smb.
 #
 # Parity note: oc816 uses the shared (latest) Oberon frontend. Its REAL
 # literal conversion is correctly-rounded and can differ in the last
@@ -32,11 +37,13 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 OC="${OC:-$PROJECT_DIR/../../../oc/self/s816/oc816}"
 OCFLAGS="${OCFLAGS:-}"
 EM16="${EM16:-$PROJECT_DIR/../bin/em16}"
+AS="${AS:-$PROJECT_DIR/../bin/as}"
 OS16B="${OS16B:-$PROJECT_DIR/../../OS16/build}"
 TIMEOUT_SECS="${TIMEOUT_SECS:-30}"
 
 if [ ! -x "$OC" ];   then echo "ERROR: compiler not found/executable at $OC"; exit 1; fi
 if [ ! -x "$EM16" ]; then echo "ERROR: emulator not found at $EM16"; exit 1; fi
+if [ ! -x "$AS" ];   then echo "ERROR: assembler not found at $AS"; exit 1; fi
 if [ ! -f "$OS16B/Kernel.img" ]; then echo "ERROR: no OS16 kernel at $OS16B (cd ../../OS16 && make)"; exit 1; fi
 KERNEL="$(cat "$OS16B/KERNEL.TXT")"
 MKFLOPPY="$PROJECT_DIR/../../OS16/tools/mkfloppy.py"
@@ -47,10 +54,16 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 cp "$SCRIPT_DIR"/*.Mod "$WORK"/ 2>/dev/null
 cp "$SCRIPT_DIR"/*.expected "$WORK"/ 2>/dev/null
+cp "$SCRIPT_DIR"/*.s "$WORK"/ 2>/dev/null
 cd "$WORK" || exit 1
 # the kernel's modules are the kernel's: its symbol files, not compiled here
 for k in $KERNEL; do rm -f "$k.Mod"; cp "$OS16B/$k.smb" .; done
 cp "$OS16B/Kernel.img" "$OS16B/boot.rom" .
+
+# Assemble the *.s helpers: as writes each one's .816 and .smb.
+for s in *.s; do
+  [ -f "$s" ] && "$AS" -o "${s%.s}.816" "$s" >/dev/null 2>&1
+done
 
 # Pre-compile library modules so dependencies resolve.
 for lib in Runtime TestTool; do
@@ -65,7 +78,8 @@ for pass in 1 2; do
     bn="${m%.Mod}"
     case "$bn" in Runtime|TestTool) continue;; esac
     [ -f "$bn.expected" ] && continue   # a test driver — compiled+run below
-    "$OC" "$m" -s $OCFLAGS >/dev/null 2>&1
+    case "$bn" in *816) flags=-816;; *) flags="$OCFLAGS";; esac
+    "$OC" "$m" -s $flags >/dev/null 2>&1
   done
 done
 
