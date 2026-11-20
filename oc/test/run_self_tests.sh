@@ -12,6 +12,8 @@
 #     OCFLAGS  more options for it: -x, code for the core's extension after
 #            WDM (MUL, DIV, the shifts by n), which em16 -fpga runs
 #     AS     assembler for the *.s helpers (default: 65Tools' bin/as)
+#     TIMEOUT_SECS  seconds of em16 a test may take (default 30), wall clock:
+#            raise it on a loaded machine
 #     args   optional list of level prefixes to run (e.g. L1 L5); default all
 #
 # Each test runs on OS16, booted as on the board: em16 -fpga with OS16's
@@ -137,8 +139,9 @@ for lvl in "${LEVELS[@]}"; do
     if ! python3 "$MKFLOPPY" -d . -x "$(echo $KERNEL | tr ' ' ,)" -m "$bn" -n "Library/Settings/Startup.txt=$bn" -L Kernel.img boot.img 2> floppy.err; then
       echo "FAIL  $bn (floppy: $(cat floppy.err))"; FAIL=$((FAIL + 1)); continue
     fi
-    full="$(perl -e "alarm $TIMEOUT_SECS; exec @ARGV" "$EM16" -fpga -bootrom boot.rom -disk0 boot.img < /dev/null 2>/dev/null | tr -d '\r')"
-    [ $? -eq 142 ] && { echo "FAIL  $bn (timeout)"; FAIL=$((FAIL + 1)); continue; }
+    # em16's status, not tr's: 142 (128 + SIGALRM) if the alarm stopped it
+    full="$(perl -e "alarm $TIMEOUT_SECS; exec @ARGV" "$EM16" -fpga -bootrom boot.rom -disk0 boot.img < /dev/null 2>/dev/null | tr -d '\r'; exit "${PIPESTATUS[0]}")"
+    [ $? -eq 142 ] && { echo "FAIL  $bn (timeout, ${TIMEOUT_SECS} s)"; FAIL=$((FAIL + 1)); continue; }
     # Output from Out's "OK", as the kernel starts, up to em16's statistics
     # (the blank line before "Executed"): what the goldens capture.
     actual="$(echo "$full" | awk '/^OK$/{f=1} /^Executed /{exit} f{print}' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}')"
