@@ -9,6 +9,8 @@
 # Usage:
 #   OC=/path/to/oc816 ./test/run_self_tests.sh [level ...]
 #     OC     compiler binary (default: the built self/s816/oc816 in the oc repo)
+#     OCFLAGS  more options for it: -x, code for the core's extension after
+#            WDM (MUL, DIV, the shifts by n), which em16 -fpga runs
 #     args   optional list of level prefixes to run (e.g. L1 L5); default all
 #
 # Each test runs on OS16, booted as on the board: em16 -fpga with OS16's
@@ -28,6 +30,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 OC="${OC:-$PROJECT_DIR/../../../oc/self/s816/oc816}"
+OCFLAGS="${OCFLAGS:-}"
 EM16="${EM16:-$PROJECT_DIR/../bin/em16}"
 OS16B="${OS16B:-$PROJECT_DIR/../../OS16/build}"
 TIMEOUT_SECS="${TIMEOUT_SECS:-30}"
@@ -51,7 +54,7 @@ cp "$OS16B/Kernel.img" "$OS16B/boot.rom" .
 
 # Pre-compile library modules so dependencies resolve.
 for lib in Runtime TestTool; do
-  [ -f "$lib.Mod" ] && "$OC" "$lib.Mod" -s >/dev/null 2>&1
+  [ -f "$lib.Mod" ] && "$OC" "$lib.Mod" -s $OCFLAGS >/dev/null 2>&1
 done
 
 # Pre-compile helper/dependency modules — any *.Mod that is not a library and
@@ -62,7 +65,7 @@ for pass in 1 2; do
     bn="${m%.Mod}"
     case "$bn" in Runtime|TestTool) continue;; esac
     [ -f "$bn.expected" ] && continue   # a test driver — compiled+run below
-    "$OC" "$m" -s >/dev/null 2>&1
+    "$OC" "$m" -s $OCFLAGS >/dev/null 2>&1
   done
 done
 
@@ -87,7 +90,7 @@ for lvl in "${LEVELS[@]}"; do
     fi
 
     if [ ! -f "$bn.Mod" ]; then echo "SKIP  $bn (no .Mod)"; SKIP=$((SKIP + 1)); continue; fi
-    out="$("$OC" "$bn.Mod" 2>&1)"
+    out="$("$OC" "$bn.Mod" $OCFLAGS 2>&1)"
 
     # "!compile-error": a negative test — a compile error IS the expected
     # (passing) result. Remaining lines are substrings that must all appear in
