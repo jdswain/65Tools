@@ -7,6 +7,9 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
         [-console] [-disk0 file] [-disk1 file] [-wd1793]
         [-scsi file] [-scsitiming] [-sd file] [-net vmnet|vmnet-host|vmnet-bridged:IF|udp:LPORT:RPORT[:HOST]] [-mac aa:bb:cc:dd:ee:ff]
         [-rtc file] [-rtctime YYYYMMDDhhmmss] [-nortc] [-adbkey code] [-adbmouse dx dy] file ...
+   em16 -mini816 [-t] [-flash file] [-rom file] [-flashsize 128K|256K|512K] [-ramsize 128K|512K]
+        [-noflashwrite] [-iostretch n] [-openbus v] [-cpuclk hz] [-turbo]
+        [-scca console|pty|tcp:PORT|none] [-sccb console|pty|tcp:PORT|none]
 
    On the default machine and under -fpga the floppy disks are the
    82077AA's, or the WD1793's with -wd1793, and -scsi puts a disk at ID 0
@@ -25,6 +28,16 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
    65C816's), the memory and devices keeping theirs; -turbo runs flat out
    even with a window, never in step with the host's time.
 
+   -mini816 is the Mini816 (EmMini816) instead, kept to real time but
+   with -turbo: -flash is the file that holds its flash (made at the first
+   write if it is not there, read-only if the file is), -rom an image put
+   at the top of the flash (a boot ROM, its vectors at $FFE0-$FFFF), the
+   sizes the smaller chips, -noflashwrite the FLASH_WRITE jumper off,
+   -iostretch an I/O cycle's CPU clocks (8), -openbus what nothing driving
+   the bus reads ($FF), -cpuclk the CPU's clock (7.3728M; the SCC's PCLK
+   stays), -scca and -sccb the SCC's channels' hosts (A the console, B
+   none). SIGUSR1 presses its NMI button, SIGUSR2 its reset.
+
    A file is an ELF executable. Oberon modules are not loaded by em16:
    OS16 boots on -fpga, from a floppy, as on the board, and loads them.
    Ported from the C++ em16 (em16-c). Its parts:
@@ -33,10 +46,11 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
      EmLoad   ELF loading, traps     EmHost  the host (C side: EmHost_rt.c)
      EmUART EmVIA EmFDC EmL28 EmVideo EmLCD  the devices *)
 
-  IMPORT Env, Files, EmHost, EmMem, EmCPU, EmLoad, EmFDC, Em82077, EmSCSI, EmSD, EmEth, EmRTC, EmADB, EmL28, EmVideo, EmLCD, EmCore, EmSDRAM, EmSoC, EmHarte;
+  IMPORT Env, Files, EmHost, EmMem, EmCPU, EmLoad, EmFDC, Em82077, EmSCSI, EmSD, EmEth, EmRTC, EmADB, EmL28, EmVideo, EmLCD, EmCore, EmSDRAM, EmSoC, EmHarte,
+    EmW816, EmFlash, EmZ85C30, EmMini816;
 
   VAR
-    trace, videoEnabled, testPattern, consoleMode, wantFpga, wantL28, bad: BOOLEAN;
+    trace, videoEnabled, testPattern, consoleMode, wantFpga, wantL28, wantMini, bad: BOOLEAN;
     sysclk: INTEGER;          (* -sysclk: the SoC's clock, 0 its default *)
     customDp, customSp, entry: INTEGER;
     adbKeys: ARRAY 8 OF INTEGER; nAdbKeys: INTEGER;   (* -adbkey: held down at reset *)
@@ -184,7 +198,8 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
   (* The program; on the CPU thread when there is a window. *)
   PROCEDURE CpuThread*;
   BEGIN
-    IF EmMem.fpga THEN EmSoC.Run
+    IF wantMini THEN EmMini816.Run
+    ELSIF EmMem.fpga THEN EmSoC.Run
     ELSIF entry # 0 THEN
       EmHost.Str(EmHost.out, "Initialising at "); EmHost.CoutHex(entry); EmHost.Ln(EmHost.out); EmHost.Flush;
       EmCPU.JumpLong(entry)
@@ -282,6 +297,86 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
     END
   END LoadFont;
 
+  (* A size: 128K, 256K, 512K, or bytes *)
+  PROCEDURE Size(s: ARRAY OF CHAR): INTEGER;
+    VAR v: INTEGER;
+  BEGIN
+    IF Equal(s, "128K") OR Equal(s, "128k") THEN v := 20000H
+    ELSIF Equal(s, "256K") OR Equal(s, "256k") THEN v := 40000H
+    ELSIF Equal(s, "512K") OR Equal(s, "512k") THEN v := 80000H
+    ELSE v := Number(s)
+    END;
+    RETURN v
+  END Size;
+
+  (* the SCC's channel c (A or B) on h: console, pty, tcp:PORT or none *)
+  PROCEDURE SccHost(c: INTEGER; h: ARRAY OF CHAR);
+    VAR name: EmLoad.Path;
+  BEGIN
+    IF Equal(h, "console") THEN EmZ85C30.SetHost(c, EmZ85C30.console, 0)
+    ELSIF Equal(h, "none") THEN EmZ85C30.SetHost(c, EmZ85C30.none, 0)
+    ELSIF EmHost.PortOpen(c, h) # 0 THEN EmZ85C30.SetHost(c, EmZ85C30.port, c);
+      EmHost.PortName(c, name);
+      IF c = EmZ85C30.A THEN ErrStr("SCC channel A: ") ELSE ErrStr("SCC channel B: ") END;
+      ErrStr(name); EmHost.Ln(EmHost.err); EmHost.Drain(EmHost.err)
+    ELSE ErrStr("-scca, -sccb: console, pty, tcp:PORT or none, not "); ErrStr(h); EmHost.Ln(EmHost.err); bad := TRUE
+    END
+  END SccHost;
+
+  (* em16 -mini816 ... (this module's head) *)
+  PROCEDURE Mini;
+    VAR i, n, k, flashSize, ramSize: INTEGER; arg, val, flash, rom: EmLoad.Path; noWrite: BOOLEAN;
+  BEGIN n := Env.ArgCount(); i := 1; flash[0] := 0X; rom[0] := 0X; noWrite := FALSE;
+    flashSize := 80000H; ramSize := 80000H;
+    WHILE ~bad & (i < n) DO Env.Arg(i, arg);
+      IF (i + 1 < n) & (Equal(arg, "-flash") OR Equal(arg, "-rom") OR Equal(arg, "-flashsize")
+          OR Equal(arg, "-ramsize") OR Equal(arg, "-iostretch") OR Equal(arg, "-openbus")
+          OR Equal(arg, "-cpuclk") OR Equal(arg, "-scca") OR Equal(arg, "-sccb")) THEN
+        INC(i); Env.Arg(i, val);
+        IF Equal(arg, "-flash") THEN flash := val
+        ELSIF Equal(arg, "-rom") THEN rom := val
+        ELSIF Equal(arg, "-flashsize") THEN flashSize := Size(val);
+          IF (flashSize # 20000H) & (flashSize # 40000H) & (flashSize # 80000H) THEN
+            ErrStr("-flashsize: 128K, 256K or 512K, not "); ErrStr(val); EmHost.Ln(EmHost.err); bad := TRUE
+          END
+        ELSIF Equal(arg, "-ramsize") THEN ramSize := Size(val);
+          IF (ramSize # 20000H) & (ramSize # 80000H) THEN
+            ErrStr("-ramsize: 128K or 512K, not "); ErrStr(val); EmHost.Ln(EmHost.err); bad := TRUE
+          END
+        ELSIF Equal(arg, "-iostretch") THEN k := Number(val);
+          IF k < 1 THEN ErrStr("-iostretch: CPU clocks, 1 or more"); EmHost.Ln(EmHost.err); bad := TRUE
+          ELSE EmMini816.SetIoClks(k)
+          END
+        ELSIF Equal(arg, "-openbus") THEN EmMini816.SetOpenBus(Number(val))
+        ELSIF Equal(arg, "-cpuclk") THEN k := Hertz(val);
+          IF k <= 0 THEN ErrStr("-cpuclk: hz (7.3728M), not "); ErrStr(val); EmHost.Ln(EmHost.err); bad := TRUE
+          ELSE EmMini816.SetCpuClock(k)
+          END
+        ELSIF Equal(arg, "-scca") THEN SccHost(EmZ85C30.A, val)
+        ELSE SccHost(EmZ85C30.B, val)
+        END
+      ELSIF Equal(arg, "-mini816") THEN
+      ELSIF Equal(arg, "-noflashwrite") THEN noWrite := TRUE
+      ELSIF Equal(arg, "-turbo") THEN EmMini816.Turbo
+      ELSIF Equal(arg, "-t") THEN EmW816.SetTrace(TRUE)
+      ELSE ErrStr("Invalid with -mini816: option '"); ErrStr(arg); ErrStr("'"); EmHost.Ln(EmHost.err); bad := TRUE
+      END;
+      INC(i)
+    END;
+    IF ~bad THEN
+      EmMini816.SetRam(ramSize); EmFlash.SetSize(flashSize); EmFlash.Protect(noWrite);
+      IF (flash[0] # 0X) & ~EmFlash.Open(flash) THEN
+        ErrStr("Cannot open the flash: "); ErrStr(flash); EmHost.Ln(EmHost.err); bad := TRUE
+      END;
+      IF (rom[0] # 0X) & ~EmFlash.LoadTop(rom) THEN
+        ErrStr("Cannot load the ROM (at most the flash's size): "); ErrStr(rom); EmHost.Ln(EmHost.err); bad := TRUE
+      END
+    END;
+    IF bad THEN EmHost.Exit(1) END;
+    EmHost.ClockStart; EmMini816.Reset; CpuThread;
+    IF EmHost.coutHex THEN EmHost.Report(EmMini816.now, 1) ELSE EmHost.Report(EmMini816.now, 0) END
+  END Mini;
+
   PROCEDURE Main;
     VAR index, n, i, v: INTEGER; arg: EmLoad.Path; cycles: LONGINT;
   BEGIN
@@ -296,14 +391,16 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
     n := Env.ArgCount();
     (* -fpga first, so that the memory has its size before files are loaded *)
     (* and -wd1793 and -cpu l28, so that floppies go to the right controller *)
-    wantFpga := FALSE; wantL28 := FALSE; sysclk := 0;
+    wantFpga := FALSE; wantL28 := FALSE; wantMini := FALSE; sysclk := 0;
     FOR i := 1 TO n - 1 DO Env.Arg(i, arg);
-      IF Equal(arg, "-fpga") THEN wantFpga := TRUE ELSIF Equal(arg, "-wd1793") THEN EmSoC.UseWD1793
+      IF Equal(arg, "-mini816") THEN wantMini := TRUE
+      ELSIF Equal(arg, "-fpga") THEN wantFpga := TRUE ELSIF Equal(arg, "-wd1793") THEN EmSoC.UseWD1793
       ELSIF Equal(arg, "-sysclk") & (i + 1 < n) THEN Env.Arg(i + 1, arg); sysclk := Hertz(arg)
       ELSIF Equal(arg, "-cpu") & (i + 1 < n) THEN Env.Arg(i + 1, arg);
         wantL28 := Equal(arg, "l28") OR Equal(arg, "L28") OR Equal(arg, "c19") OR Equal(arg, "C19")
       END
     END;
+    IF wantMini THEN Mini; EmHost.Exit(0) END;
     EmMem.SetClock(Cycles);
     IF wantFpga THEN EmHost.SetClock(40500000) END;              (* the board's clock (top_tang20k.v) *)
     IF sysclk > 0 THEN EmHost.SetClock(sysclk) END;

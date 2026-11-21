@@ -8,6 +8,7 @@
    its disk image files (WD1793.cpp) and the clock and statistics of
    main.cpp, kept in C because Oberon has no access to them. */
 
+#include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <stdint.h>
@@ -19,6 +20,10 @@
 #include <time.h>
 #include <unistd.h>
 #include <limits.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <sys/socket.h>
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
@@ -42,9 +47,23 @@ static void sigint_handler(int sig) {
     _exit(130);
 }
 
+/* The Mini816's buttons: SIGUSR1 presses NMI, SIGUSR2 reset */
+static volatile sig_atomic_t buttons;
+
+static void sigusr1_handler(int sig) { (void)sig; buttons |= 1; }
+static void sigusr2_handler(int sig) { (void)sig; buttons |= 2; }
+
 void EmHost__Init(void) {
     signal(SIGPIPE, SIG_IGN);
     signal(SIGINT, sigint_handler);
+    signal(SIGUSR1, sigusr1_handler);
+    signal(SIGUSR2, sigusr2_handler);
+}
+
+int EmHost__Buttons(void) {
+    int b = buttons;
+    buttons = 0;
+    return b;
 }
 
 void EmHost__Write(int stream, const char *buf, int len, int n) {
@@ -172,8 +191,9 @@ void EmHost__Report(int64_t cycles, int hex) {
 
 /* --- disk images --- */
 
-/* 0 and 1 the floppy drives, 2 the SCSI disk, 3 the SD card */
-#define NDISK 4
+/* 0 and 1 the floppy drives, 2 the SCSI disk, 3 the SD card, 4 the
+   Mini816's flash (EmFlash) */
+#define NDISK 5
 static FILE *disk[NDISK];
 
 static void cname(const char *name, int len, char *path, int size) {
@@ -215,4 +235,98 @@ int EmHost__DiskSize(int drive) {
     fseek(disk[drive], 0, SEEK_END);
     n = ftell(disk[drive]);
     return n > 0x7FFFFFFF ? 0x7FFFFFFF : (int)n;
+}
+
+/* --- serial ports: the Mini816's SCC channels (EmZ85C30) --- */
+
+/* "pty": a pseudo-terminal, its slave kept open (raw) so that the master
+   reads no EIO before a terminal opens it; "tcp:PORT": a socket on
+   127.0.0.1 that one client at a time connects to. Both non-blocking. */
+#define NPORT 2
+static int port_fd[NPORT] = {-1, -1}, port_listen[NPORT] = {-1, -1}, port_slave[NPORT] = {-1, -1};
+static char port_name[NPORT][256];
+
+int EmHost__PortOpen(int n, const char *spec, int len) {
+    char s[256];
+    if (n < 0 || n >= NPORT) return 0;
+    cname(spec, len, s, sizeof(s));
+    if (strcmp(s, "pty") == 0) {
+        struct termios t;
+        char *name;
+        int m = posix_openpt(O_RDWR | O_NOCTTY);
+        if (m < 0 || grantpt(m) != 0 || unlockpt(m) != 0 || !(name = ptsname(m))) return 0;
+        snprintf(port_name[n], sizeof(port_name[n]), "%s", name);
+        port_slave[n] = open(name, O_RDWR | O_NOCTTY);
+        if (port_slave[n] >= 0 && tcgetattr(port_slave[n], &t) == 0) {
+            cfmakeraw(&t);
+            tcsetattr(port_slave[n], TCSANOW, &t);
+        }
+        fcntl(m, F_SETFL, fcntl(m, F_GETFL) | O_NONBLOCK);
+        port_fd[n] = m;
+        return 1;
+    }
+    if (strncmp(s, "tcp:", 4) == 0) {
+        struct sockaddr_in a;
+        int one = 1, fd = socket(AF_INET, SOCK_STREAM, 0);
+        if (fd < 0) return 0;
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+        memset(&a, 0, sizeof(a));
+        a.sin_family = AF_INET;
+        a.sin_port = htons((unsigned short)atoi(s + 4));
+        a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        if (bind(fd, (struct sockaddr *)&a, sizeof(a)) != 0 || listen(fd, 1) != 0) { close(fd); return 0; }
+        fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+        port_listen[n] = fd;
+        snprintf(port_name[n], sizeof(port_name[n]), "127.0.0.1:%d", atoi(s + 4));
+        return 1;
+    }
+    return 0;
+}
+
+static void port_accept(int n) {
+    if (port_listen[n] >= 0 && port_fd[n] < 0) {
+        int one = 1, c = accept(port_listen[n], NULL, NULL);
+        if (c >= 0) {
+            fcntl(c, F_SETFL, fcntl(c, F_GETFL) | O_NONBLOCK);
+            setsockopt(c, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+            port_fd[n] = c;
+        }
+    }
+}
+
+/* a client gone: wait for the next */
+static void port_lost(int n) {
+    if (port_listen[n] >= 0 && port_fd[n] >= 0) { close(port_fd[n]); port_fd[n] = -1; }
+}
+
+int EmHost__PortRead(int n) {
+    unsigned char b;
+    ssize_t r;
+    if (n < 0 || n >= NPORT) return -1;
+    port_accept(n);
+    if (port_fd[n] < 0) return -1;
+    r = read(port_fd[n], &b, 1);
+    if (r == 1) return b;
+    if (r == 0 || (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)) port_lost(n);
+    return -1;
+}
+
+void EmHost__PortWrite(int n, int ch) {
+    unsigned char b = (unsigned char)ch;
+    if (n < 0 || n >= NPORT) return;
+    port_accept(n);
+    if (port_fd[n] >= 0 && write(port_fd[n], &b, 1) < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
+        port_lost(n);
+}
+
+int EmHost__PortConnected(int n) {
+    if (n < 0 || n >= NPORT) return 0;
+    port_accept(n);
+    return port_fd[n] >= 0;
+}
+
+void EmHost__PortName(int n, char *s, int len) {
+    if (len <= 0) return;
+    s[0] = 0;
+    if (n >= 0 && n < NPORT) { strncpy(s, port_name[n], (size_t)len - 1); s[len - 1] = 0; }
 }

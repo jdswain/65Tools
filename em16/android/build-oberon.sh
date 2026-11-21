@@ -14,7 +14,7 @@ RT=$(cd "$(dirname "$OC")/../runtime/android" && pwd)
 NDK=${ANDROID_NDK_HOME:-$(ls -d "$HOME"/Library/Android/sdk/ndk/* | sort -V | tail -1)}
 CLANG=$NDK/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang
 TRIPLE=aarch64-linux-android26
-MODS="EmHost EmSym EmUART EmVIA EmFDC Em82077 EmSCSI EmEth EmL28 EmVideo EmLCD EmCore EmSDRAM EmSCC EmADB EmBlit EmSD EmPower EmRTC EmDMA EmTimer EmSoC EmMem EmCPU EmLoad EmW816 EmHarte Em16"
+MODS="EmHost EmSym EmUART EmVIA EmFDC Em82077 EmSCSI EmEth EmL28 EmVideo EmLCD EmCore EmSDRAM EmSCC EmADB EmBlit EmSD EmPower EmRTC EmDMA EmTimer EmSoC EmMem EmCPU EmLoad EmW816 EmFlash Em65C22 EmZ85C30 EmMini816 EmHarte Em16"
 mkdir -p "$OBJ"
 cp "$RT/Errors.Mod" "$RT/Env.Mod" "$RT/Files.Mod" "$OBJ/"
 for m in $MODS; do cp "$HERE/../src/$m.Mod" "$OBJ/"; done

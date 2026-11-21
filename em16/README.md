@@ -76,9 +76,13 @@ This port is a derivative of it and under the same licence.
     EmEth     the ENC424J600 Ethernet controller, on -net's network
     EmRTC     the rev B's DS12C887 real-time clock (-rtc, -rtctime)
 
-    and the W65C816S chip:
+    and for the Mini816 (-mini816):
 
+    EmMini816 its memory map, the CPLD's decode and I/O cycles, time
     EmW816    the W65C816S, a bus cycle at a time; -harte816 checks it
+    EmFlash   the SST39SF040 flash and its commands, in a file
+    Em65C22   the W65C22 VIA: ports, handshakes, timers, shift register
+    EmZ85C30  the Z85C30 SCC: two channels on the console, a pty or TCP
 
 What Oberon cannot reach is in C: `EmNet_rt.c` (the network: the frames
 waiting, UDP), `EmNat.c` (the network: em16's own NAT), `EmHost_rt.c`
@@ -475,19 +479,51 @@ and a read by pseudo-DMA.
 the board (`as -o X.mem`, the image made a binary for `-bootrom`;
 their closing `bra halt` replaced by STP to end the run).
 
-## The W65C816S (EmW816)
+## The Mini816 (-mini816)
 
-`EmW816` is the W65C816S chip, for boards built on one: each
-instruction makes its bus cycles in the order of WDC's data sheet, each
-with its address, its kind (VDA, VPA, VPB, a write, MLB) and its data,
-the dummy cycles included (an internal operation, and the emulation
-mode's dummy write of a read-modify-write, have neither VDA nor VPA).
-`em16 -harte816 dir [-show n] [names]` checks it against the
-SingleStepTests vectors cycle by cycle, their addresses, kinds and
-data, then the registers and memory, showing n failures a file in full
-(1); with the vectors of 2026-11-21 (`tools/harte816.py dir` fetches
-and converts them, about 370 MB), all 5,080,400 pass. NMI is a falling
-edge, IRQ a level; ABORT is left out.
+    em16 -mini816 [-t] [-flash file] [-rom file] [-flashsize 128K|256K|512K] [-ramsize 128K|512K]
+                  [-noflashwrite] [-iostretch n] [-openbus v] [-cpuclk hz] [-turbo]
+                  [-scca console|pty|tcp:PORT|none] [-sccb console|pty|tcp:PORT|none]
+
+`-mini816` emulates the Mini816, a W65C816S board
+(`../../../Hardware/Mini816`), as its `docs/em16-profile.md` describes
+it, instead of the other machines: its own CPU, memory map and devices,
+kept to real time (7.3728 MHz) but with `-turbo`.
+
+- The processor is `EmW816`, the W65C816S chip: each instruction makes
+  its bus cycles in the order of WDC's data sheet, each with its
+  address, its kind (VDA, VPA, VPB, a write, MLB) and its data, the
+  dummy cycles included (an internal operation, and the emulation
+  mode's dummy write of a read-modify-write, have neither VDA nor VPA
+  and select nothing on the board). `em16 -harte816 dir [-show n]
+  [names]` checks it against the SingleStepTests vectors cycle by cycle,
+  their addresses, kinds and data, then the registers and memory; with
+  the vectors of 2026-11-21 (`tools/harte816.py dir` fetches and
+  converts them, about 370 MB), all 5,080,400 pass. NMI is a falling
+  edge, IRQ a level; ABORT is left out, as the board ties it high. `-t`
+  traces each instruction to standard error.
+- The memory map is the CPLD's: bank bits 0-3 only, RAM in banks
+  $00-$07 below $00:C000, the I/O page at $00:C000-$00:CFFF (each access
+  with VDA or VPA stretched to `-iostretch` CPU clocks, 8), the flash's
+  top 12K at $00:D000-$00:FFFF and the flash in banks $08-$0F.
+  Unselected addresses read `-openbus` ($FF).
+- The flash (`EmFlash`) has SST's commands (byte program, sector and
+  chip erase, software ID), complete at once. `-flash` names the file
+  that holds it, each change written through as a disk image's is (a
+  missing file is made, erased, at the first write); `-rom` puts an
+  image at the top, a boot ROM whose vectors are at $FFE0-$FFFF.
+- The VIA (`Em65C22`) at $C000 counts PHI2's cycles, a stretched I/O
+  cycle once; the SCC (`EmZ85C30`) at $C010 runs from PCLK, 7.3728 MHz
+  whatever `-cpuclk` is, each channel at the rate of its baud-rate
+  generator, channel A on the console and channel B on `-sccb`'s host
+  (a pty whose name em16 prints, or a socket on 127.0.0.1). Its CTS is
+  asserted while a host is connected; RTS is not passed on. The SCC is
+  not reset with the CPU, as on the board.
+- SIGUSR1 presses the NMI button, SIGUSR2 reset (the CPU, the VIA and
+  the TIM-Bus cards, not the SCC). STP ends the run.
+
+Not there yet: the TMS9118 at $C020 (it reads the open bus), the keyboard
+and joystick (port A reads $FF), the SD card on port B and the sound.
 
 ## Speed
 
@@ -527,6 +563,16 @@ registers, the index port, the RAM through a mirror, two updates over
 midnight with UIP seen, the update interrupt and register C, BCD with
 SET to 2100-01-01 (the century carried), 12-hour mode, the periodic
 flag; then `-rtc` with no file (a new module, started) and again (kept).
+`test/mini816.sh` boots `test/mini816.s` on `-mini816`: RAM banks and
+their mirror, the boot window, the open bus, the flash's ID, a byte
+programmed twice and a sector erased (the file then checked), the
+VIA's timer 2, timer 1 counting PHI2 (27 between two reads, the I/O
+cycles stretched but counted once), timer 1 in free run with PB7, the
+SCC's baud-rate generator interrupting with RR3 and RR2 B's status,
+channel A receiving, WAI with I = 1 ended by an IRQ, and WAI ended by
+an NMI (SIGUSR1). `test/mini816b.sh` puts channel B on a socket
+(`-sccb tcp:PORT`), and a client checks that `test/mini816b.s` echoes
+its text no faster than 9600 baud.
 `test/hd.sh` runs a 20 MB disk with `-scsitiming` (`test/hd.s`, polled):
 from power on, the selection answered at 1 s and UNIT ATTENTION, NOT
 READY (02 04 01) until the spin-up at 5 s; then reads and a write timed

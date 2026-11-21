@@ -86,7 +86,7 @@ MODULE EmHost; (* The host side of em16: standard output and error, the
   END FileExists;
 
   (* Disk images, by number: 0 and 1 the floppy drives, 2 the SCSI disk,
-     3 the SD card.
+     3 the SD card, 4 the Mini816's flash.
      Open returns 0 failed, 1 read-write, 2 read-only. *)
   PROCEDURE DiskOpen*(drive: INTEGER; name: ARRAY OF CHAR): INTEGER;
   BEGIN RETURN 0
@@ -117,6 +117,35 @@ MODULE EmHost; (* The host side of em16: standard output and error, the
 
   PROCEDURE NetSend*(VAR buf: ARRAY OF BYTE; n: INTEGER);
   END NetSend;
+
+  (* The Mini816's serial ports (EmZ85C30's channels), by number: Open
+     "pty" (a pseudo-terminal, named by PortName) or "tcp:PORT" (a socket
+     on 127.0.0.1 a client connects to), 1 if it opened; Read a byte
+     waiting, -1: none; Connected 1 while there is a client (a pty
+     always). *)
+  PROCEDURE PortOpen*(n: INTEGER; spec: ARRAY OF CHAR): INTEGER;
+  BEGIN RETURN 0
+  END PortOpen;
+
+  PROCEDURE PortRead*(n: INTEGER): INTEGER;
+  BEGIN RETURN -1
+  END PortRead;
+
+  PROCEDURE PortWrite*(n, ch: INTEGER);
+  END PortWrite;
+
+  PROCEDURE PortConnected*(n: INTEGER): INTEGER;
+  BEGIN RETURN 0
+  END PortConnected;
+
+  PROCEDURE PortName*(n: INTEGER; VAR s: ARRAY OF CHAR);
+  END PortName;
+
+  (* The Mini816's buttons pressed since the last call: 1 NMI (SIGUSR1),
+     2 reset (SIGUSR2) *)
+  PROCEDURE Buttons*(): INTEGER;
+  BEGIN RETURN 0
+  END Buttons;
 
   (* Run the CPU (Em16.CpuThread) on a second thread and the window of
      the video display or the LCD on this one, until it is closed. *)

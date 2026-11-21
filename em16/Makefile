@@ -24,7 +24,7 @@ BINDIR := ../bin
 TARGET := $(BINDIR)/em16
 
 # In order of import
-MODS := EmHost EmSym EmUART EmVIA EmFDC Em82077 EmSCSI EmEth EmL28 EmVideo EmLCD EmCore EmSDRAM EmSCC EmADB EmBlit EmSD EmPower EmRTC EmDMA EmTimer EmSoC EmMem EmCPU EmLoad EmW816 EmHarte Em16
+MODS := EmHost EmSym EmUART EmVIA EmFDC Em82077 EmSCSI EmEth EmL28 EmVideo EmLCD EmCore EmSDRAM EmSCC EmADB EmBlit EmSD EmPower EmRTC EmDMA EmTimer EmSoC EmMem EmCPU EmLoad EmW816 EmFlash Em65C22 EmZ85C30 EmMini816 EmHarte Em16
 OBJS := $(MODS:%=$(OBJDIR)/%.o)
 CSRC := $(SRCDIR)/EmHost_rt.c $(SRCDIR)/EmNet_rt.c $(SRCDIR)/EmNat.c $(SRCDIR)/EmFont.c mac/EmCocoa.m mac/EmVmnet.c
 
@@ -76,7 +76,9 @@ $(OBJDIR)/EmLoad.o: $(OBJDIR)/EmCPU.o
 $(OBJDIR)/EmCore.o: $(OBJDIR)/EmSym.o
 $(OBJDIR)/EmHarte.o: $(OBJDIR)/EmCore.o $(OBJDIR)/EmW816.o
 $(OBJDIR)/EmW816.o: $(OBJDIR)/EmHost.o
-$(OBJDIR)/Em16.o: $(OBJDIR)/EmLoad.o $(OBJDIR)/EmHarte.o $(OBJDIR)/EmSoC.o $(OBJDIR)/Em82077.o $(OBJDIR)/EmSCSI.o $(OBJDIR)/EmSD.o $(OBJDIR)/EmEth.o $(OBJDIR)/EmRTC.o
+$(OBJDIR)/EmFlash.o $(OBJDIR)/EmZ85C30.o: $(OBJDIR)/EmHost.o
+$(OBJDIR)/EmMini816.o: $(OBJDIR)/EmHost.o $(OBJDIR)/EmW816.o $(OBJDIR)/EmFlash.o $(OBJDIR)/Em65C22.o $(OBJDIR)/EmZ85C30.o
+$(OBJDIR)/Em16.o: $(OBJDIR)/EmLoad.o $(OBJDIR)/EmHarte.o $(OBJDIR)/EmMini816.o $(OBJDIR)/EmSoC.o $(OBJDIR)/Em82077.o $(OBJDIR)/EmSCSI.o $(OBJDIR)/EmSD.o $(OBJDIR)/EmEth.o $(OBJDIR)/EmRTC.o
 
 $(TARGET): $(OBJS) $(CSRC) | $(BINDIR)
 	cd $(OBJDIR) && $(OC) -o $(abspath $(TARGET)) Em16.Mod \
@@ -96,6 +98,8 @@ test: $(TARGET)
 	@sh test/banked.sh
 	@sh test/core832.sh
 	@sh test/hd.sh
+	@sh test/mini816.sh
+	@sh test/mini816b.sh
 
 clean:
 	rm -rf $(OBJDIR)
