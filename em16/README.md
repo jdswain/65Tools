@@ -84,6 +84,7 @@ This port is a derivative of it and under the same licence.
     Em65C22   the W65C22 VIA: ports, handshakes, timers, shift register
     EmZ85C30  the Z85C30 SCC: two channels on the console, a pty or TCP
     EmTMS9918 the TMS9118 VDP: its modes and sprites, a line at a time
+    EmSound   the speaker: PB7 (and CB2) sampled, to the host or a WAV
 
 What Oberon cannot reach is in C: `EmNet_rt.c` (the network: the frames
 waiting, UDP), `EmNat.c` (the network: em16's own NAT), `EmHost_rt.c`
@@ -486,6 +487,7 @@ their closing `bra halt` replaced by STP to end the run).
                   [-noflashwrite] [-iostretch n] [-openbus v] [-cpuclk hz] [-turbo]
                   [-scca console|pty|tcp:PORT|none] [-sccb console|pty|tcp:PORT|none]
                   [-sd file] [-sdcd low|high] [-video] [-joyarrows] [-key col,row] [-fbdump ppm]
+                  [-nosound] [-soundcb2] [-wav file]
 
 `-mini816` emulates the Mini816, a W65C816S board
 (`../../../Hardware/Mini816`), as its `docs/em16-profile.md` describes
@@ -558,12 +560,22 @@ kept to real time (7.3728 MHz) but with `-turbo`.
   with `-video` leaves the window and its last frame; closing the
   window ends em16.
 
+- The speaker (`EmSound`) is PB7 as port B drives it (timer 1's square
+  wave, ORB's bit 7, or pulled up), through a transistor: each change
+  taken at the wall's time, the level averaged over each sample (48 kHz)
+  and passed through a high pass (about 30 Hz), as the speaker passes
+  it, so that a level held is silent. `-soundcb2` makes CB2 a second
+  voice (the shift register's, on a header on the board: whether it is
+  wired is open). It goes to the Mac's sound output (`mac/EmAudio.c`,
+  an AudioQueue some 20-80 ms behind), but with `-turbo` or `-nosound`;
+  `-wav` records it as a WAV file in the board's time, with `-turbo`
+  too.
+
 `test/mini816kbd.s` is a boot ROM to try the window with: it shows the
 matrix, a box for each key that fills while it is down, and a ball the
 joystick moves (`as -o kbd.bin test/mini816kbd.s`, then `em16 -mini816
--video -rom kbd.bin`).
-
-Not there yet: the sound.
+-video -rom kbd.bin`); `test/mini816snd.s` sounds the speaker
+(`em16 -mini816 -soundcb2 -rom snd.bin`).
 
 ## Speed
 
@@ -624,6 +636,11 @@ VIA's timer 1, 5S and its number, C (a transparent sprite's too, not a
 fifth's); the keyboard scanned with keys held by `-key`; then seven
 display modes on VRAM from a xorshift, each frame (`-fbdump`) compared
 pixel for pixel with a model of the TMS9918A in the script.
+`test/mini816snd.sh` records `test/mini816snd.s` (`-wav`): timer 1 in
+free run on PB7 at 1000.11 Hz, PB7 toggled by the CPU at 500.19 Hz and
+the shift register in free run on CB2 at 2003.48 Hz (a bit 2 x (N + 2)
+cycles), each found in the file for its 250 ms at its pitch to 0.2%,
+silence between, and CB2's only with `-soundcb2`.
 `test/hd.sh` runs a 20 MB disk with `-scsitiming` (`test/hd.s`, polled):
 from power on, the selection answered at 1 s and UNIT ATTENTION, NOT
 READY (02 04 01) until the spin-up at 5 s; then reads and a write timed

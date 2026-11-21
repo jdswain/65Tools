@@ -13,9 +13,9 @@ MODULE Em65C22; (* A W65C22N VIA, the Mini816's: its ports and their
    free run, and drives PB7 when ACR bit 7 is set: low from the write of
    T1C-H to the time-out in one-shot mode, inverted at each time-out in
    free run. Timer 2 times out once, or counts PB6's falling edges. The
-   shift register runs at T2's low byte + 2 cycles a bit (and in free run
-   repeats its byte), at 2 cycles a bit under PHI2, or on CB1's edges; it
-   shifts out on CB2, MSB first, or shifts CB2 in.
+   shift register runs at 2 x (T2's low byte + 2) cycles a bit (and in
+   free run repeats its byte), at 2 cycles a bit under PHI2, or on CB1's
+   edges; it shifts out on CB2, MSB first, or shifts CB2 in.
 
    The device keeps itself up to date when it is read or written and
    when Tick is called, which the board does between instructions. *)
@@ -109,19 +109,22 @@ MODULE Em65C22; (* A W65C22N VIA, the Mini816's: its ports and their
 
   (* --- the timers and the shift register, brought up to now --- *)
 
-  (* T2's period as the shift register's clock *)
+  (* a bit's time, a period of CB1's shift clock: 2 cycles under PHI2,
+     else T2's low byte + 2 low and as long high (W65C22 data sheet,
+     figures 2-9 and 2-11) *)
   PROCEDURE SrPeriod(): INTEGER;
     VAR m, p: INTEGER;
   BEGIN m := SrMode();
-    IF (m = 2) OR (m = 6) THEN p := 2 ELSE p := t2l + 2 END;
+    IF (m = 2) OR (m = 6) THEN p := 2 ELSE p := 2 * (t2l + 2) END;
     RETURN p
   END SrPeriod;
 
+  (* the first bit as CB1 first falls, half a period on *)
   PROCEDURE SrStart(now: LONGINT);
     VAR m: INTEGER;
   BEGIN m := SrMode(); ifr := AND(ifr, 0FFH - fSR);
     IF (m = 0) OR (m = 3) OR (m = 7) THEN srN := -1; srNext := never   (* off, or clocked by CB1 *)
-    ELSE srN := 0; srNext := now + SrPeriod()
+    ELSE srN := 0; srNext := now + SrPeriod() DIV 2
     END;
     IF (m = 3) OR (m = 7) THEN srN := 0 END
   END SrStart;

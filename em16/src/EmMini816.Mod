@@ -46,9 +46,14 @@ MODULE EmMini816; (* The Mini816 (../../../Hardware/Mini816, its
    the selected column's rows read on port A, 0 for a key down: columns
    0-7 the 64 keys, 15 the joystick (rows 0-4 up, down, left, right,
    fire), 8-14 nothing. Key presses them (the window, -key); a button
-   also ejects or inserts the SD card (EmHost.Buttons' 4). *)
+   also ejects or inserts the SD card (EmHost.Buttons' 4).
 
-  IMPORT EmHost, EmW816, EmFlash, Em65C22, EmZ85C30, EmSD, EmTMS9918;
+   The speaker (EmSound) is PB7 as port B drives it, and CB2 if it is
+   started so; their changes are passed on at the wall's time (now, less
+   the PHI2 cycles since the change), and the samples brought up to now
+   as the run goes. *)
+
+  IMPORT EmHost, EmW816, EmFlash, Em65C22, EmZ85C30, EmSD, EmTMS9918, EmSound;
 
   CONST
     pclk* = 7372800;              (* the SCC's PCLK, never stretched *)
@@ -223,11 +228,13 @@ MODULE EmMini816; (* The Mini816 (../../../Hardware/Mini816, its
   BEGIN RETURN 0BFH + miso * 40H
   END PinsB;
 
-  (* port B's outputs or CA2 changed: the keyboard's column, the SD
-     card's SPI *)
+  (* port B's outputs, CA2 or CB2 changed (at t, PHI2's): the keyboard's
+     column, the speaker, the SD card's SPI *)
   PROCEDURE Lines(pb, ca2, cb2: INTEGER; t: LONGINT);
     VAR was: INTEGER;
-  BEGIN column := pb MOD 8 + ca2 * 8; was := sdPins; sdPins := pb;
+  BEGIN column := pb MOD 8 + ca2 * 8;
+    IF EmSound.on THEN EmSound.Set(0, pb DIV 80H, now - (phi2 - t)); EmSound.Set(1, cb2, now - (phi2 - t)) END;
+    was := sdPins; sdPins := pb;
     IF ODD(pb DIV 20H) THEN                          (* CS high *)
       IF ~ODD(was DIV 20H) THEN EmSD.Select(FALSE) END;
       miso := 1
@@ -282,11 +289,13 @@ MODULE EmMini816; (* The Mini816 (../../../Hardware/Mini816, its
   BEGIN nextButtons := now; nextPace := now; nextTick := now;
     WHILE ~EmW816.stopped & ~quit DO EmW816.Step;
       IF now >= nextTick THEN
-        EmTMS9918.Tick(Vclk()); VdpLine; Em65C22.Tick(phi2); EmZ85C30.Tick(Pclk()); nextTick := now + 64
+        EmTMS9918.Tick(Vclk()); VdpLine; Em65C22.Tick(phi2); EmZ85C30.Tick(Pclk()); nextTick := now + 64;
+        IF EmSound.on THEN EmSound.Advance(now) END
       END;
       IF now >= nextButtons THEN Buttons END;
       IF ~turbo & (now >= nextPace) THEN EmHost.Pace(now, cpuHz); nextPace := now + cpuHz DIV 1000 END
     END;
+    IF EmSound.on THEN EmSound.Advance(now); EmSound.Finish END;
     EmHost.DrainAll
   END Run;
 

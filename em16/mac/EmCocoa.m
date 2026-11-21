@@ -15,6 +15,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <math.h>
+#include <unistd.h>
 
 /* the Oberon side */
 extern uint8_t EmVideo__mem[];
@@ -572,7 +573,10 @@ static int pad_bits(void) {
     if (mode == modeVideo) [(VideoView *)view releaseMouse];
     [timer invalidate];
     timer = nil;
-    if (mode == modeMini) EmMini816__Stop(); else EmCPU__Stop();
+    if (mode == modeMini) {   /* the run ended, and with it the WAV file (EmSound.Finish) */
+        EmMini816__Stop();
+        for (int i = 0; i < 200 && !cpu_done; i++) usleep(5000);
+    } else EmCPU__Stop();
     [NSApp terminate:nil];
 }
 

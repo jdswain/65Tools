@@ -159,6 +159,15 @@ MODULE EmHost; (* The host side of em16: standard output and error, the
   PROCEDURE RunMini*;
   END RunMini;
 
+  (* The host's sound (mac/EmAudio.c): Start it, mono 16-bit at rate,
+     1 if it started; Put a sample, played some 20 ms on *)
+  PROCEDURE SoundStart*(rate: INTEGER): INTEGER;
+  BEGIN RETURN 0
+  END SoundStart;
+
+  PROCEDURE SoundPut*(s: INTEGER);
+  END SoundPut;
+
   PROCEDURE StopDisplay*;
   END StopDisplay;
 

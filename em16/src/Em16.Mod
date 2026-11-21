@@ -11,6 +11,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
         [-noflashwrite] [-iostretch n] [-openbus v] [-cpuclk hz] [-turbo]
         [-scca console|pty|tcp:PORT|none] [-sccb console|pty|tcp:PORT|none]
         [-sd file] [-sdcd low|high] [-video] [-joyarrows] [-key col,row] [-fbdump ppm]
+        [-nosound] [-soundcb2] [-wav file]
 
    On the default machine and under -fpga the floppy disks are the
    82077AA's, or the WD1793's with -wd1793, and -scsi puts a disk at ID 0
@@ -41,7 +42,10 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
    with the card in (low). -video opens the VDP's window, whose keys are
    the keyboard's, the keypad and a game controller the joystick (with
    -joyarrows the arrows and right Option too); -key holds a key of the
-   matrix down from power on; -fbdump writes the VDP's last frame.
+   matrix down from power on; -fbdump writes the VDP's last frame. The
+   speaker (PB7) is the host's sound, but with -turbo or -nosound;
+   -soundcb2 makes CB2 a second voice, -wav records the sound as a WAV
+   file, in the board's time (with -turbo too).
    SIGUSR1 presses its NMI button, SIGUSR2 its reset.
 
    A file is an ELF executable. Oberon modules are not loaded by em16:
@@ -53,7 +57,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
      EmUART EmVIA EmFDC EmL28 EmVideo EmLCD  the devices *)
 
   IMPORT Env, Files, EmHost, EmMem, EmCPU, EmLoad, EmFDC, Em82077, EmSCSI, EmSD, EmEth, EmRTC, EmADB, EmL28, EmVideo, EmLCD, EmCore, EmSDRAM, EmSoC, EmHarte,
-    EmW816, EmFlash, EmZ85C30, EmMini816, EmTMS9918;
+    EmW816, EmFlash, EmZ85C30, EmMini816, EmTMS9918, EmSound;
 
   VAR
     trace, videoEnabled, testPattern, consoleMode, wantFpga, wantL28, wantMini, bad: BOOLEAN;
@@ -361,14 +365,17 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
 
   (* em16 -mini816 ... (this module's head) *)
   PROCEDURE Mini;
-    VAR i, n, k, flashSize, ramSize: INTEGER; arg, val, flash, rom, dump: EmLoad.Path; noWrite, video: BOOLEAN;
+    VAR i, n, k, flashSize, ramSize: INTEGER; arg, val, flash, rom, dump: EmLoad.Path;
+      noWrite, video, turbo, sound, cb2: BOOLEAN;
   BEGIN n := Env.ArgCount(); i := 1; flash[0] := 0X; rom[0] := 0X; dump[0] := 0X; noWrite := FALSE; video := FALSE;
+    turbo := FALSE; sound := TRUE; cb2 := FALSE;
     flashSize := 80000H; ramSize := 80000H;
     WHILE ~bad & (i < n) DO Env.Arg(i, arg);
       IF (i + 1 < n) & (Equal(arg, "-flash") OR Equal(arg, "-rom") OR Equal(arg, "-flashsize")
           OR Equal(arg, "-ramsize") OR Equal(arg, "-iostretch") OR Equal(arg, "-openbus")
           OR Equal(arg, "-cpuclk") OR Equal(arg, "-scca") OR Equal(arg, "-sccb")
-          OR Equal(arg, "-sd") OR Equal(arg, "-sdcd") OR Equal(arg, "-key") OR Equal(arg, "-fbdump")) THEN
+          OR Equal(arg, "-sd") OR Equal(arg, "-sdcd") OR Equal(arg, "-key") OR Equal(arg, "-fbdump")
+          OR Equal(arg, "-wav")) THEN
         INC(i); Env.Arg(i, val);
         IF Equal(arg, "-flash") THEN flash := val
         ELSIF Equal(arg, "-rom") THEN rom := val
@@ -393,6 +400,8 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
         ELSIF Equal(arg, "-sccb") THEN SccHost(EmZ85C30.B, val)
         ELSIF Equal(arg, "-sd") THEN bad := ~EmSD.Mount(val)
         ELSIF Equal(arg, "-fbdump") THEN dump := val
+        ELSIF Equal(arg, "-wav") THEN
+          IF ~EmSound.Record(val) THEN ErrStr("Cannot write "); ErrStr(val); EmHost.Ln(EmHost.err); bad := TRUE END
         ELSIF Equal(arg, "-key") THEN
           IF ~HoldKey(val) THEN ErrStr("-key: col,row (0-7 or 15, 0-7), not "); ErrStr(val); EmHost.Ln(EmHost.err); bad := TRUE END
         ELSIF Equal(val, "low") OR Equal(val, "high") THEN EmMini816.SetCardDetect(Equal(val, "low"))
@@ -400,7 +409,9 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
         END
       ELSIF Equal(arg, "-mini816") THEN
       ELSIF Equal(arg, "-noflashwrite") THEN noWrite := TRUE
-      ELSIF Equal(arg, "-turbo") THEN EmMini816.Turbo
+      ELSIF Equal(arg, "-turbo") THEN EmMini816.Turbo; turbo := TRUE
+      ELSIF Equal(arg, "-nosound") THEN sound := FALSE
+      ELSIF Equal(arg, "-soundcb2") THEN cb2 := TRUE
       ELSIF Equal(arg, "-video") THEN video := TRUE
       ELSIF Equal(arg, "-joyarrows") THEN EmMini816.JoyArrows
       ELSIF Equal(arg, "-t") THEN EmW816.SetTrace(TRUE)
@@ -418,6 +429,8 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       END
     END;
     IF bad THEN EmHost.Exit(1) END;
+    EmSound.Start(EmMini816.cpuHz, cb2, sound & ~turbo);
+    IF sound & ~turbo & ~EmSound.live THEN ErrStr("No sound: the host's did not start"); EmHost.Ln(EmHost.err) END;
     EmHost.ClockStart; EmMini816.Reset;
     IF video THEN EmTMS9918.SetRender(1); EmHost.RunMini       (* until the window closes *)
     ELSE IF dump[0] # 0X THEN EmTMS9918.SetRender(2) END; CpuThread
