@@ -1,8 +1,8 @@
 MODULE L17_IfGuard;
   (* Type tests and guards on interface values: from a global, a heap
      object's field and a parameter, NIL, and inside larger expressions.
-     Box is a base record (extension level 0). NIL IS T is TRUE, as in
-     Wirth's compiler: NIL belongs to every pointer type. *)
+     Box is a base record (extension level 0). NIL IS T is FALSE but
+     for v's own type; a guard lets NIL through. *)
   IMPORT Out, L17_IfBase, L17_IfExt;
   TYPE
     Holder = POINTER TO HolderDesc;
