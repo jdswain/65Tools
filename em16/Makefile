@@ -24,7 +24,7 @@ BINDIR := ../bin
 TARGET := $(BINDIR)/em16
 
 # In order of import
-MODS := EmHost EmSym EmUART EmVIA EmFDC Em82077 EmSCSI EmEth EmL28 EmVideo EmLCD EmCore EmSDRAM EmSCC EmADB EmBlit EmSD EmPower EmRTC EmDMA EmTimer EmSoC EmMem EmCPU EmLoad EmHarte Em16
+MODS := EmHost EmSym EmUART EmVIA EmFDC Em82077 EmSCSI EmEth EmL28 EmVideo EmLCD EmCore EmSDRAM EmSCC EmADB EmBlit EmSD EmPower EmRTC EmDMA EmTimer EmSoC EmMem EmCPU EmLoad EmW816 EmHarte Em16
 OBJS := $(MODS:%=$(OBJDIR)/%.o)
 CSRC := $(SRCDIR)/EmHost_rt.c $(SRCDIR)/EmNet_rt.c $(SRCDIR)/EmNat.c $(SRCDIR)/EmFont.c mac/EmCocoa.m mac/EmVmnet.c
 
@@ -74,7 +74,8 @@ $(OBJDIR)/EmCPU.o: $(OBJDIR)/EmMem.o $(OBJDIR)/EmSym.o
 $(OBJDIR)/EmSym.o: $(OBJDIR)/EmHost.o
 $(OBJDIR)/EmLoad.o: $(OBJDIR)/EmCPU.o
 $(OBJDIR)/EmCore.o: $(OBJDIR)/EmSym.o
-$(OBJDIR)/EmHarte.o: $(OBJDIR)/EmCore.o
+$(OBJDIR)/EmHarte.o: $(OBJDIR)/EmCore.o $(OBJDIR)/EmW816.o
+$(OBJDIR)/EmW816.o: $(OBJDIR)/EmHost.o
 $(OBJDIR)/Em16.o: $(OBJDIR)/EmLoad.o $(OBJDIR)/EmHarte.o $(OBJDIR)/EmSoC.o $(OBJDIR)/Em82077.o $(OBJDIR)/EmSCSI.o $(OBJDIR)/EmSD.o $(OBJDIR)/EmEth.o $(OBJDIR)/EmRTC.o
 
 $(TARGET): $(OBJS) $(CSRC) | $(BINDIR)

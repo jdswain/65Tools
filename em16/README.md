@@ -76,6 +76,10 @@ This port is a derivative of it and under the same licence.
     EmEth     the ENC424J600 Ethernet controller, on -net's network
     EmRTC     the rev B's DS12C887 real-time clock (-rtc, -rtctime)
 
+    and the W65C816S chip:
+
+    EmW816    the W65C816S, a bus cycle at a time; -harte816 checks it
+
 What Oberon cannot reach is in C: `EmNet_rt.c` (the network: the frames
 waiting, UDP), `EmNat.c` (the network: em16's own NAT), `EmHost_rt.c`
 (terminal modes, non-blocking standard input, signals, the clock, the
@@ -470,6 +474,20 @@ and a read by pseudo-DMA.
 `fpga/rom`'s `blttest`, `fbtest`, `texttest` and `adbtest` behave as on
 the board (`as -o X.mem`, the image made a binary for `-bootrom`;
 their closing `bra halt` replaced by STP to end the run).
+
+## The W65C816S (EmW816)
+
+`EmW816` is the W65C816S chip, for boards built on one: each
+instruction makes its bus cycles in the order of WDC's data sheet, each
+with its address, its kind (VDA, VPA, VPB, a write, MLB) and its data,
+the dummy cycles included (an internal operation, and the emulation
+mode's dummy write of a read-modify-write, have neither VDA nor VPA).
+`em16 -harte816 dir [-show n] [names]` checks it against the
+SingleStepTests vectors cycle by cycle, their addresses, kinds and
+data, then the registers and memory, showing n failures a file in full
+(1); with the vectors of 2026-11-21 (`tools/harte816.py dir` fetches
+and converts them, about 370 MB), all 5,080,400 pass. NMI is a falling
+edge, IRQ a level; ABORT is left out.
 
 ## Speed
 

@@ -248,6 +248,21 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
     EmHarte.Run(dir, names, n); EmHost.DrainAll
   END Harte;
 
+  (* em16 -harte816 dir [-show n] [opcode.mode ...]: EmW816, the chip,
+     against the SingleStepTests, cycle by cycle; n failures shown in full
+     a file (default 1) *)
+  PROCEDURE Harte816;
+    VAR dir, arg: EmLoad.Path; names: EmHarte.Names; i, n, show: INTEGER;
+  BEGIN Env.Arg(2, dir); n := 0; show := 1; i := 3;
+    WHILE i < Env.ArgCount() DO Env.Arg(i, arg);
+      IF Equal(arg, "-show") & (i + 1 < Env.ArgCount()) THEN INC(i); Env.Arg(i, arg); show := Number(arg)
+      ELSIF n < 64 THEN Env.Arg(i, names[n]); INC(n)
+      END;
+      INC(i)
+    END;
+    EmHarte.Run816(dir, names, n, show); EmHost.DrainAll
+  END Harte816;
+
   (* The SoC's text mode font: -font, or the Verilog repository's beside
      the 65Tools that bin/em16 is in. *)
   PROCEDURE LoadFont;
@@ -272,6 +287,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
   BEGIN
     IF Env.ArgCount() > 2 THEN Env.Arg(1, arg);
       IF Equal(arg, "-harte") THEN Harte; EmHost.Exit(0)
+      ELSIF Equal(arg, "-harte816") THEN Harte816; EmHost.Exit(0)
       ELSIF Equal(arg, "-bench") THEN Bench; EmHost.Exit(0)
       END
     END;

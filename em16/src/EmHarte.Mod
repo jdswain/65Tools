@@ -29,7 +29,7 @@ MODULE EmHarte; (* EmCore against the SingleStepTests (TomHarte) vectors,
    its reset too; EmCore's bus cycles drift from the core's by one now
    and then, so the counts differ by 3 or 4. *)
 
-  IMPORT Files, EmHost, EmCore;
+  IMPORT Files, EmHost, EmCore, EmW816;
 
   TYPE
     Names* = ARRAY 64, 16 OF CHAR;
@@ -44,6 +44,11 @@ MODULE EmHarte; (* EmCore against the SingleStepTests (TomHarte) vectors,
     wlog: ARRAY 256 OF INTEGER; wn: INTEGER;
     (* the bench: the result written (-1: none yet), when, the detail, the IRQ line *)
     result, detail: INTEGER; resultAt: LONGINT; irq: BOOLEAN;
+    (* -harte816: the vector's cycles; the cycles run, and the first that
+       differs (-1: none) with what it was *)
+    ecy: INTEGER;
+    eAddr, eKind, eData: ARRAY 8192 OF INTEGER;
+    ncy, bad, gAddr, gKind, gData: INTEGER;
 
   PROCEDURE Read(a: INTEGER): INTEGER;
   BEGIN RETURN mem[AND(a, 0FFFFFFH)]
@@ -253,5 +258,163 @@ MODULE EmHarte; (* EmCore against the SingleStepTests (TomHarte) vectors,
     EmHost.Int(EmHost.out, tp); Out(" passed, "); EmHost.Int(EmHost.out, tf); Out(" failed");
     EmHost.Ln(EmHost.out)
   END Run;
+
+  (* --- em16 -harte816: EmW816, the chip, against the vectors with their
+     bus cycles, as tools/harte816.py converts them (NN.m.bin, its
+     header). Each cycle is checked as it is made: its address and its
+     byte where the vector has them, its kind (VDA, VPA, VPB, a write,
+     MLB); then the cycles' count, the registers and the memory. --- *)
+
+  PROCEDURE U8(): INTEGER;
+    VAR b: BYTE;
+  BEGIN Files.ReadByte(r, b); RETURN b
+  END U8;
+
+  PROCEDURE U16(): INTEGER;
+    VAR l: INTEGER;
+  BEGIN l := U8(); RETURN l + U8() * 256
+  END U16;
+
+  PROCEDURE U32(): INTEGER;
+    VAR l: INTEGER;
+  BEGIN l := U16(); RETURN l + U16() * 10000H
+  END U32;
+
+  PROCEDURE GetRegs816(VAR g: Regs);
+  BEGIN
+    g.pc := U16(); g.s := U16(); g.p := U8(); g.a := U16(); g.x := U16();
+    g.y := U16(); g.dbr := U8(); g.d := U16(); g.pbr := U8(); g.e := U8()
+  END GetRegs816;
+
+  (* a cycle's kind as the vectors write it *)
+  PROCEDURE Kind(k: INTEGER);
+  BEGIN
+    IF ODD(k) THEN Out("d") ELSE Out("-") END;
+    IF ODD(k DIV 2) THEN Out("p") ELSE Out("-") END;
+    IF ODD(k DIV 4) THEN Out("v") ELSE Out("-") END;
+    IF ODD(k DIV 8) THEN Out("w") ELSE Out("r") END;
+    IF ODD(k DIV 16) THEN Out("l") ELSE Out("-") END
+  END Kind;
+
+  PROCEDURE ChipBus(a, k, d: INTEGER): INTEGER;
+    VAR v: INTEGER;
+  BEGIN
+    IF ODD(k DIV EmW816.wr) THEN v := d;
+      IF ODD(k) THEN mem[a] := d; IF wn < 256 THEN wlog[wn] := a END; INC(wn) END
+    ELSE v := mem[a]
+    END;
+    IF (bad < 0) & ((ncy >= ecy) OR ~ODD(eKind[ncy] DIV 64) & (a # eAddr[ncy]) OR (k # AND(eKind[ncy], 31))
+        OR ~ODD(eKind[ncy] DIV 32) & (v # eData[ncy])) THEN
+      bad := ncy; gAddr := a; gKind := k; gData := v
+    END;
+    INC(ncy); RETURN v
+  END ChipBus;
+
+  PROCEDURE RunFile816(name: ARRAY OF CHAR; VAR pass, fail: INTEGER);
+    VAR n, t, i, ni, nf, a, v, s, x, y, steps: INTEGER; ini, fin: Regs; ok: BOOLEAN;
+      fa, fv: ARRAY 64 OF INTEGER; ia: ARRAY 256 OF INTEGER;
+  BEGIN pass := 0; fail := 0;
+    f := Files.Old(name);
+    IF f = NIL THEN Out("cannot open "); Out(name); EmHost.Ln(EmHost.out)
+    ELSE
+      Files.Set(r, f, 0);
+      n := U32();
+      FOR t := 0 TO n - 1 DO
+        GetRegs816(ini); GetRegs816(fin);
+        ni := U16(); nf := U16();
+        FOR i := 0 TO ni - 1 DO v := U32(); a := AND(v, 0FFFFFFH); mem[a] := LSR(v, 24); IF i < 256 THEN ia[i] := a END END;
+        FOR i := 0 TO nf - 1 DO v := U32(); IF i < 64 THEN fa[i] := AND(v, 0FFFFFFH); fv[i] := LSR(v, 24) END END;
+        ecy := U16();
+        FOR i := 0 TO ecy - 1 DO v := U32();
+          IF i < LEN(eAddr) THEN eAddr[i] := AND(v, 0FFFFFFH); eKind[i] := LSR(v, 24); eData[i] := U8()
+          ELSE v := U8()
+          END
+        END;
+        s := ini.s; x := ini.x; y := ini.y;
+        IF ini.e # 0 THEN s := 100H + AND(s, 0FFH); x := AND(x, 0FFH); y := AND(y, 0FFH)
+        ELSIF ODD(ini.p DIV 16) THEN x := AND(x, 0FFH); y := AND(y, 0FFH)
+        END;
+        EmW816.SetState(ini.pc, s, ini.p, ini.a, x, y, ini.dbr, ini.d, ini.pbr, ini.e);
+        ncy := 0; bad := -1; wn := 0; steps := 0;
+        REPEAT EmW816.Step; INC(steps)
+        UNTIL (ncy >= ecy) OR EmW816.stopped OR EmW816.waiting OR (steps > 10000);
+        (* WAI's and STP's vectors end with the halted chip: an entry with
+           no address and neither a read nor a write, not a bus cycle *)
+        WHILE (EmW816.stopped OR EmW816.waiting) & (ncy < ecy) & (ncy < LEN(eKind)) & ODD(eKind[ncy] DIV 64) DO
+          INC(ncy)
+        END;
+        ok := (bad < 0) & (ncy = ecy) & (EmW816.PC = fin.pc) & (EmW816.S = fin.s) & (EmW816.A = fin.a)
+          & (EmW816.X = fin.x) & (EmW816.Y = fin.y) & (EmW816.D = fin.d) & (EmW816.DBR = fin.dbr)
+          & (EmW816.PBR = fin.pbr) & (EmW816.GetP() = fin.p) & (EmW816.fE = fin.e);
+        FOR i := 0 TO nf - 1 DO
+          IF (i < 64) & (mem[fa[i]] # fv[i]) THEN ok := FALSE END
+        END;
+        IF ok THEN INC(pass)
+        ELSE INC(fail);
+          IF fail <= shown THEN
+            Out("MISMATCH "); Out(name); Out(" test "); EmHost.Int(EmHost.out, t);
+            Out(": "); EmHost.Int(EmHost.out, ncy); Out(" cycles, expected "); EmHost.Int(EmHost.out, ecy);
+            EmHost.Ln(EmHost.out);
+            ShowRegs("  ini", ini.pc, ini.s, ini.a, ini.x, ini.y, ini.d, ini.dbr, ini.pbr, ini.p, ini.e);
+            ShowRegs("  exp", fin.pc, fin.s, fin.a, fin.x, fin.y, fin.d, fin.dbr, fin.pbr, fin.p, fin.e);
+            ShowRegs("  got", EmW816.PC, EmW816.S, EmW816.A, EmW816.X, EmW816.Y, EmW816.D,
+              EmW816.DBR, EmW816.PBR, EmW816.GetP(), EmW816.fE);
+            IF bad >= 0 THEN
+              FOR i := 0 TO bad DO
+                IF (i < ecy) & (i < LEN(eAddr)) THEN
+                  Out("  cycle "); EmHost.Int(EmHost.out, i); Out(" exp "); Hex(eAddr[i], 6); Out(" ");
+                  Kind(eKind[i]); Out(" ");
+                  IF ODD(eKind[i] DIV 32) THEN Out("--") ELSE Hex(eData[i], 2) END;
+                  EmHost.Ln(EmHost.out)
+                END
+              END;
+              Out("  cycle "); EmHost.Int(EmHost.out, bad); Out(" got "); Hex(gAddr, 6); Out(" ");
+              Kind(gKind); Out(" "); Hex(gData, 2); EmHost.Ln(EmHost.out)
+            END;
+            FOR i := 0 TO nf - 1 DO
+              IF (i < 64) & (mem[fa[i]] # fv[i]) THEN
+                Out("  mem "); Hex(fa[i], 6); Out(" exp "); Hex(fv[i], 2); Out(" got "); Hex(mem[fa[i]], 2);
+                EmHost.Ln(EmHost.out)
+              END
+            END
+          END
+        END;
+        FOR i := 0 TO ni - 1 DO IF i < 256 THEN mem[ia[i]] := 0 END END;
+        FOR i := 0 TO nf - 1 DO IF i < 64 THEN mem[fa[i]] := 0 END END;
+        FOR i := 0 TO wn - 1 DO IF i < 256 THEN mem[wlog[i]] := 0 END END
+      END
+    END
+  END RunFile816;
+
+  (* All 512 files, or those named; a line per file with failures (its
+     first show failures in full), then the totals. *)
+  PROCEDURE Run816*(dir: ARRAY OF CHAR; VAR names: Names; n, show: INTEGER);
+    VAR name, file: ARRAY 512 OF CHAR; op, m, pass, fail, tp, tf, k: INTEGER; hex: ARRAY 17 OF CHAR;
+  BEGIN
+    EmW816.SetBus(ChipBus, NoIrq);
+    FOR k := 0 TO 15 DO IF k < 10 THEN hex[k] := CHR(ORD("0") + k) ELSE hex[k] := CHR(ORD("a") + k - 10) END END;
+    tp := 0; tf := 0; shown := show;
+    op := 0; k := 0;
+    WHILE ((n = 0) & (op < 256)) OR ((n > 0) & (k < n)) DO
+      FOR m := 0 TO 1 DO
+        IF n = 0 THEN
+          name[0] := hex[op DIV 16]; name[1] := hex[op MOD 16]; name[2] := ".";
+          IF m = 0 THEN name[3] := "n" ELSE name[3] := "e" END; name[4] := 0X
+        ELSIF m = 0 THEN name[0] := 0X; Append(names[k], name)
+        END;
+        IF (n = 0) OR (m = 0) THEN
+          file[0] := 0X; Append(dir, file); Append("/", file); Append(name, file); Append(".bin", file);
+          RunFile816(file, pass, fail); tp := tp + pass; tf := tf + fail;
+          IF fail > 0 THEN
+            Out("=== "); Out(name); Out(": "); EmHost.Int(EmHost.out, pass); Out(" pass, ");
+            EmHost.Int(EmHost.out, fail); Out(" fail ==="); EmHost.Ln(EmHost.out)
+          END
+        END
+      END;
+      INC(op); INC(k)
+    END;
+    EmHost.Int(EmHost.out, tp); Out(" passed, "); EmHost.Int(EmHost.out, tf); Out(" failed");
+    EmHost.Ln(EmHost.out)
+  END Run816;
 
 END EmHarte.
