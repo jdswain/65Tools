@@ -1,7 +1,8 @@
 MODULE EmMini816; (* The Mini816 (../../../Hardware/Mini816, its
    docs/em16-profile.md): a W65C816S (EmW816) at 7.3728 MHz, 512K of RAM,
    512K of flash (EmFlash), the CPLD's decode, the W65C22 (Em65C22) and
-   the Z85C30 (EmZ85C30), and the TIM-Bus's slots.
+   the Z85C30 (EmZ85C30), the microSD card on the VIA (EmSD's card), and
+   the TIM-Bus's slots.
 
    The CPLD latches bank bits 0-3 only, so the map repeats every 16 banks:
 
@@ -26,9 +27,17 @@ MODULE EmMini816; (* The Mini816 (../../../Hardware/Mini816, its
    IRQ is the wired OR of the VIA's, the SCC's and the cards'; NMI and
    reset are buttons (EmHost.Buttons: SIGUSR1 and SIGUSR2). Reset resets
    the CPU, the VIA and the cards but not the SCC, which has no reset
-   pin. STP ends the run; Run keeps to real time but with Turbo. *)
+   pin, or the SD card. STP ends the run; Run keeps to real time but
+   with Turbo.
 
-  IMPORT EmHost, EmW816, EmFlash, Em65C22, EmZ85C30;
+   The SD card's SPI is port B's, bit by bit: PB3 MOSI, PB4 SCK, PB5 CS
+   (low selects), PB6 MISO, in mode 0: the card takes MOSI as SCK rises
+   and puts its next bit on MISO as SCK falls, a byte's first as CS falls
+   or as the last byte's eighth bit ends. MISO is pulled up, 1 with the
+   card deselected or out. Its detect is CA1, low with a card in but with
+   SetCardDetect(FALSE); a card is in if EmSD has one mounted. *)
+
+  IMPORT EmHost, EmW816, EmFlash, Em65C22, EmZ85C30, EmSD;
 
   CONST
     pclk* = 7372800;              (* the SCC's PCLK, never stretched *)
@@ -50,6 +59,10 @@ MODULE EmMini816; (* The Mini816 (../../../Hardware/Mini816, its
     cardIrq: ARRAY 8 OF CardLine;
     cardReset: ARRAY 8 OF PROCEDURE;
     nextButtons, nextPace, nextTick: LONGINT;
+    (* the SD card: port B's pins as last driven, the bits of the byte
+       shifted in, the byte, the card's byte going out, MISO *)
+    sdPins, sdBits, sdIn, sdOut, miso: INTEGER;
+    cdLow: BOOLEAN;               (* CA1 low with a card in *)
 
   PROCEDURE SetRam*(size: INTEGER);
   BEGIN IF size = 20000H THEN ramMask := 1FFFFH ELSE ramMask := 7FFFFH END
@@ -70,6 +83,11 @@ MODULE EmMini816; (* The Mini816 (../../../Hardware/Mini816, its
   PROCEDURE Turbo*;
   BEGIN turbo := TRUE
   END Turbo;
+
+  (* the level of CA1 that means a card is in: low (TRUE) or high *)
+  PROCEDURE SetCardDetect*(low: BOOLEAN);
+  BEGIN cdLow := low
+  END SetCardDetect;
 
   (* slot n's card, its IRQ line and its reset (NIL: none) *)
   PROCEDURE SetCard*(n: INTEGER; c: Card; irq: CardLine; reset: PROCEDURE);
@@ -138,6 +156,42 @@ MODULE EmMini816; (* The Mini816 (../../../Hardware/Mini816, its
     RETURN v
   END Bus;
 
+  (* --- the VIA's pins --- *)
+
+  (* port A: the keyboard's rows, none pressed *)
+  PROCEDURE PinsA(): INTEGER;
+  BEGIN RETURN 0FFH
+  END PinsA;
+
+  (* port B: MISO, the rest pulled up *)
+  PROCEDURE PinsB(): INTEGER;
+  BEGIN RETURN 0BFH + miso * 40H
+  END PinsB;
+
+  (* port B's outputs changed: the SD card's SPI *)
+  PROCEDURE Lines(pb, ca2, cb2: INTEGER; t: LONGINT);
+    VAR was: INTEGER;
+  BEGIN was := sdPins; sdPins := pb;
+    IF ODD(pb DIV 20H) THEN                          (* CS high *)
+      IF ~ODD(was DIV 20H) THEN EmSD.Select(FALSE) END;
+      miso := 1
+    ELSIF ODD(was DIV 20H) THEN                      (* CS falling *)
+      EmSD.Select(TRUE); sdBits := 0; sdIn := 0; sdOut := EmSD.Send(); miso := sdOut DIV 80H
+    ELSIF ODD(pb DIV 10H) & ~ODD(was DIV 10H) THEN   (* SCK rising *)
+      sdIn := sdIn * 2 + pb DIV 8 MOD 2; INC(sdBits);
+      IF sdBits = 8 THEN EmSD.Receive(sdIn) END
+    ELSIF ~ODD(pb DIV 10H) & ODD(was DIV 10H) THEN   (* SCK falling *)
+      IF sdBits = 8 THEN sdBits := 0; sdIn := 0; sdOut := EmSD.Send() END;
+      miso := LSR(sdOut, 7 - sdBits) MOD 2
+    END
+  END Lines;
+
+  (* CA1, the card's detect *)
+  PROCEDURE CardDetect(): INTEGER;
+    VAR v: INTEGER;
+  BEGIN IF EmSD.mounted = cdLow THEN v := 0 ELSE v := 1 END; RETURN v
+  END CardDetect;
+
   (* IRQB, the devices brought up to now first *)
   PROCEDURE Irq(): BOOLEAN;
     VAR n: INTEGER; r: BOOLEAN;
@@ -150,7 +204,7 @@ MODULE EmMini816; (* The Mini816 (../../../Hardware/Mini816, its
   (* RESB: all but the SCC *)
   PROCEDURE Reset*;
     VAR n: INTEGER;
-  BEGIN Em65C22.Reset;
+  BEGIN Em65C22.SetCA1(CardDetect(), phi2); Em65C22.Reset;
     FOR n := 0 TO 7 DO IF cardReset[n] # NIL THEN cardReset[n] END END;
     EmW816.SetBus(Bus, Irq); EmW816.Reset
   END Reset;
@@ -180,7 +234,9 @@ MODULE EmMini816; (* The Mini816 (../../../Hardware/Mini816, its
   BEGIN
     FOR i := 0 TO LEN(ram) - 1 DO ram[i] := 0 END;
     FOR i := 0 TO 7 DO cards[i] := NIL; cardIrq[i] := NIL; cardReset[i] := NIL END;
-    ramMask := 7FFFFH; ioClks := 8; openBus := 0FFH; cpuHz := pclk; now := 0; phi2 := 0; turbo := FALSE
+    ramMask := 7FFFFH; ioClks := 8; openBus := 0FFH; cpuHz := pclk; now := 0; phi2 := 0; turbo := FALSE;
+    sdPins := 0FFH; sdBits := 0; sdIn := 0; sdOut := 0FFH; miso := 1; cdLow := TRUE;
+    Em65C22.SetPins(PinsA, PinsB, Lines)
   END Init;
 
 BEGIN Init

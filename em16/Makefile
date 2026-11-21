@@ -77,7 +77,7 @@ $(OBJDIR)/EmCore.o: $(OBJDIR)/EmSym.o
 $(OBJDIR)/EmHarte.o: $(OBJDIR)/EmCore.o $(OBJDIR)/EmW816.o
 $(OBJDIR)/EmW816.o: $(OBJDIR)/EmHost.o
 $(OBJDIR)/EmFlash.o $(OBJDIR)/EmZ85C30.o: $(OBJDIR)/EmHost.o
-$(OBJDIR)/EmMini816.o: $(OBJDIR)/EmHost.o $(OBJDIR)/EmW816.o $(OBJDIR)/EmFlash.o $(OBJDIR)/Em65C22.o $(OBJDIR)/EmZ85C30.o
+$(OBJDIR)/EmMini816.o: $(OBJDIR)/EmHost.o $(OBJDIR)/EmW816.o $(OBJDIR)/EmFlash.o $(OBJDIR)/Em65C22.o $(OBJDIR)/EmZ85C30.o $(OBJDIR)/EmSD.o
 $(OBJDIR)/Em16.o: $(OBJDIR)/EmLoad.o $(OBJDIR)/EmHarte.o $(OBJDIR)/EmMini816.o $(OBJDIR)/EmSoC.o $(OBJDIR)/Em82077.o $(OBJDIR)/EmSCSI.o $(OBJDIR)/EmSD.o $(OBJDIR)/EmEth.o $(OBJDIR)/EmRTC.o
 
 $(TARGET): $(OBJS) $(CSRC) | $(BINDIR)
@@ -100,6 +100,7 @@ test: $(TARGET)
 	@sh test/hd.sh
 	@sh test/mini816.sh
 	@sh test/mini816b.sh
+	@sh test/mini816sd.sh
 
 clean:
 	rm -rf $(OBJDIR)

@@ -484,6 +484,7 @@ their closing `bra halt` replaced by STP to end the run).
     em16 -mini816 [-t] [-flash file] [-rom file] [-flashsize 128K|256K|512K] [-ramsize 128K|512K]
                   [-noflashwrite] [-iostretch n] [-openbus v] [-cpuclk hz] [-turbo]
                   [-scca console|pty|tcp:PORT|none] [-sccb console|pty|tcp:PORT|none]
+                  [-sd file] [-sdcd low|high]
 
 `-mini816` emulates the Mini816, a W65C816S board
 (`../../../Hardware/Mini816`), as its `docs/em16-profile.md` describes
@@ -519,11 +520,19 @@ kept to real time (7.3728 MHz) but with `-turbo`.
   (a pty whose name em16 prints, or a socket on 127.0.0.1). Its CTS is
   asserted while a host is connected; RTS is not passed on. The SCC is
   not reset with the CPU, as on the board.
+- The microSD card is on the VIA's port B, its SPI shifted by the
+  software a bit at a time (PB3 MOSI, PB4 SCK, PB5 CS, PB6 MISO, mode
+  0): the card takes MOSI as SCK rises and puts its next bit on MISO as
+  SCK falls, a byte's first as CS falls. The card is the -fpga
+  machine's (`EmSD`: SDHC, `-sd`'s image, the same commands), a byte at
+  a time behind the bits. MISO reads 1 with the card deselected or
+  out. Its detect is CA1, low with a card in, or high with `-sdcd
+  high`; the card stays in for the run.
 - SIGUSR1 presses the NMI button, SIGUSR2 reset (the CPU, the VIA and
-  the TIM-Bus cards, not the SCC). STP ends the run.
+  the TIM-Bus cards, not the SCC or the card). STP ends the run.
 
 Not there yet: the TMS9118 at $C020 (it reads the open bus), the keyboard
-and joystick (port A reads $FF), the SD card on port B and the sound.
+and joystick (port A reads $FF) and the sound.
 
 ## Speed
 
@@ -572,7 +581,12 @@ SCC's baud-rate generator interrupting with RR3 and RR2 B's status,
 channel A receiving, WAI with I = 1 ended by an IRQ, and WAI ended by
 an NMI (SIGUSR1). `test/mini816b.sh` puts channel B on a socket
 (`-sccb tcp:PORT`), and a client checks that `test/mini816b.s` echoes
-its text no faster than 9600 baud.
+its text no faster than 9600 baud. `test/mini816sd.sh` gives
+`test/mini816sd.s` a 2 MB card, which it drives bit by bit: MISO
+pulled up while deselected, CMD0, CMD8, ACMD41 until ready, CMD58's
+OCR, CMD9's CSD (its size), a block read, written and read back, two
+blocks by CMD18 and CMD12; the image then checked, and without `-sd`
+no answer.
 `test/hd.sh` runs a 20 MB disk with `-scsitiming` (`test/hd.s`, polled):
 from power on, the selection answered at 1 s and UNIT ATTENTION, NOT
 READY (02 04 01) until the spin-up at 5 s; then reads and a write timed

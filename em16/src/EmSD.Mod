@@ -21,7 +21,12 @@ MODULE EmSD; (* The SoC's microSD slot in SPI mode, rtl/sd_spi.v, with an
    and $FD to stop), CMD55 and ACMD41 (idle for the first, ready on the
    second), CMD58 (OCR: powered up once ready, CCS set). Others are illegal
    commands; other CRCs are not checked. Deselecting it abandons what it
-   was sending. *)
+   was sending.
+
+   A board that shifts the bits itself (the Mini816, on its VIA) has the
+   card alone: Select is its CS, Send the byte the card is to shift out
+   next, taken as the byte starts, and Receive the byte shifted in, given
+   at its eighth bit. *)
 
   IMPORT EmHost;
 
@@ -32,7 +37,7 @@ MODULE EmSD; (* The SoC's microSD slot in SPI mode, rtl/sd_spi.v, with an
     pRead = 1; pSend = 2; pNext = 3;  (* an access that waits *)
 
   VAR
-    mounted, readOnly: BOOLEAN;
+    mounted*, readOnly: BOOLEAN;
     blocks: INTEGER;
     (* the controller *)
     rx, div, sel: INTEGER;
@@ -152,22 +157,37 @@ MODULE EmSD; (* The SoC's microSD slot in SPI mode, rtl/sd_spi.v, with an
     END
   END Take;
 
+  (* The card's next byte: $FF while it has nothing to send *)
+  PROCEDURE Send*(): INTEGER;
+    VAR r: INTEGER;
+  BEGIN r := 0FFH;
+    IF mounted & (sel # 0) & (qh # qt) THEN r := q[qh]; qh := (qh + 1) MOD qSize END;
+    RETURN r
+  END Send;
+
+  (* The host's byte, as the card's has gone out *)
+  PROCEDURE Receive*(b: INTEGER);
+  BEGIN
+    IF mounted & (sel # 0) THEN Take(b);
+      IF (qh = qt) & rdMulti THEN PushBlock(rdBlk); rdBlk := (rdBlk + 1) MOD blocks END
+    END
+  END Receive;
+
   (* One byte each way *)
   PROCEDURE Exchange(b: INTEGER): INTEGER;
     VAR r: INTEGER;
-  BEGIN r := 0FFH;
-    IF mounted & (sel # 0) THEN
-      IF qh # qt THEN r := q[qh]; qh := (qh + 1) MOD qSize END;
-      Take(b);
-      IF (qh = qt) & rdMulti THEN PushBlock(rdBlk); rdBlk := (rdBlk + 1) MOD blocks END
-    END;
-    RETURN r
+  BEGIN r := Send(); Receive(b); RETURN r
   END Exchange;
 
   PROCEDURE Deselect;
   BEGIN qh := 0; qt := 0; ncmd := 0; rdMulti := FALSE;
     IF wrState = 2 THEN wrState := 0 END
   END Deselect;
+
+  (* CS: TRUE selects the card *)
+  PROCEDURE Select*(on: BOOLEAN);
+  BEGIN IF on THEN sel := 1 ELSIF sel # 0 THEN Deselect; sel := 0 END
+  END Select;
 
   (* --- the controller --- *)
 
@@ -197,8 +217,7 @@ MODULE EmSD; (* The SoC's microSD slot in SPI mode, rtl/sd_spi.v, with an
   PROCEDURE Write*(reg, v: INTEGER; now: LONGINT);
   BEGIN reg := AND(reg, 3); v := AND(v, 0FFH);
     IF reg = 0 THEN Start(v, now)
-    ELSIF reg = 2 THEN
-      IF ODD(v) THEN sel := 1 ELSE IF sel # 0 THEN Deselect END; sel := 0 END
+    ELSIF reg = 2 THEN Select(ODD(v))
     ELSIF reg = 3 THEN div := v
     END
   END Write;

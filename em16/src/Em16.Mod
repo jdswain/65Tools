@@ -10,6 +10,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
    em16 -mini816 [-t] [-flash file] [-rom file] [-flashsize 128K|256K|512K] [-ramsize 128K|512K]
         [-noflashwrite] [-iostretch n] [-openbus v] [-cpuclk hz] [-turbo]
         [-scca console|pty|tcp:PORT|none] [-sccb console|pty|tcp:PORT|none]
+        [-sd file] [-sdcd low|high]
 
    On the default machine and under -fpga the floppy disks are the
    82077AA's, or the WD1793's with -wd1793, and -scsi puts a disk at ID 0
@@ -36,7 +37,9 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
    -iostretch an I/O cycle's CPU clocks (8), -openbus what nothing driving
    the bus reads ($FF), -cpuclk the CPU's clock (7.3728M; the SCC's PCLK
    stays), -scca and -sccb the SCC's channels' hosts (A the console, B
-   none). SIGUSR1 presses its NMI button, SIGUSR2 its reset.
+   none), -sd the microSD card's image and -sdcd the level of its detect
+   with the card in (low). SIGUSR1 presses its NMI button, SIGUSR2 its
+   reset.
 
    A file is an ELF executable. Oberon modules are not loaded by em16:
    OS16 boots on -fpga, from a floppy, as on the board, and loads them.
@@ -331,7 +334,8 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
     WHILE ~bad & (i < n) DO Env.Arg(i, arg);
       IF (i + 1 < n) & (Equal(arg, "-flash") OR Equal(arg, "-rom") OR Equal(arg, "-flashsize")
           OR Equal(arg, "-ramsize") OR Equal(arg, "-iostretch") OR Equal(arg, "-openbus")
-          OR Equal(arg, "-cpuclk") OR Equal(arg, "-scca") OR Equal(arg, "-sccb")) THEN
+          OR Equal(arg, "-cpuclk") OR Equal(arg, "-scca") OR Equal(arg, "-sccb")
+          OR Equal(arg, "-sd") OR Equal(arg, "-sdcd")) THEN
         INC(i); Env.Arg(i, val);
         IF Equal(arg, "-flash") THEN flash := val
         ELSIF Equal(arg, "-rom") THEN rom := val
@@ -353,7 +357,10 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
           ELSE EmMini816.SetCpuClock(k)
           END
         ELSIF Equal(arg, "-scca") THEN SccHost(EmZ85C30.A, val)
-        ELSE SccHost(EmZ85C30.B, val)
+        ELSIF Equal(arg, "-sccb") THEN SccHost(EmZ85C30.B, val)
+        ELSIF Equal(arg, "-sd") THEN bad := ~EmSD.Mount(val)
+        ELSIF Equal(val, "low") OR Equal(val, "high") THEN EmMini816.SetCardDetect(Equal(val, "low"))
+        ELSE ErrStr("-sdcd: low or high, not "); ErrStr(val); EmHost.Ln(EmHost.err); bad := TRUE
         END
       ELSIF Equal(arg, "-mini816") THEN
       ELSIF Equal(arg, "-noflashwrite") THEN noWrite := TRUE
