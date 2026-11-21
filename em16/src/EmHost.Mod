@@ -155,6 +155,10 @@ MODULE EmHost; (* The host side of em16: standard output and error, the
   PROCEDURE RunLCD*;
   END RunLCD;
 
+  (* the Mini816's: its VDP's window, its keys the keyboard's *)
+  PROCEDURE RunMini*;
+  END RunMini;
+
   PROCEDURE StopDisplay*;
   END StopDisplay;
 

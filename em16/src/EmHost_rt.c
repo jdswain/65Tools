@@ -47,8 +47,11 @@ static void sigint_handler(int sig) {
     _exit(130);
 }
 
-/* The Mini816's buttons: SIGUSR1 presses NMI, SIGUSR2 reset */
+/* The Mini816's buttons: SIGUSR1 presses NMI, SIGUSR2 reset; the
+   window's menu those and 4, the SD card in or out (em16_press) */
 static volatile sig_atomic_t buttons;
+
+void em16_press(int b) { buttons |= b; }
 
 static void sigusr1_handler(int sig) { (void)sig; buttons |= 1; }
 static void sigusr2_handler(int sig) { (void)sig; buttons |= 2; }

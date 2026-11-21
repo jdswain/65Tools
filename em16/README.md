@@ -83,6 +83,7 @@ This port is a derivative of it and under the same licence.
     EmFlash   the SST39SF040 flash and its commands, in a file
     Em65C22   the W65C22 VIA: ports, handshakes, timers, shift register
     EmZ85C30  the Z85C30 SCC: two channels on the console, a pty or TCP
+    EmTMS9918 the TMS9118 VDP: its modes and sprites, a line at a time
 
 What Oberon cannot reach is in C: `EmNet_rt.c` (the network: the frames
 waiting, UDP), `EmNat.c` (the network: em16's own NAT), `EmHost_rt.c`
@@ -484,7 +485,7 @@ their closing `bra halt` replaced by STP to end the run).
     em16 -mini816 [-t] [-flash file] [-rom file] [-flashsize 128K|256K|512K] [-ramsize 128K|512K]
                   [-noflashwrite] [-iostretch n] [-openbus v] [-cpuclk hz] [-turbo]
                   [-scca console|pty|tcp:PORT|none] [-sccb console|pty|tcp:PORT|none]
-                  [-sd file] [-sdcd low|high]
+                  [-sd file] [-sdcd low|high] [-video] [-joyarrows] [-key col,row] [-fbdump ppm]
 
 `-mini816` emulates the Mini816, a W65C816S board
 (`../../../Hardware/Mini816`), as its `docs/em16-profile.md` describes
@@ -527,12 +528,42 @@ kept to real time (7.3728 MHz) but with `-turbo`.
   machine's (`EmSD`: SDHC, `-sd`'s image, the same commands), a byte at
   a time behind the bits. MISO reads 1 with the card deselected or
   out. Its detect is CA1, low with a card in, or high with `-sdcd
-  high`; the card stays in for the run.
-- SIGUSR1 presses the NMI button, SIGUSR2 reset (the CPU, the VIA and
-  the TIM-Bus cards, not the SCC or the card). STP ends the run.
+  high`.
+- The VDP (`EmTMS9918`) at $C020 is a TMS9918A with 16K of VRAM, in
+  its own time (its 10.738635 MHz crystal: 342 pixels a line, 262 lines,
+  59.92 frames a second), a line drawn as the beam leaves it: Graphics
+  I and II (their tables masked as R3 and R4 say), multicolour and text;
+  32 sprites, 8 x 8 or 16 x 16, magnified, the early clock, four to a
+  line, the lower numbered in front; 5S with the fifth's number, C, and
+  F as line 192 starts. Its INT goes to the VIA's CB1, and RESB resets
+  it. VRAM is taken at any rate; the 4K mode and the mixtures of modes
+  are not there. `-video` shows it in a window, 256 x 192 and a border,
+  three times its size; `-fbdump` writes its last frame as a PPM file
+  when the run ends.
+- The keyboard is the matrix on the VIA: the column selected by PB0-PB2
+  and CA2, its rows read on port A. The window's keys are its keys by
+  where they are on the Mac's keyboard, not by what they type (docs's
+  section 6): either Control is the Control left of A, Caps Lock is
+  Caps (a press at each turn of the Mac's lock), Command is Super and
+  Option Alt, the arrows the arrows. The joystick (column 15) is the
+  keypad (8 2 4 6 and the diagonals, 5 or 0 fire) and a game
+  controller's d-pad or left stick and A or B; with `-joyarrows` the
+  arrows and right Option (fire) too, instead of the matrix's. `-key
+  col,row` holds a key down from power on. Keys held when the window
+  loses the focus are let go.
+- The window's Machine menu presses the NMI and reset buttons, and
+  ejects or inserts the SD card (CA1 then changes, an edge for the
+  VIA); SIGUSR1 presses NMI, SIGUSR2 reset (the CPU, the VIA, the VDP
+  and the TIM-Bus cards, not the SCC or the card). STP ends the run, or
+  with `-video` leaves the window and its last frame; closing the
+  window ends em16.
 
-Not there yet: the TMS9118 at $C020 (it reads the open bus), the keyboard
-and joystick (port A reads $FF) and the sound.
+`test/mini816kbd.s` is a boot ROM to try the window with: it shows the
+matrix, a box for each key that fills while it is down, and a ball the
+joystick moves (`as -o kbd.bin test/mini816kbd.s`, then `em16 -mini816
+-video -rom kbd.bin`).
+
+Not there yet: the sound.
 
 ## Speed
 
@@ -586,7 +617,13 @@ its text no faster than 9600 baud. `test/mini816sd.sh` gives
 pulled up while deselected, CMD0, CMD8, ACMD41 until ready, CMD58's
 OCR, CMD9's CSD (its size), a block read, written and read back, two
 blocks by CMD18 and CMD12; the image then checked, and without `-sd`
-no answer.
+no answer. `test/mini816vdp.sh` runs `test/mini816vdp.s`: the VDP's
+ports (the address wrapping, the read ahead, the latch reset by a
+status read), F with IE clear and set (CB1), 60 frames timed by the
+VIA's timer 1, 5S and its number, C (a transparent sprite's too, not a
+fifth's); the keyboard scanned with keys held by `-key`; then seven
+display modes on VRAM from a xorshift, each frame (`-fbdump`) compared
+pixel for pixel with a model of the TMS9918A in the script.
 `test/hd.sh` runs a 20 MB disk with `-scsitiming` (`test/hd.s`, polled):
 from power on, the selection answered at 1 s and UNIT ATTENTION, NOT
 READY (02 04 01) until the spin-up at 5 s; then reads and a write timed

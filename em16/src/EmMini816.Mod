@@ -1,8 +1,9 @@
 MODULE EmMini816; (* The Mini816 (../../../Hardware/Mini816, its
    docs/em16-profile.md): a W65C816S (EmW816) at 7.3728 MHz, 512K of RAM,
    512K of flash (EmFlash), the CPLD's decode, the W65C22 (Em65C22) and
-   the Z85C30 (EmZ85C30), the microSD card on the VIA (EmSD's card), and
-   the TIM-Bus's slots.
+   the Z85C30 (EmZ85C30), the TMS9118 (EmTMS9918), the keyboard, the
+   joystick and the microSD card on the VIA (EmSD's card), and the
+   TIM-Bus's slots.
 
    The CPLD latches bank bits 0-3 only, so the map repeats every 16 banks:
 
@@ -35,12 +36,23 @@ MODULE EmMini816; (* The Mini816 (../../../Hardware/Mini816, its
    and puts its next bit on MISO as SCK falls, a byte's first as CS falls
    or as the last byte's eighth bit ends. MISO is pulled up, 1 with the
    card deselected or out. Its detect is CA1, low with a card in but with
-   SetCardDetect(FALSE); a card is in if EmSD has one mounted. *)
+   SetCardDetect(FALSE); a card is in if EmSD has one mounted.
 
-  IMPORT EmHost, EmW816, EmFlash, Em65C22, EmZ85C30, EmSD;
+   The VDP runs from its own crystal, in the time now is (the wall's),
+   at $C020 (A0 its MODE, mirrored every 2); its INT is CB1, low while
+   asserted. RESB resets it.
+
+   The keyboard's columns are selected by PB0-PB2 and CA2 (bit 3), and
+   the selected column's rows read on port A, 0 for a key down: columns
+   0-7 the 64 keys, 15 the joystick (rows 0-4 up, down, left, right,
+   fire), 8-14 nothing. Key presses them (the window, -key); a button
+   also ejects or inserts the SD card (EmHost.Buttons' 4). *)
+
+  IMPORT EmHost, EmW816, EmFlash, Em65C22, EmZ85C30, EmSD, EmTMS9918;
 
   CONST
     pclk* = 7372800;              (* the SCC's PCLK, never stretched *)
+    vdpXtal = 10738635;           (* the VDP's crystal *)
 
   TYPE
     (* a TIM-Bus card: an access to its slot's DEVSEL (sel 0), IOSEL (1) or
@@ -63,6 +75,11 @@ MODULE EmMini816; (* The Mini816 (../../../Hardware/Mini816, its
        shifted in, the byte, the card's byte going out, MISO *)
     sdPins, sdBits, sdIn, sdOut, miso: INTEGER;
     cdLow: BOOLEAN;               (* CA1 low with a card in *)
+    matrix: ARRAY 16 OF INTEGER;  (* each column's keys down, a bit a row *)
+    column: INTEGER;              (* the column selected *)
+    cb1: INTEGER;                 (* CB1 as the VDP drives it *)
+    joyArrows*: INTEGER;          (* 1: the window's arrows are the joystick's *)
+    quit: BOOLEAN;                (* the window closed *)
 
   PROCEDURE SetRam*(size: INTEGER);
   BEGIN IF size = 20000H THEN ramMask := 1FFFFH ELSE ramMask := 7FFFFH END
@@ -93,6 +110,41 @@ MODULE EmMini816; (* The Mini816 (../../../Hardware/Mini816, its
   PROCEDURE SetCard*(n: INTEGER; c: Card; irq: CardLine; reset: PROCEDURE);
   BEGIN cards[n] := c; cardIrq[n] := irq; cardReset[n] := reset
   END SetCard;
+
+  PROCEDURE JoyArrows*;
+  BEGIN joyArrows := 1
+  END JoyArrows;
+
+  (* key (column c, row r) down or up (1, 0) *)
+  PROCEDURE Key*(c, r, down: INTEGER);
+  BEGIN
+    IF ((c >= 0) & (c < 8) OR (c = 15)) & (r >= 0) & (r < 8) THEN
+      IF down # 0 THEN matrix[c] := ORA(matrix[c], ASL(1, r)) ELSE matrix[c] := AND(matrix[c], 0FFH - ASL(1, r)) END
+    END
+  END Key;
+
+  (* 1 a card in the slot, 0 out, -1 none given (-sd) *)
+  PROCEDURE CardIn*(): INTEGER;
+    VAR v: INTEGER;
+  BEGIN IF ~EmSD.loaded THEN v := -1 ELSIF EmSD.mounted THEN v := 1 ELSE v := 0 END; RETURN v
+  END CardIn;
+
+  (* the run ended from outside: the window closed *)
+  PROCEDURE Stop*;
+  BEGIN quit := TRUE
+  END Stop;
+
+  (* the time in the VDP's crystal's cycles *)
+  PROCEDURE Vclk(): LONGINT;
+  BEGIN RETURN now DIV cpuHz * vdpXtal + now MOD cpuHz * vdpXtal DIV cpuHz
+  END Vclk;
+
+  (* CB1 from the VDP's INT *)
+  PROCEDURE VdpLine;
+    VAR v: INTEGER;
+  BEGIN IF EmTMS9918.Int() THEN v := 0 ELSE v := 1 END;
+    IF v # cb1 THEN cb1 := v; Em65C22.SetCB1(v, phi2) END
+  END VdpLine;
 
   (* the time in PCLK cycles *)
   PROCEDURE Pclk(): LONGINT;
@@ -126,7 +178,10 @@ MODULE EmMini816; (* The Mini816 (../../../Hardware/Mini816, its
       IF write THEN Em65C22.Write(a, d, phi2) ELSE v := Em65C22.Read(a, phi2) END
     ELSIF a < 0C020H THEN
       IF write THEN EmZ85C30.Write(a, d, Pclk()) ELSE v := EmZ85C30.Read(a, Pclk()) END
-    ELSIF a < 0C080H THEN                           (* the VDP, IO_SP3, none *)
+    ELSIF a < 0C030H THEN
+      IF write THEN EmTMS9918.Write(a, d, Vclk()) ELSE v := EmTMS9918.Read(a, Vclk()) END;
+      VdpLine
+    ELSIF a < 0C080H THEN                           (* IO_SP3, none *)
     ELSIF a < 0C100H THEN v := CardAccess(AND((a - 0C080H) DIV 16, 7), 0, a, d, write)
     ELSIF a < 0C800H THEN v := CardAccess(AND(a DIV 100H, 7), 1, a, d, write)
     ELSE v := Strobe(a, d, write)
@@ -158,9 +213,9 @@ MODULE EmMini816; (* The Mini816 (../../../Hardware/Mini816, its
 
   (* --- the VIA's pins --- *)
 
-  (* port A: the keyboard's rows, none pressed *)
+  (* port A: the selected column's rows *)
   PROCEDURE PinsA(): INTEGER;
-  BEGIN RETURN 0FFH
+  BEGIN RETURN 0FFH - matrix[column]
   END PinsA;
 
   (* port B: MISO, the rest pulled up *)
@@ -168,10 +223,11 @@ MODULE EmMini816; (* The Mini816 (../../../Hardware/Mini816, its
   BEGIN RETURN 0BFH + miso * 40H
   END PinsB;
 
-  (* port B's outputs changed: the SD card's SPI *)
+  (* port B's outputs or CA2 changed: the keyboard's column, the SD
+     card's SPI *)
   PROCEDURE Lines(pb, ca2, cb2: INTEGER; t: LONGINT);
     VAR was: INTEGER;
-  BEGIN was := sdPins; sdPins := pb;
+  BEGIN column := pb MOD 8 + ca2 * 8; was := sdPins; sdPins := pb;
     IF ODD(pb DIV 20H) THEN                          (* CS high *)
       IF ~ODD(was DIV 20H) THEN EmSD.Select(FALSE) END;
       miso := 1
@@ -195,7 +251,7 @@ MODULE EmMini816; (* The Mini816 (../../../Hardware/Mini816, its
   (* IRQB, the devices brought up to now first *)
   PROCEDURE Irq(): BOOLEAN;
     VAR n: INTEGER; r: BOOLEAN;
-  BEGIN Em65C22.Tick(phi2); EmZ85C30.Tick(Pclk());
+  BEGIN EmTMS9918.Tick(Vclk()); VdpLine; Em65C22.Tick(phi2); EmZ85C30.Tick(Pclk());
     r := Em65C22.Irq() OR EmZ85C30.Irq();
     FOR n := 0 TO 7 DO IF (cardIrq[n] # NIL) & cardIrq[n]() THEN r := TRUE END END;
     RETURN r
@@ -204,7 +260,7 @@ MODULE EmMini816; (* The Mini816 (../../../Hardware/Mini816, its
   (* RESB: all but the SCC *)
   PROCEDURE Reset*;
     VAR n: INTEGER;
-  BEGIN Em65C22.SetCA1(CardDetect(), phi2); Em65C22.Reset;
+  BEGIN Em65C22.SetCA1(CardDetect(), phi2); Em65C22.Reset; EmTMS9918.Reset; VdpLine;
     FOR n := 0 TO 7 DO IF cardReset[n] # NIL THEN cardReset[n] END END;
     EmW816.SetBus(Bus, Irq); EmW816.Reset
   END Reset;
@@ -215,13 +271,19 @@ MODULE EmMini816; (* The Mini816 (../../../Hardware/Mini816, its
   BEGIN b := EmHost.Buttons();
     IF ODD(b) THEN EmW816.Nmi END;
     IF ODD(b DIV 2) THEN Reset END;
+    IF ODD(b DIV 4) & EmSD.loaded THEN
+      IF EmSD.mounted THEN EmSD.Eject ELSE EmSD.Insert END;
+      Em65C22.SetCA1(CardDetect(), phi2)
+    END;
     nextButtons := now + cpuHz DIV 200
   END Buttons;
 
   PROCEDURE Run*;
   BEGIN nextButtons := now; nextPace := now; nextTick := now;
-    WHILE ~EmW816.stopped DO EmW816.Step;
-      IF now >= nextTick THEN Em65C22.Tick(phi2); EmZ85C30.Tick(Pclk()); nextTick := now + 64 END;
+    WHILE ~EmW816.stopped & ~quit DO EmW816.Step;
+      IF now >= nextTick THEN
+        EmTMS9918.Tick(Vclk()); VdpLine; Em65C22.Tick(phi2); EmZ85C30.Tick(Pclk()); nextTick := now + 64
+      END;
       IF now >= nextButtons THEN Buttons END;
       IF ~turbo & (now >= nextPace) THEN EmHost.Pace(now, cpuHz); nextPace := now + cpuHz DIV 1000 END
     END;
@@ -236,6 +298,8 @@ MODULE EmMini816; (* The Mini816 (../../../Hardware/Mini816, its
     FOR i := 0 TO 7 DO cards[i] := NIL; cardIrq[i] := NIL; cardReset[i] := NIL END;
     ramMask := 7FFFFH; ioClks := 8; openBus := 0FFH; cpuHz := pclk; now := 0; phi2 := 0; turbo := FALSE;
     sdPins := 0FFH; sdBits := 0; sdIn := 0; sdOut := 0FFH; miso := 1; cdLow := TRUE;
+    FOR i := 0 TO 15 DO matrix[i] := 0 END;
+    column := 15; cb1 := 1; joyArrows := 0; quit := FALSE;
     Em65C22.SetPins(PinsA, PinsB, Lines)
   END Init;
 

@@ -10,7 +10,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
    em16 -mini816 [-t] [-flash file] [-rom file] [-flashsize 128K|256K|512K] [-ramsize 128K|512K]
         [-noflashwrite] [-iostretch n] [-openbus v] [-cpuclk hz] [-turbo]
         [-scca console|pty|tcp:PORT|none] [-sccb console|pty|tcp:PORT|none]
-        [-sd file] [-sdcd low|high]
+        [-sd file] [-sdcd low|high] [-video] [-joyarrows] [-key col,row] [-fbdump ppm]
 
    On the default machine and under -fpga the floppy disks are the
    82077AA's, or the WD1793's with -wd1793, and -scsi puts a disk at ID 0
@@ -38,8 +38,11 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
    the bus reads ($FF), -cpuclk the CPU's clock (7.3728M; the SCC's PCLK
    stays), -scca and -sccb the SCC's channels' hosts (A the console, B
    none), -sd the microSD card's image and -sdcd the level of its detect
-   with the card in (low). SIGUSR1 presses its NMI button, SIGUSR2 its
-   reset.
+   with the card in (low). -video opens the VDP's window, whose keys are
+   the keyboard's, the keypad and a game controller the joystick (with
+   -joyarrows the arrows and right Option too); -key holds a key of the
+   matrix down from power on; -fbdump writes the VDP's last frame.
+   SIGUSR1 presses its NMI button, SIGUSR2 its reset.
 
    A file is an ELF executable. Oberon modules are not loaded by em16:
    OS16 boots on -fpga, from a floppy, as on the board, and loads them.
@@ -50,7 +53,7 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
      EmUART EmVIA EmFDC EmL28 EmVideo EmLCD  the devices *)
 
   IMPORT Env, Files, EmHost, EmMem, EmCPU, EmLoad, EmFDC, Em82077, EmSCSI, EmSD, EmEth, EmRTC, EmADB, EmL28, EmVideo, EmLCD, EmCore, EmSDRAM, EmSoC, EmHarte,
-    EmW816, EmFlash, EmZ85C30, EmMini816;
+    EmW816, EmFlash, EmZ85C30, EmMini816, EmTMS9918;
 
   VAR
     trace, videoEnabled, testPattern, consoleMode, wantFpga, wantL28, wantMini, bad: BOOLEAN;
@@ -326,16 +329,46 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
     END
   END SccHost;
 
+  (* -key col,row: the key held down, FALSE if s is not two numbers *)
+  PROCEDURE HoldKey(s: ARRAY OF CHAR): BOOLEAN;
+    VAR i, j, c, r: INTEGER; ok: BOOLEAN;
+  BEGIN i := 0; c := 0; r := 0;
+    WHILE (i < 3) & (s[i] >= "0") & (s[i] <= "9") DO c := c * 10 + ORD(s[i]) - ORD("0"); INC(i) END;
+    ok := (i > 0) & (s[i] = ",");
+    IF ok THEN INC(i); j := i;
+      WHILE (i < j + 3) & (s[i] >= "0") & (s[i] <= "9") DO r := r * 10 + ORD(s[i]) - ORD("0"); INC(i) END;
+      ok := (i > j) & (s[i] = 0X) & ((c < 8) OR (c = 15)) & (r < 8)
+    END;
+    IF ok THEN EmMini816.Key(c, r, 1) END;
+    RETURN ok
+  END HoldKey;
+
+  (* -fbdump: the VDP's last frame as a PPM file, through its palette *)
+  PROCEDURE VdpDump(name: ARRAY OF CHAR);
+    VAR f: Files.File; r: Files.Rider; i, c: INTEGER; head: ARRAY 32 OF CHAR;
+  BEGIN f := Files.New(name);
+    IF f # NIL THEN Files.Set(r, f, 0);
+      head := "P6 288 240 255"; head[2] := 0AX; head[10] := 0AX; head[14] := 0AX; head[15] := 0X;
+      i := 0; WHILE head[i] # 0X DO Files.WriteByte(r, ORD(head[i])); INC(i) END;
+      FOR i := 0 TO EmTMS9918.width * EmTMS9918.height - 1 DO c := EmTMS9918.fb[i];
+        Files.WriteByte(r, EmTMS9918.pal[c * 3]); Files.WriteByte(r, EmTMS9918.pal[c * 3 + 1]);
+        Files.WriteByte(r, EmTMS9918.pal[c * 3 + 2])
+      END;
+      Files.Register(f)
+    ELSE ErrStr("Cannot write "); ErrStr(name); EmHost.Ln(EmHost.err)
+    END
+  END VdpDump;
+
   (* em16 -mini816 ... (this module's head) *)
   PROCEDURE Mini;
-    VAR i, n, k, flashSize, ramSize: INTEGER; arg, val, flash, rom: EmLoad.Path; noWrite: BOOLEAN;
-  BEGIN n := Env.ArgCount(); i := 1; flash[0] := 0X; rom[0] := 0X; noWrite := FALSE;
+    VAR i, n, k, flashSize, ramSize: INTEGER; arg, val, flash, rom, dump: EmLoad.Path; noWrite, video: BOOLEAN;
+  BEGIN n := Env.ArgCount(); i := 1; flash[0] := 0X; rom[0] := 0X; dump[0] := 0X; noWrite := FALSE; video := FALSE;
     flashSize := 80000H; ramSize := 80000H;
     WHILE ~bad & (i < n) DO Env.Arg(i, arg);
       IF (i + 1 < n) & (Equal(arg, "-flash") OR Equal(arg, "-rom") OR Equal(arg, "-flashsize")
           OR Equal(arg, "-ramsize") OR Equal(arg, "-iostretch") OR Equal(arg, "-openbus")
           OR Equal(arg, "-cpuclk") OR Equal(arg, "-scca") OR Equal(arg, "-sccb")
-          OR Equal(arg, "-sd") OR Equal(arg, "-sdcd")) THEN
+          OR Equal(arg, "-sd") OR Equal(arg, "-sdcd") OR Equal(arg, "-key") OR Equal(arg, "-fbdump")) THEN
         INC(i); Env.Arg(i, val);
         IF Equal(arg, "-flash") THEN flash := val
         ELSIF Equal(arg, "-rom") THEN rom := val
@@ -359,12 +392,17 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
         ELSIF Equal(arg, "-scca") THEN SccHost(EmZ85C30.A, val)
         ELSIF Equal(arg, "-sccb") THEN SccHost(EmZ85C30.B, val)
         ELSIF Equal(arg, "-sd") THEN bad := ~EmSD.Mount(val)
+        ELSIF Equal(arg, "-fbdump") THEN dump := val
+        ELSIF Equal(arg, "-key") THEN
+          IF ~HoldKey(val) THEN ErrStr("-key: col,row (0-7 or 15, 0-7), not "); ErrStr(val); EmHost.Ln(EmHost.err); bad := TRUE END
         ELSIF Equal(val, "low") OR Equal(val, "high") THEN EmMini816.SetCardDetect(Equal(val, "low"))
         ELSE ErrStr("-sdcd: low or high, not "); ErrStr(val); EmHost.Ln(EmHost.err); bad := TRUE
         END
       ELSIF Equal(arg, "-mini816") THEN
       ELSIF Equal(arg, "-noflashwrite") THEN noWrite := TRUE
       ELSIF Equal(arg, "-turbo") THEN EmMini816.Turbo
+      ELSIF Equal(arg, "-video") THEN video := TRUE
+      ELSIF Equal(arg, "-joyarrows") THEN EmMini816.JoyArrows
       ELSIF Equal(arg, "-t") THEN EmW816.SetTrace(TRUE)
       ELSE ErrStr("Invalid with -mini816: option '"); ErrStr(arg); ErrStr("'"); EmHost.Ln(EmHost.err); bad := TRUE
       END;
@@ -380,7 +418,11 @@ MODULE Em16; (* em16, an emulator of the 65C816 and its relatives, for
       END
     END;
     IF bad THEN EmHost.Exit(1) END;
-    EmHost.ClockStart; EmMini816.Reset; CpuThread;
+    EmHost.ClockStart; EmMini816.Reset;
+    IF video THEN EmTMS9918.SetRender(1); EmHost.RunMini       (* until the window closes *)
+    ELSE IF dump[0] # 0X THEN EmTMS9918.SetRender(2) END; CpuThread
+    END;
+    IF dump[0] # 0X THEN VdpDump(dump) END;
     IF EmHost.coutHex THEN EmHost.Report(EmMini816.now, 1) ELSE EmHost.Report(EmMini816.now, 0) END
   END Mini;
 

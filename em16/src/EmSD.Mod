@@ -26,7 +26,8 @@ MODULE EmSD; (* The SoC's microSD slot in SPI mode, rtl/sd_spi.v, with an
    A board that shifts the bits itself (the Mini816, on its VIA) has the
    card alone: Select is its CS, Send the byte the card is to shift out
    next, taken as the byte starts, and Receive the byte shifted in, given
-   at its eighth bit. *)
+   at its eighth bit. Eject takes the card out of the slot and Insert
+   puts it back, powered up anew. *)
 
   IMPORT EmHost;
 
@@ -37,7 +38,8 @@ MODULE EmSD; (* The SoC's microSD slot in SPI mode, rtl/sd_spi.v, with an
     pRead = 1; pSend = 2; pNext = 3;  (* an access that waits *)
 
   VAR
-    mounted*, readOnly: BOOLEAN;
+    mounted*, readOnly: BOOLEAN;      (* a card in the slot; its image read-only *)
+    loaded*: BOOLEAN;                 (* an image open, the card's *)
     blocks: INTEGER;
     (* the controller *)
     rx, div, sel: INTEGER;
@@ -55,7 +57,7 @@ MODULE EmSD; (* The SoC's microSD slot in SPI mode, rtl/sd_spi.v, with an
     k := EmHost.DiskOpen(image, name); size := EmHost.DiskSize(image);
     IF k = 0 THEN EmHost.Str(EmHost.out, "SD: Cannot open card image: "); EmHost.Str(EmHost.out, name)
     ELSIF size < blockSize THEN EmHost.Str(EmHost.out, "SD: Card image too small: "); EmHost.Str(EmHost.out, name)
-    ELSE mounted := TRUE; readOnly := k = 2; blocks := size DIV blockSize;
+    ELSE mounted := TRUE; loaded := TRUE; readOnly := k = 2; blocks := size DIV blockSize;
       EmHost.Str(EmHost.out, "SD: Card in the slot ("); EmHost.Int(EmHost.out, blocks);
       EmHost.Str(EmHost.out, " blocks");
       IF readOnly THEN EmHost.Str(EmHost.out, ", read-only") END;
@@ -222,10 +224,19 @@ MODULE EmSD; (* The SoC's microSD slot in SPI mode, rtl/sd_spi.v, with an
     END
   END Write;
 
+  PROCEDURE Eject*;
+  BEGIN mounted := FALSE; Deselect
+  END Eject;
+
+  PROCEDURE Insert*;
+  BEGIN mounted := loaded; Deselect;
+    idle := TRUE; app := FALSE; acmd41s := 0; wrState := 0; wrMulti := FALSE
+  END Insert;
+
   PROCEDURE Reset*;
   BEGIN rx := 0FFH; div := (EmHost.hz + 799999) DIV 800000 - 1; sel := 0; busyUntil := 0; Deselect;   (* 400 kHz or less *)
     idle := TRUE; app := FALSE; acmd41s := 0; wrState := 0; wrMulti := FALSE
   END Reset;
 
-BEGIN mounted := FALSE; Reset
+BEGIN mounted := FALSE; loaded := FALSE; Reset
 END EmSD.
