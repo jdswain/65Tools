@@ -4,7 +4,7 @@
 
 CC = gcc
 CFLAGS = -Wall -Wextra -O2
-OC = ../bin/oc
+OC = ../../../oc/self/s816/oc816
 BINDIR = ../bin
 
 SRCDIR = src

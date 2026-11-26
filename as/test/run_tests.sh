@@ -106,7 +106,7 @@ done
 # This is what catches the two drifting apart. Skipped if either tool is
 # not built; name them with OC816 and EM16.
 OC816=${OC816:-../../../../oc/self/s816/oc816}
-OUTMOD=../../oc/test/Out.Mod
+OUTMOD=../../../OS16/src/Kernel/Out.Mod
 if [ "$UPDATE" = "-update" ]; then :
 elif [ -x "$OC816" ] && [ -x "$EM16" ] && [ -f "$OUTMOD" ]; then
   OC816=$(cd "$(dirname "$OC816")" && pwd)/$(basename "$OC816")

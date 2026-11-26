@@ -1,3 +1,0 @@
-MODULE Foo;
-BEGIN
-END Bar.

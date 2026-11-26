@@ -25,13 +25,13 @@ This produces:
 
 ```bash
 # Compile a module
-bin/oc test/Hello.Mod
+bin/oc Hello.Mod
 
 # Compile a library module (generates .smb symbol file for importers)
-bin/oc test/Out.Mod /s
+bin/oc Out.Mod /s
 
 # Disassemble the output
-bin/disasm test/Hello.816
+bin/disasm Hello.816
 ```
 
 The compiler reads a `.Mod` source file and produces a `.816` object file and
@@ -39,8 +39,8 @@ a `.smb` symbol file in the same directory as the source.
 
 ## Emulator
 
-The test suite requires the `em16` 65C816 emulator, expected at `../bin/em16`
-relative to this directory. To build it:
+Programs run on the `em16` 65C816 emulator, at `../bin/em16` relative to
+this directory. To build it:
 
 ```bash
 cd ../em16
@@ -52,26 +52,14 @@ em16 is written in Oberon and needs the LLVM Oberon compiler (`../../../oc`).
 Compiled modules run on OS16 (`../../OS16`), booted under `em16 -fpga`
 from a floppy that holds OS16's kernel, the program and the modules it
 imports, and RUN.TXT naming it (`../../OS16/tools/mkfloppy.py`): em16 has
-no loader of its own for them. `test/run_self_tests.sh` does this for each
-test. The `-t` flag of em16 enables an instruction trace for debugging.
+no loader of its own for them. The `-t` flag of em16 enables an
+instruction trace for debugging.
 
 ## Tests
 
-The test suite is organized into levels (L0-L18), each covering a set of
-language features. See `test/TEST_PLAN.md` for the full breakdown.
-
-```bash
-# Run all tests: this compiler's compilation tests, then oc816's goldens
-make test
-
-# Run just this compiler's compilation tests
-make test_compile
-
-# Run oc816's goldens on OS16 (build OS16 first: cd ../../OS16 && make);
-# give levels to run only those
-make test_self
-bash test/run_self_tests.sh L4 L9
-```
+The test suite that was here (`test/`, levels L0-L19) is oc816's now: it
+is in the oc repository, `../../../oc/self/s816/test`, run there by
+`make test` in `self/s816`.
 
 This C compiler's own programs no longer run: its NEW is `BRK #10`, which
 em16 answered from a heap of its own, and that heap and em16's module
@@ -93,7 +81,6 @@ oc/
     Texts.c        Text/logging support
     disasm.c       Disassembler
   include/       Header files
-  test/          Oberon test modules and expected output
   oberon/        Original Oberon source (reference)
 ```
 

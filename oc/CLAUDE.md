@@ -2,21 +2,21 @@
 > the primary 65C816 compiler. The primary compiler is the self-hosted
 > `oc816`, built in the `oc` repo from a frontend shared with the LLVM backend
 > (`oc/self/s816/`, see `oc/CLAUDE.md`). It supports the full extended language
-> (methods, constructors, SUPER, interfaces). Run its golden suite with
-> `make test_self` (or `OC=… ./test/run_self_tests.sh`) — it covers every level
-> plus the OO (L16) and interface (L17) goldens. Keep this C compiler buildable
-> for `bin/disasm` and side-by-side comparison; it is baseline Oberon-07 +
-> LONGINT only (no methods/interfaces). Its programs no longer run: em16 has
-> no `.816` loader or heap any more; oc816's tests run on OS16 booted under
-> `em16 -fpga` (`../../OS16`, `test/run_self_tests.sh`).
+> (methods, constructors, SUPER, interfaces). Its golden suite, which was
+> test/ here, is in the oc repo now (`oc/self/s816/test`, `make test` in
+> `oc/self/s816`) — it covers every level plus the OO (L16) and interface
+> (L17) goldens. Keep this C compiler buildable for `bin/disasm` and
+> side-by-side comparison; it is baseline Oberon-07 + LONGINT only (no
+> methods/interfaces). Its programs no longer run: em16 has no `.816`
+> loader or heap any more; oc816's tests run on OS16 booted under
+> `em16 -fpga` (`../../OS16`).
 
 This project is written in C.
 There is a Makefile for building.
 The file structure is:
 include/ - .h header files.
 src/ - .c source files.
-test/ - Oberon test cases.
-Use bin/oc to compile oberon code. The resulting object file ends in .816 and is in the same directory as the source, normally test/
+Use bin/oc to compile oberon code. The resulting object file ends in .816 and is in the same directory as the source.
 Use two spaces for indenting in C code.
 This project is an oberon compiler for the 65C816 processor.
 The files are:
@@ -28,7 +28,7 @@ There is also cpu.c, codegen.c, and gen_816.c for generating code.
 Each oberon module compiles to a file with .816 extension.
 There is a disassembler for the 816 files, it is in bin/disasm.
 The disassembler does not implement all 65C816 instructions yet, quite often we need to add instructions.
-The emulator is in ../bin/em16. A compiled module runs on OS16, booted on em16 -fpga from a floppy with it (see test/run_self_tests.sh and ../../OS16/tools/mkfloppy.py).
+The emulator is in ../bin/em16. A compiled module runs on OS16, booted on em16 -fpga from a floppy with it (see the oc repo's self/s816/test/run_self_tests.sh and ../../OS16/tools/mkfloppy.py).
 The emulator has a -t trace option, this outputs an instruction trace.
 The compiler is based on an oberon version, this is in oberon/. Often it is useful to refer to the source in there to see what needs to be implemented.
 

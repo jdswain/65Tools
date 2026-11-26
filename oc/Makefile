@@ -62,25 +62,12 @@ $(OBJDIR)/test_orp.o: $(SRCDIR)/test_orp.c $(INCDIR)/ORP.h $(INCDIR)/ORB.h $(INC
 
 clean:
 	rm -rf $(OBJDIR) $(BINDIR)
-	rm -f test.Mod *.smb
+	rm -f test.Mod DisasmDemo.Mod DisasmDemo.816 *.smb
 
-# Automated compilation tests
-test_compile: $(BINDIR)/oc
-	@bash test/run_tests.sh
-
-# Full test suite: the C compiler's compilation tests and oc816's goldens
-test:
-	@bash test/run_tests.sh; bash test/run_self_tests.sh
-
-# Primary suite: the self-hosted Oberon compiler (oc816) is now the reference
-# implementation; it drives every level plus the OO (L16) and interface (L17)
-# goldens, each run on OS16 booted under em16 -fpga (OS16 must be built:
-# cd ../../OS16 && make). The C compiler is kept for bin/disasm and its
-# compilation tests (test_compile); its programs (NEW is BRK #10) no longer
-# run anywhere. Needs the oc816 binary — build it in the oc repo
-# (cd ../../../oc/self/s816 && make); override the path with OC=/path/to/oc816.
-test_self:
-	@bash test/run_self_tests.sh
+# The golden suite that was test/ is oc816's now, in the oc repo
+# (../../../oc/self/s816/test, make test there); this compiler is kept
+# for bin/disasm and as the reference oc816 was ported from. Its programs
+# (NEW is BRK #10) no longer run anywhere.
 
 test_scanner: $(BINDIR)/test_scanner
 	@echo "=== Testing Scanner ==="
@@ -140,8 +127,8 @@ install: $(TARGETS)
 # Test disassembler
 test_disasm: $(BINDIR)/disasm
 	@echo "=== Testing 65C816 Disassembler ==="
-	@echo 'MODULE DisasmDemo; VAR x: INTEGER; y: INTEGER; BEGIN x := 10; y := x + 5 END DisasmDemo.' > test/DisasmDemo.Mod
-	@$(BINDIR)/oc test/DisasmDemo.Mod
+	@echo 'MODULE DisasmDemo; VAR x: INTEGER; y: INTEGER; BEGIN x := 10; y := x + 5 END DisasmDemo.' > DisasmDemo.Mod
+	@$(BINDIR)/oc DisasmDemo.Mod
 	@$(BINDIR)/disasm DisasmDemo.816
 
-.PHONY: all clean test test_self test_compile test_scanner test_orb test_orp test_disasm install
+.PHONY: all clean test_scanner test_orb test_orp test_disasm install
