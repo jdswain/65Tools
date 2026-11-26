@@ -3,8 +3,8 @@
 em16, the emulator of the 65C816, the Rockwell R65C02 and the L28's
 R65C19 that the 65Tools test their programs on, ported from C++
 (em16-c, now in git's history only) to Oberon, and of the Tang Nano 20K SoC of
-`../../Verilog65C816/fpga` (`-fpga`, below). It builds `../bin/em16`, which the oc test
-suites, `as/test816` and Business BASIC use.
+`../../Verilog65C816/fpga` (`-fpga`, below). It builds `../bin/em16`, which oc816's test
+suite, `as/test816` and Business BASIC use.
 
     make            ../bin/em16
     make test       the disk controllers, DMA, the banked direct page, the
@@ -26,8 +26,9 @@ procedure, from the modules' bases the guest prints and the maps `oc816
 
 Oberon programs run on OS16, which boots on `-fpga` from a floppy as on
 the board: em16 has no loader of its own for Oberon modules any more, nor
-a heap for NEW. The tests of `../oc` and `../as/test816` and OS16's own
-build a boot floppy with OS16's kernel image and the program
+a heap for NEW. oc816's tests (the oc repository's `self/s816/test`),
+`../as/test816` and OS16's own build a boot floppy with OS16's kernel
+image and the program
 (`../../OS16/tools/mkfloppy.py`, `../../OS16/doc/OS16_MemoryManagement.md`).
 
 The Oberon sources are compiled by the LLVM Oberon compiler of the oc

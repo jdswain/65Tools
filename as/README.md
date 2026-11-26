@@ -45,7 +45,7 @@ A procedure is exported with `*` and declared to Oberon importers with
 `.proc Name(INTEGER, VAR BYTE, ...): INTEGER`; `_init` is the module's body
 (without one, an RTL appended to the code is). Parameters arrive in the
 compiler's registers, R0 at `$02` upward, and a result goes back in R0
-(`../oc/doc/DP.md`).
+(the oc repository's `self/s816/doc/DP.md`).
 
 The types of a `.proc` are BYTE, BOOLEAN, CHAR, INTEGER, LONGINT, REAL,
 SET, `ARRAY OF T` (open, for a parameter) and the types the module
